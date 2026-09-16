@@ -386,6 +386,15 @@ function executeRoundCalculations(roomId) {
     }
   }
 
+  // На сервере в конце расчетов раунда:
+  // Если где-то в расчетах урона получился NaN, сбрасываем в безопасное число
+  if (isNaN(room.p1.currentHp) || room.p1.currentHp === undefined || room.p1.currentHp === null) {
+    room.p1.currentHp = room.p1.maxHp;
+  }
+  if (isNaN(room.p2.currentHp) || room.p2.currentHp === undefined || room.p2.currentHp === null) {
+    room.p2.currentHp = room.p2.maxHp;
+  }
+
   if (room.p1.currentHp < 0) room.p1.currentHp = 0;
   if (room.p2.currentHp < 0) room.p2.currentHp = 0;
 
