@@ -407,12 +407,34 @@ if (isP1Dead || isP2Dead || room.turnCount > 40) {
 async function savePveResultsToSupabase(playerRoomObject, monster, resultType) {
   try {
     const userId = playerRoomObject.data.id;
-    const newGold = resultType === 'p1_win' ? (playerRoomObject.data.gold + monster.data.rewardGold) : playerRoomObject.data.gold;
-    const newXp = resultType === 'p1_win' ? (playerRoomObject.data.xp + monster.data.rewardXp) : playerRoomObject.data.xp;
+    let newGold = resultType === 'p1_win' ? (playerRoomObject.data.gold + monster.data.rewardGold) : playerRoomObject.data.gold;
+    let newXp = resultType === 'p1_win' ? (playerRoomObject.data.xp + monster.data.rewardXp) : playerRoomObject.data.xp;
     let finalHp = resultType === 'p1_win' ? Math.max(0, playerRoomObject.currentHp) : Math.max(1, Math.floor(playerRoomObject.maxHp * 0.2)); 
+    
+    // 🔥 ФИКС ЛЕВЕЛАПА НА СЕРВЕРЕ: Считаем уровень и статы прямо тут
+    let currentLevel = playerRoomObject.data.level || 1;
+    let currentStatPoints = playerRoomObject.data.statpoints || playerRoomObject.data.statPoints || 0;
+    
+    // Формула лимита опыта (должна совпадать с клиентом!)
+    const getXpLimit = (lvl) => (lvl + 1) * 10; // Если у тебя 1 ур = 20, 2 ур = 30 и т.д.
+    
+    while (newXp >= getXpLimit(currentLevel)) {
+      currentLevel++;
+      currentStatPoints += 5;
+      if (resultType === 'p1_win') finalHp = (totalEndurance * 10); // Полное исцеление при левелапе
+    }
 
-    await sb.from('players').update({ gold: newGold, xp: newXp, hp: finalHp, equipped: playerRoomObject.data.equipped }).eq('id', Number(userId));
-    console.log(`☁️ Итоги PvE боя сохранены в Supabase для игрока ID ${userId}`);
+    // Сохраняем все обновленные параметры в Supabase, включая статы и уровень
+    await sb.from('players').update({ 
+      gold: newGold, 
+      xp: newXp, 
+      hp: finalHp, 
+      level: currentLevel,
+      statpoints: currentStatPoints, // Записываем в маленьком регистре для БД
+      equipped: playerRoomObject.data.equipped 
+    }).eq('id', Number(userId));
+    
+    console.log(`☁️ Итоги боя и левелап сохранены в Supabase для игрока ID ${userId}. Уровень: ${currentLevel}`);
   } catch (err) { console.error("Ошибка Supabase PvE:", err.message); }
 }
 
