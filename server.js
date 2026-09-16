@@ -5,6 +5,20 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { createClient } = require('@supabase/supabase-js');
+// Таблица порогов опыта (должна на 100% совпадать с клиентом)
+const SERVER_XP_TABLE = [
+  0,      // 0 уровень (не используется)
+  0,      // 1 уровень (стартовая точка, нужно 0 XP)
+  20,     // Чтобы получить 2 лвл, нужно ВСЕГО набрать 20 XP
+  70,     // Чтобы получить 3 лвл, нужно ВСЕГО набрать 70 XP
+  170,    // Чтобы получить 4 лвл, нужно ВСЕГО набрать 170 XP
+  370,    // Чтобы получить 5 лвл, нужно ВСЕГО набрать 370 XP
+  770,    // Чтобы получить 6 лвл, нужно ВСЕГО набрать 770 XP
+  1570,   // Чтобы получить 7 лвл, нужно ВСЕГО набрать 1570 XP
+  3070,   // Чтобы получить 8 лвл, нужно ВСЕГО набрать 3070 XP
+  5570,   // Чтобы получить 9 лвл, нужно ВСЕГО набрать 5570 XP
+  9570,   // Чтобы получить 10 лвл, нужно ВСЕГО набрать 9570 XP
+];
 
 // Импортируем серверные базы данных монстров и предметов
 const MONSTER_DATABASE = require('./database_server/monsters');
@@ -411,26 +425,36 @@ async function savePveResultsToSupabase(playerRoomObject, monster, resultType) {
     let newXp = resultType === 'p1_win' ? (playerRoomObject.data.xp + monster.data.rewardXp) : playerRoomObject.data.xp;
     let finalHp = resultType === 'p1_win' ? Math.max(0, playerRoomObject.currentHp) : Math.max(1, Math.floor(playerRoomObject.maxHp * 0.2)); 
     
-    // 🔥 ФИКС ЛЕВЕЛАПА НА СЕРВЕРЕ: Считаем уровень и статы прямо тут
+    // Считаем выносливость игрока
+    const totalEndurance = (playerRoomObject.data.stats?.endurance || 10) + getServerEquipmentBonus(playerRoomObject.data, 'endurance');
+    
+    // 🔥 НАДЕЖНЫЙ РАСЧЕТ ЛЕВЕЛАПА ПО ТАБЛИЦЕ КЛИЕНТА
     let currentLevel = playerRoomObject.data.level || 1;
     let currentStatPoints = playerRoomObject.data.statpoints || playerRoomObject.data.statPoints || 0;
     
-    // Формула лимита опыта (должна совпадать с клиентом!)
-    const getXpLimit = (lvl) => (lvl + 1) * 10; // Если у тебя 1 ур = 20, 2 ур = 30 и т.д.
+    // Функция получения опыта для следующего уровня по нашей таблице
+    const getXpLimit = (lvl) => {
+      const nextLevel = lvl + 1;
+      if (nextLevel < SERVER_XP_TABLE.length) {
+        return SERVER_XP_TABLE[nextLevel];
+      }
+      return nextLevel * 1000; // Резервный расчет, если уровень ушел за пределы таблицы
+    };
     
+    // Цикл левелапа
     while (newXp >= getXpLimit(currentLevel)) {
       currentLevel++;
       currentStatPoints += 5;
-      if (resultType === 'p1_win') finalHp = (totalEndurance * 10); // Полное исцеление при левелапе
+      if (resultType === 'p1_win') finalHp = (totalEndurance * 10); 
     }
 
-    // Сохраняем все обновленные параметры в Supabase, включая статы и уровень
+    // Сохраняем все обновленные параметры в Supabase
     await sb.from('players').update({ 
       gold: newGold, 
       xp: newXp, 
       hp: finalHp, 
       level: currentLevel,
-      statpoints: currentStatPoints, // Записываем в маленьком регистре для БД
+      statpoints: currentStatPoints, 
       equipped: playerRoomObject.data.equipped 
     }).eq('id', Number(userId));
     
