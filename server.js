@@ -166,26 +166,37 @@ io.on('connection', (socket) => {
       
       console.log(`⚔️ PvP Пара найдена! Создается комната: ${roomId}`);
 
+    // На сервере внутри socket.on('search_match')
       activeRooms[roomId] = {
         id: roomId,
-        p1: { socket: opponent.socket, data: opponent.playerData, currentHp: opponent.currentHp, maxHp: opponent.maxHp, turn: null },
-        p2: { socket: socket, data: playerData, currentHp: clientCurrentHp, maxHp: clientMaxHp, turn: null },
+        p1: { socket: opponent.socket, data: opponent.playerData, currentHp: Number(opponent.currentHp), maxHp: opponent.maxHp, turn: null },
+        p2: { socket: socket, data: playerData, currentHp: Number(clientCurrentHp), maxHp: clientMaxHp, turn: null },
         turnCount: 1, timeoutRef: null
       };
 
-      // 🔥 ИСПРАВЛЕНИЕ 1: Добавляем сокеты в комнату
       opponent.socket.join(roomId);
       socket.join(roomId);
 
-      // Даем Socket.io 50 миллисекунд, чтобы гарантированно завершить асинхронный .join() для ОБЕИХ вкладок [1]
       setTimeout(() => {
         if (activeRooms[roomId]) {
-          // Шлем пакет старта напрямую в созданную комнату для обоих участников одновременно!
+          // 🔥 ФИКС: Передаем честное ТЕКУЩЕЕ здоровье оппонента (currentHp) при старте!
           if (activeRooms[roomId].p1.socket) {
-            activeRooms[roomId].p1.socket.emit('battle_start', { roomId, opponent: playerData, myMaxHp: activeRooms[roomId].p1.maxHp, oppMaxHp: activeRooms[roomId].p2.maxHp });
+            activeRooms[roomId].p1.socket.emit('battle_start', { 
+              roomId, 
+              opponent: playerData, 
+              myMaxHp: activeRooms[roomId].p1.maxHp, 
+              oppMaxHp: activeRooms[roomId].p2.maxHp,
+              oppCurrentHp: activeRooms[roomId].p2.currentHp // <-- Передаем ХП соперника для P1
+            });
           }
           if (activeRooms[roomId].p2.socket) {
-            activeRooms[roomId].p2.socket.emit('battle_start', { roomId, opponent: opponent.playerData, myMaxHp: activeRooms[roomId].p2.maxHp, oppMaxHp: activeRooms[roomId].p1.maxHp });
+            activeRooms[roomId].p2.socket.emit('battle_start', { 
+              roomId, 
+              opponent: opponent.playerData, 
+              myMaxHp: activeRooms[roomId].p2.maxHp, 
+              oppMaxHp: activeRooms[roomId].p1.maxHp,
+              oppCurrentHp: activeRooms[roomId].p1.currentHp // <-- Передаем ХП соперника для P2
+            });
           }
           startServerTurnTimer(roomId);
         }
@@ -385,35 +396,34 @@ function executeRoundCalculations(roomId) {
   const isP1Dead = room.p1.currentHp <= 0;
   const isP2Dead = room.p2.currentHp <= 0;
 
-if (isP1Dead || isP2Dead || room.turnCount > 40) {
+ if (isP1Dead || isP2Dead || room.turnCount > 40) {
     let resultType = 'draw';
-    let finalGold = room.p1.data.gold;
-    let finalXp = room.p1.data.xp;
-
-    // 🔥 ИСПРАВЛЕНИЕ 1: Мгновенно заставляем сокеты покинуть комнату Socket.io, чтобы разорвать связь
-    if (room.p1.socket) room.p1.socket.leave(room.id);
-    if (!room.p2.isAi && room.p2.socket) room.p2.socket.leave(room.id);
-
-    // 🔥 ИСПРАВЛЕНИЕ 2: Сначала ЖЕСТКО удаляем комнату из ОЗУ сервера, чтобы хендлер F5 её больше никогда не нашел!
-    const finishedRoomId = roomId;
-    delete activeRooms[finishedRoomId];
-    console.log(`🧹 Память сервера очищена: комната ${finishedRoomId} полностью удалена.`);
-
     if (room.p2.isAi) {
-      if (!isP1Dead && isP2Dead) { resultType = 'p1_win'; finalGold += room.p2.data.rewardGold; finalXp += room.p2.data.rewardXp; }
+      if (!isP1Dead && isP2Dead) resultType = 'p1_win';
       if (isP1Dead && !isP2Dead) resultType = 'monster_win';
-      if (room.p1.socket) room.p1.socket.emit('round_result', { p1Hp: room.p1.currentHp, p2Hp: room.p2.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: finalGold, serverXp: finalXp });
+      
+      if (room.p1.socket) {
+        room.p1.socket.emit('round_result', { myHp: room.p1.currentHp, enemyHp: room.p2.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: room.p1.data.gold + (resultType === 'p1_win' ? room.p2.data.rewardGold : 0), serverXp: room.p1.data.xp + (resultType === 'p1_win' ? room.p2.data.rewardXp : 0) });
+      }
       savePveResultsToSupabase(room.p1, room.p2, resultType);
     } else {
-      let p2Gold = room.p2.data.gold; let p2Xp = room.p2.data.xp;
-      if (!isP1Dead && isP2Dead) { resultType = 'p1_win'; finalGold += 25; finalXp += 30; }
-      if (isP1Dead && !isP2Dead) { resultType = 'p2_win'; p2Gold += 25; p2Xp += 30; }
-      if (room.p1.socket) room.p1.socket.emit('round_result', { p1Hp: room.p1.currentHp, p2Hp: room.p2.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: finalGold, serverXp: finalXp });
-      if (room.p2.socket) room.p2.socket.emit('round_result', { p1Hp: room.p2.currentHp, p2Hp: room.p1.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: p2Gold, serverXp: p2Xp });
+      // PvP Финал
+      if (!isP1Dead && isP2Dead) resultType = 'p1_win';
+      if (isP1Dead && !isP2Dead) resultType = 'p2_win';
+      
+      if (room.p1.socket) room.p1.socket.emit('round_result', { myHp: room.p1.currentHp, enemyHp: room.p2.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: room.p1.data.gold + (resultType === 'p1_win' ? 25 : 0), serverXp: room.p1.data.xp + (resultType === 'p1_win' ? 30 : 0) });
+      if (room.p2.socket) room.p2.socket.emit('round_result', { myHp: room.p2.currentHp, enemyHp: room.p1.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: room.p2.data.gold + (resultType === 'p2_win' ? 25 : 0), serverXp: room.p2.data.xp + (resultType === 'p2_win' ? 30 : 0) });
       saveBattleResultsToSupabase(room.p1, room.p2, resultType);
     }
+    
+    if (room.p1.socket) room.p1.socket.leave(room.id);
+    if (!room.p2.isAi && room.p2.socket) room.p2.socket.leave(room.id);
+    delete activeRooms[roomId];
   } else {
-    io.to(room.id).emit('round_result', { p1Hp: room.p1.currentHp, p2Hp: room.p2.currentHp, logs, isOver: false, turnCount: currentRound });
+    // Живой раунд боя: шлем каждому сокету его ЛИЧНЫЕ MyHp и EnemyHp!
+    if (room.p1.socket) room.p1.socket.emit('round_result', { myHp: room.p1.currentHp, enemyHp: room.p2.currentHp, logs, isOver: false, turnCount: currentRound });
+    if (!room.p2.isAi && room.p2.socket) room.p2.socket.emit('round_result', { myHp: room.p2.currentHp, enemyHp: room.p1.currentHp, logs, isOver: false, turnCount: currentRound });
+    
     startServerTurnTimer(roomId);
   }
 }
