@@ -371,10 +371,19 @@ function executeRoundCalculations(roomId) {
   const isP1Dead = room.p1.currentHp <= 0;
   const isP2Dead = room.p2.currentHp <= 0;
 
-  if (isP1Dead || isP2Dead || room.turnCount > 40) {
+if (isP1Dead || isP2Dead || room.turnCount > 40) {
     let resultType = 'draw';
     let finalGold = room.p1.data.gold;
     let finalXp = room.p1.data.xp;
+
+    // 🔥 ИСПРАВЛЕНИЕ 1: Мгновенно заставляем сокеты покинуть комнату Socket.io, чтобы разорвать связь
+    if (room.p1.socket) room.p1.socket.leave(room.id);
+    if (!room.p2.isAi && room.p2.socket) room.p2.socket.leave(room.id);
+
+    // 🔥 ИСПРАВЛЕНИЕ 2: Сначала ЖЕСТКО удаляем комнату из ОЗУ сервера, чтобы хендлер F5 её больше никогда не нашел!
+    const finishedRoomId = roomId;
+    delete activeRooms[finishedRoomId];
+    console.log(`🧹 Память сервера очищена: комната ${finishedRoomId} полностью удалена.`);
 
     if (room.p2.isAi) {
       if (!isP1Dead && isP2Dead) { resultType = 'p1_win'; finalGold += room.p2.data.rewardGold; finalXp += room.p2.data.rewardXp; }
@@ -389,7 +398,6 @@ function executeRoundCalculations(roomId) {
       if (room.p2.socket) room.p2.socket.emit('round_result', { p1Hp: room.p2.currentHp, p2Hp: room.p1.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: p2Gold, serverXp: p2Xp });
       saveBattleResultsToSupabase(room.p1, room.p2, resultType);
     }
-    delete activeRooms[roomId];
   } else {
     io.to(room.id).emit('round_result', { p1Hp: room.p1.currentHp, p2Hp: room.p2.currentHp, logs, isOver: false, turnCount: currentRound });
     startServerTurnTimer(roomId);
