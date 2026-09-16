@@ -14,7 +14,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { 
   cors: { 
-    origin: ["https://github.io", "http://localhost:3000"],
+    origin: ["https://zykkoi98.github.io", "http://localhost:3000"],
     methods: ["GET", "POST"]
   } 
 });
