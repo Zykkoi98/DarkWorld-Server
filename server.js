@@ -141,50 +141,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 🏆 ВХОД В ОЧЕРЕДЬ АРЕНЫ (PvP)
-  socket.on('search_match', (clientPayload) => {
-    const playerData = clientPayload.playerData;
-    const clientCurrentHp = clientPayload.currentHp;
-    const clientMaxHp = clientPayload.maxHp;
-    if (!playerData) return socket.emit('error', 'Данные игрока отсутствуют.');
-    
-    pvpLobby = pvpLobby.filter(p => Number(p.playerData.id) !== Number(playerData.id));
-    
-    if (pvpLobby.length > 0) {
-      const opponent = pvpLobby.shift(); 
-      const roomId = `room_${opponent.playerData.id}_${playerData.id}_${Date.now()}`;
-      console.log(`⚔️ PvP Пара найдена! Создается комната: ${roomId}`);
-
-      const buildFlatData = (p) => ({
-        id: Number(p.id), name: p.name, gold: Number(p.gold || 0), xp: Number(p.xp || 0), level: Number(p.level || 1),
-        statpoints: Number(p.statpoints !== undefined ? p.statpoints : (p.statPoints || 0)), equipped: p.equipped || {},
-        strength: Number(p.strength !== undefined ? p.strength : (p.stats?.strength || 1)),
-        agility: Number(p.agility !== undefined ? p.agility : (p.stats?.agility || 1)),
-        endurance: Number(p.endurance !== undefined ? p.endurance : (p.stats?.endurance || 1)),
-        intellect: Number(p.intellect !== undefined ? p.intellect : (p.stats?.intellect || 1)),
-        luck: Number(p.luck !== undefined ? p.luck : (p.stats?.luck || 1))
-      });
-
-      activeRooms[roomId] = {
-        id: roomId,
-        p1: { socket: opponent.socket, data: buildFlatData(opponent.playerData), currentHp: Number(opponent.currentHp), maxHp: Number(opponent.maxHp), turn: null },
-        p2: { socket: socket, data: buildFlatData(playerData), currentHp: Number(clientCurrentHp), maxHp: Number(clientMaxHp), turn: null },
-        turnCount: 1, timeoutRef: null
-      };
-      opponent.socket.join(roomId); socket.join(roomId);
-
-      setTimeout(() => {
-        if (activeRooms[roomId]) {
-          if (activeRooms[roomId].p1.socket) activeRooms[roomId].p1.socket.emit('battle_start', { roomId, opponent: playerData, myMaxHp: activeRooms[roomId].p1.maxHp, oppMaxHp: activeRooms[roomId].p2.maxHp, oppCurrentHp: activeRooms[roomId].p2.currentHp });
-          if (activeRooms[roomId].p2.socket) activeRooms[roomId].p2.socket.emit('battle_start', { roomId, opponent: opponent.playerData, myMaxHp: activeRooms[roomId].p2.maxHp, oppMaxHp: activeRooms[roomId].p1.maxHp, oppCurrentHp: activeRooms[roomId].p1.currentHp });
-          startServerTurnTimer(roomId);
-        }
-      }, 50);
-    } else {
-      pvpLobby.push({ socket: socket, playerData: playerData, currentHp: clientCurrentHp, maxHp: clientMaxHp });
-      socket.emit('search_status', '🔍 Поиск достойного соперника на Арене...');
-    }
-  });
 
   // 🌲 ЗАПУСК PvE ПОЕДИНКА (БОЙ С МОНСТРОМ В ЛЕСУ)
   socket.on('search_pve_match', async ({ playerData, monsterKey, maxHp }) => {
@@ -214,6 +170,63 @@ io.on('connection', (socket) => {
       socket.emit('pve_battle_start', { roomId, monster: activeRooms[roomId].p2.data, myMaxHp: myRealMaxHp, monsterMaxHp: monsterMaxHp, monsterCurrentHp: monsterMaxHp });
       startServerTurnTimer(roomId);
     } catch (err) { console.error("Ошибка при старте PvE боя:", err.message); }
+  });
+   // ============================================================================
+  // 🏆 СЛУЖБА НОВОЙ АРЕНЫ: СВЯЗЬ С ТАБЛИЦЕЙ ARENA_LOBBY В SUPABASE
+  // ============================================================================
+
+  // 1. Игрок создал заявку на Арене — сервер оповещает всех остальных
+  socket.on('create_arena_request', ({ userId }) => {
+    console.log(`📝 Сигнал сервера: Игрок ID ${userId} опубликовал вызов.`);
+    // Массово шлем всем сокетам команду обновить доску объявлений из базы
+    io.emit('arena_lobby_updated');
+  });
+
+  // 2. Игрок отменил поиск — сервер даёт команду обновить экраны
+  socket.on('cancel_arena_request', ({ userId }) => {
+    console.log(`❌ Сигнал сервера: Игрок ID ${userId} снял свою заявку.`);
+    io.emit('arena_lobby_updated');
+  });
+
+  // 3. Один игрок принял вызов другого (Нажата кнопка "В БОЙ")
+  socket.on('accept_arena_challenge', async ({ myId, opponentId, myMaxHp, oppMaxHp }) => {
+    try {
+      const roomOppId = Number(opponentId);
+      const roomMyId = Number(myId);
+
+      // Скачиваем свежие профили обоих участников боя для честного распределения статов
+      const { data: p1Data } = await sb.from('players').select('*').eq('id', roomOppId).single();
+      const { data: p2Data } = await sb.from('players').select('*').eq('id', roomMyId).single();
+
+      if (!p1Data || !p2Data) return socket.emit('error', 'Боец не найден в базе данных.');
+
+      const roomId = `room_${roomOppId}_${roomMyId}_${Date.now()}`;
+      console.log(`⚔️ БОЙ НАЧАЛСЯ ИЗ ЛОББИ! Комната: ${roomId} [${p1Data.name} vs ${p2Data.name}]`);
+
+      // Функция сборки быстрых плоских характеристик
+      const buildFlatData = (p) => ({
+        id: Number(p.id), name: p.name, gold: Number(p.gold || 0), xp: Number(p.xp || 0), level: Number(p.level || 1),
+        statpoints: Number(p.statpoints !== undefined ? p.statpoints : 0), equipped: p.equipped || {},
+        strength: Number(p.strength || 1), agility: Number(p.agility || 1), endurance: Number(p.endurance || 1), intellect: Number(p.intellect || 1), luck: Number(p.luck || 1)
+      });
+
+      // Регистрируем боевую комнату в оперативной памяти сервера (твоё рабочее ПВП!)
+      activeRooms[roomId] = {
+        id: roomId,
+        p1: { socket: null, data: buildFlatData(p1Data), currentHp: Number(p1Data.hp), maxHp: Number(oppMaxHp || 100), turn: null },
+        p2: { socket: socket, data: buildFlatData(p2Data), currentHp: Number(p2Data.hp), maxHp: Number(myMaxHp || 100), turn: null },
+        turnCount: 1, timeoutRef: null
+      };
+
+      // Шлем массовый сигнал обновить доску (так как заявка ушла в бой)
+      io.emit('arena_lobby_updated');
+
+      // Даем команду обоим клиентам принудительно открыть экран боя!
+      io.emit('arena_redirect_to_battle', { opponentId: roomOppId, challengerId: roomMyId, roomId: roomId });
+      
+    } catch (err) {
+      console.error("❌ Ошибка сервера при принятии вызова:", err.message);
+    }
   });
 
   // ⚔️ ПРИЕМ ХОДОВ И ИНЛАЙН СЛУШАТЕЛИ КЛИКОВ ЗЕЛЬЯ
