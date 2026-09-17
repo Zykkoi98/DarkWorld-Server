@@ -117,12 +117,13 @@ io.on('connection', (socket) => {
     console.log(`🔍 Сервер проверяет активные сессии для игрока ID ${uid}...`);
 
     // Безопасный поиск активной комнаты в памяти бэкенда
-    const foundRoomId = Object.keys(activeRooms).find(roomId => {
+       const foundRoomId = Object.keys(activeRooms).find(roomId => {
       const room = activeRooms[roomId];
       if (!room || !room.p1) return false;
       
-      const isP1 = Number(room.p1.data?.id || 0) === uid;
-      const isP2 = (!room.p2.isAi && room.p2.data && Number(room.p2.data.id || 0) === uid);
+      // 🔥 ФИКС: Сравниваем ID строго как строки, отсекая баги округления чисел
+      const isP1 = String(room.p1.data?.id || '0') === String(userId);
+      const isP2 = (!room.p2.isAi && room.p2.data && String(room.p2.data.id || '0') === String(userId));
       
       return isP1 || isP2;
     });
@@ -227,26 +228,31 @@ io.on('connection', (socket) => {
   // 3. Один игрок принял вызов другого (Нажата кнопка "В БОЙ")
   socket.on('accept_arena_challenge', async ({ myId, opponentId, myMaxHp, oppMaxHp }) => {
     try {
-      const roomOppId = Number(opponentId);
-      const roomMyId = Number(myId);
+      // 🔥 ФИКС: Сохраняем типы как строки, чтобы int8 из базы не округлялся в ОЗУ Node.js
+      const roomOppId = String(opponentId);
+      const roomMyId = String(myId);
 
-      // Скачиваем свежие профили обоих участников боя для честного распределения статов
+      // Скачиваем свежие профили обоих участников боя
       const { data: p1Data } = await sb.from('players').select('*').eq('id', roomOppId).single();
       const { data: p2Data } = await sb.from('players').select('*').eq('id', roomMyId).single();
 
-      if (!p1Data || !p2Data) return socket.emit('error', 'Боец не найден в базе данных.');
+      if (!p1Data || !p2Data) {
+        console.log(`❌ Ошибка: Не найден игрок в базе. Запрашивали ID: ${roomOppId} и ${roomMyId}`);
+        return socket.emit('error', 'Боец не найден в базе данных.');
+      }
 
       const roomId = `room_${roomOppId}_${roomMyId}_${Date.now()}`;
       console.log(`⚔️ БОЙ НАЧАЛСЯ ИЗ ЛОББИ! Комната: ${roomId} [${p1Data.name} vs ${p2Data.name}]`);
 
       // Функция сборки быстрых плоских характеристик
       const buildFlatData = (p) => ({
-        id: Number(p.id), name: p.name, gold: Number(p.gold || 0), xp: Number(p.xp || 0), level: Number(p.level || 1),
+        id: String(p.id), // 🔥 ФИКС: Храним ID внутри ОЗУ боя как строку
+        name: p.name, gold: Number(p.gold || 0), xp: Number(p.xp || 0), level: Number(p.level || 1),
         statpoints: Number(p.statpoints !== undefined ? p.statpoints : 0), equipped: p.equipped || {},
         strength: Number(p.strength || 1), agility: Number(p.agility || 1), endurance: Number(p.endurance || 1), intellect: Number(p.intellect || 1), luck: Number(p.luck || 1)
       });
 
-      // Регистрируем боевую комнату в оперативной памяти сервера (твоё рабочее ПВП!)
+      // Регистрируем боевую комнату в оперативной памяти сервера
       activeRooms[roomId] = {
         id: roomId,
         p1: { socket: null, data: buildFlatData(p1Data), currentHp: Number(p1Data.hp), maxHp: Number(oppMaxHp || 100), turn: null },
@@ -254,10 +260,10 @@ io.on('connection', (socket) => {
         turnCount: 1, timeoutRef: null
       };
 
-      // Шлем массовый сигнал обновить доску (так как заявка ушла в бой)
+      // Шлем массовый сигнал обновить доску
       io.emit('arena_lobby_updated');
 
-      // Даем команду обоим клиентам принудительно открыть экран боя!
+      // Даем команду обоим клиентам принудительно открыть экран боя! (Передаем СТРОКИ)
       io.emit('arena_redirect_to_battle', { opponentId: roomOppId, challengerId: roomMyId, roomId: roomId });
       
     } catch (err) {
