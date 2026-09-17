@@ -109,20 +109,18 @@ function getServerMaxHp(playerData) {
 io.on('connection', (socket) => {
   console.log(`🔌 Игрок подключился к сокету: ${socket.id}`);
 
-// 🔄 АБСОЛЮТНО БЕЗОПАСНЫЙ ХЕНДЛЕР RECONNECT (ФИКС КРАША PvE И PvP)
+ // 🔄 УЛЬТИМАТИВНЫЙ ХЕНДЛЕР RECONNECT (ФИКС PvE ПОСЛЕ F5 И СТАРТА PvP)
   socket.on('check_active_battle', ({ userId }) => {
     if (!userId) return;
     const uid = Number(userId);
 
     console.log(`🔍 Сервер проверяет активные сессии для игрока ID ${uid}...`);
 
-    // 🔥 БРОНЕБОЙНЫЙ ПОИСК: Защищен от крашей из-за монстров в PvE комнатах!
     const foundRoomId = Object.keys(activeRooms).find(roomId => {
       const room = activeRooms[roomId];
       if (!room || !room.p1) return false;
       
       const isP1 = Number(room.p1.data?.id || 0) === uid;
-      // Проверяем p2.data.id строго если это НЕ бот-монстр!
       const isP2 = (!room.p2.isAi && room.p2.data && Number(room.p2.data.id || 0) === uid);
       
       return isP1 || isP2;
@@ -135,30 +133,47 @@ io.on('connection', (socket) => {
       
       if (isP1) {
         room.p1.socket = socket; // Перевязываем живой сокет игрока P1
+        
+        // 🔥 ФИКС БАГА: Собираем безопасный плоский объект оппонента для Игрока 1
+        const oppData = room.p2.isAi ? {
+          name: room.p2.name || "Монстр",
+          icon: room.p2.icon || "👹"
+        } : {
+          name: room.p2.data?.name || "Игрок 2",
+          icon: "👤"
+        };
+
         socket.emit('reconnect_battle_success', {
           roomId: foundRoomId, 
           isPve: !!room.p2.isAi, 
-          opponent: room.p2.data, // Для PvE отдаст имя/иконку монстра
+          opponent: oppData, // Гарантируем наличие name и icon
           myMaxHp: room.p1.maxHp, 
           oppMaxHp: room.p2.maxHp, 
           myCurrentHp: room.p1.currentHp, 
           oppCurrentHp: room.p2.currentHp, 
           turnCount: room.turnCount
         });
-        console.log(`☁️ Игрок 1 (ID ${uid}) успешно возвращен в бой ${foundRoomId}`);
+        console.log(`☁️ Игрок P1 (ID ${uid}) успешно возвращен в бой ${foundRoomId}`);
       } else {
-        room.p2.socket = socket; // Перевязываем живой сокет игрока P2 (PvP)
+        room.p2.socket = socket; // Перевязываем живой сокет игрока P2
+        
+        // 🔥 ФИКС БАГА: Собираем безопасный плоский объект оппонента для Игрока 2 (Всегда PvP)
+        const oppData = {
+          name: room.p1.data?.name || "Игрок 1",
+          icon: "👤"
+        };
+
         socket.emit('reconnect_battle_success', {
           roomId: foundRoomId, 
           isPve: false, 
-          opponent: room.p1.data, 
+          opponent: oppData, 
           myMaxHp: room.p2.maxHp, 
           oppMaxHp: room.p1.maxHp, 
           myCurrentHp: room.p2.currentHp, 
           oppCurrentHp: room.p1.currentHp, 
           turnCount: room.turnCount
         });
-        console.log(`☁️ Игрок 2 (ID ${uid}) успешно возвращен в бой ${foundRoomId}`);
+        console.log(`☁️ Игрок P2 (ID ${uid}) успешно возвращен в бой ${foundRoomId}`);
       }
     } else {
       console.log(`📭 Активных боев в памяти сервера для ID ${uid} не найдено.`);
