@@ -104,232 +104,148 @@ function getServerMaxHp(playerData) {
   return (totalEndurance * 10) + armorHp;
 }
 // ============================================================================
-// ===== 🛡️ ИСПРАВЛЕННЫЙ СЕРВЕР RPG: ЧАСТЬ 2 — СЕТЕВЫЕ СОБЫТИЯ И RECONNECT =====
+// ===== 🛡️ ИСПРАВЛЕННЫЙ СЕРВЕР RPG: ЧАСТЬ 2 — СЕТЕВЫЕ СОБЫТИЯ И РЕКОННЕКТ =====
 // ============================================================================
 io.on('connection', (socket) => {
   console.log(`🔌 Игрок подключился к сокету: ${socket.id}`);
 
-  // 🔄 ХЕНДЛЕР ПЕРЕПОДКЛЮЧЕНИЯ: Ищет зависший в памяти бой по неизменяемому ID игрока
+  // 🔄 ХЕНДЛЕР ПЕРЕПОДКЛЮЧЕНИЯ ПОСЛЕ F5
   socket.on('check_active_battle', ({ userId }) => {
     if (!userId) return;
-
     const foundRoomId = Object.keys(activeRooms).find(roomId => {
       const room = activeRooms[roomId];
       const isP1 = Number(room.p1.data.id) === Number(userId);
       const isP2 = !room.p2.isAi && Number(room.p2.data.id) === Number(userId);
       return isP1 || isP2;
     });
-
     if (foundRoomId) {
       const room = activeRooms[foundRoomId];
       const isP1 = Number(room.p1.data.id) === Number(userId);
-      
-      // Связываем новый активный сокет с комнатой
       socket.join(foundRoomId);
-      
       if (isP1) {
-        room.p1.socket = socket; // Обновляем сокет Первого игрока
+        room.p1.socket = socket;
         socket.emit('reconnect_battle_success', {
-          roomId: foundRoomId,
-          isPve: !!room.p2.isAi,
-          opponent: room.p2.data,
-          myMaxHp: room.p1.maxHp,
-          oppMaxHp: room.p2.maxHp,
-          myCurrentHp: room.p1.currentHp,
-          oppCurrentHp: room.p2.currentHp,
-          turnCount: room.turnCount
+          roomId: foundRoomId, isPve: !!room.p2.isAi, opponent: room.p2.data,
+          myMaxHp: room.p1.maxHp, oppMaxHp: room.p2.maxHp,
+          myCurrentHp: room.p1.currentHp, oppCurrentHp: room.p2.currentHp, turnCount: room.turnCount
         });
       } else {
-        room.p2.socket = socket; // Обновляем сокет Второго игрока
+        room.p2.socket = socket;
         socket.emit('reconnect_battle_success', {
-          roomId: foundRoomId,
-          isPve: false,
-          opponent: room.p1.data,
-          myMaxHp: room.p2.maxHp,
-          oppMaxHp: room.p1.maxHp,
-          myCurrentHp: room.p2.currentHp,
-          oppCurrentHp: room.p1.currentHp,
-          turnCount: room.turnCount
+          roomId: foundRoomId, isPve: false, opponent: room.p1.data,
+          myMaxHp: room.p2.maxHp, oppMaxHp: room.p1.maxHp,
+          myCurrentHp: room.p2.currentHp, oppCurrentHp: room.p1.currentHp, turnCount: room.turnCount
         });
       }
-      console.log(`🔄 Игрок ${userId} успешно переподключил сокет к комнате ${foundRoomId}`);
+      console.log(`🔄 Игрок ${userId} успешно вернулся в комнату ${foundRoomId}`);
     }
   });
 
-  // Вход в очередь Арены (PvP)
+  // 🏆 ВХОД В ОЧЕРЕДЬ АРЕНЫ (PvP)
   socket.on('search_match', (clientPayload) => {
     const playerData = clientPayload.playerData;
     const clientCurrentHp = clientPayload.currentHp;
     const clientMaxHp = clientPayload.maxHp;
-
-    if (!playerData) return socket.emit('error', 'Критическая ошибка: Данные игрока отсутствуют.');
+    if (!playerData) return socket.emit('error', 'Данные игрока отсутствуют.');
     
-    // Очищаем лобби от старых записей этого же игрока
     pvpLobby = pvpLobby.filter(p => Number(p.playerData.id) !== Number(playerData.id));
     
     if (pvpLobby.length > 0) {
       const opponent = pvpLobby.shift(); 
-      const roomId = `room_${opponent.playerData.id}_${playerData.id}`; // Создаем ID комнаты по ID игроков, а не сокетов!
-      
+      const roomId = `room_${opponent.playerData.id}_${playerData.id}_${Date.now()}`;
       console.log(`⚔️ PvP Пара найдена! Создается комната: ${roomId}`);
 
-    // На сервере внутри socket.on('search_match')
+      const buildFlatData = (p) => ({
+        id: Number(p.id), name: p.name, gold: Number(p.gold || 0), xp: Number(p.xp || 0), level: Number(p.level || 1),
+        statpoints: Number(p.statpoints !== undefined ? p.statpoints : (p.statPoints || 0)), equipped: p.equipped || {},
+        strength: Number(p.strength !== undefined ? p.strength : (p.stats?.strength || 1)),
+        agility: Number(p.agility !== undefined ? p.agility : (p.stats?.agility || 1)),
+        endurance: Number(p.endurance !== undefined ? p.endurance : (p.stats?.endurance || 1)),
+        intellect: Number(p.intellect !== undefined ? p.intellect : (p.stats?.intellect || 1)),
+        luck: Number(p.luck !== undefined ? p.luck : (p.stats?.luck || 1))
+      });
+
       activeRooms[roomId] = {
         id: roomId,
-        p1: { socket: opponent.socket, data: opponent.playerData, currentHp: Number(opponent.currentHp), maxHp: opponent.maxHp, turn: null },
-        p2: { socket: socket, data: playerData, currentHp: Number(clientCurrentHp), maxHp: clientMaxHp, turn: null },
+        p1: { socket: opponent.socket, data: buildFlatData(opponent.playerData), currentHp: Number(opponent.currentHp), maxHp: Number(opponent.maxHp), turn: null },
+        p2: { socket: socket, data: buildFlatData(playerData), currentHp: Number(clientCurrentHp), maxHp: Number(clientMaxHp), turn: null },
         turnCount: 1, timeoutRef: null
       };
-
-      opponent.socket.join(roomId);
-      socket.join(roomId);
+      opponent.socket.join(roomId); socket.join(roomId);
 
       setTimeout(() => {
         if (activeRooms[roomId]) {
-          // 🔥 ФИКС: Передаем честное ТЕКУЩЕЕ здоровье оппонента (currentHp) при старте!
-          if (activeRooms[roomId].p1.socket) {
-            activeRooms[roomId].p1.socket.emit('battle_start', { 
-              roomId, 
-              opponent: playerData, 
-              myMaxHp: activeRooms[roomId].p1.maxHp, 
-              oppMaxHp: activeRooms[roomId].p2.maxHp,
-              oppCurrentHp: activeRooms[roomId].p2.currentHp // <-- Передаем ХП соперника для P1
-            });
-          }
-          if (activeRooms[roomId].p2.socket) {
-            activeRooms[roomId].p2.socket.emit('battle_start', { 
-              roomId, 
-              opponent: opponent.playerData, 
-              myMaxHp: activeRooms[roomId].p2.maxHp, 
-              oppMaxHp: activeRooms[roomId].p1.maxHp,
-              oppCurrentHp: activeRooms[roomId].p1.currentHp // <-- Передаем ХП соперника для P2
-            });
-          }
+          if (activeRooms[roomId].p1.socket) activeRooms[roomId].p1.socket.emit('battle_start', { roomId, opponent: playerData, myMaxHp: activeRooms[roomId].p1.maxHp, oppMaxHp: activeRooms[roomId].p2.maxHp, oppCurrentHp: activeRooms[roomId].p2.currentHp });
+          if (activeRooms[roomId].p2.socket) activeRooms[roomId].p2.socket.emit('battle_start', { roomId, opponent: opponent.playerData, myMaxHp: activeRooms[roomId].p2.maxHp, oppMaxHp: activeRooms[roomId].p1.maxHp, oppCurrentHp: activeRooms[roomId].p1.currentHp });
           startServerTurnTimer(roomId);
         }
       }, 50);
-
     } else {
-      // Сохраняем текущий сокет и данные в очередь поиска
       pvpLobby.push({ socket: socket, playerData: playerData, currentHp: clientCurrentHp, maxHp: clientMaxHp });
       socket.emit('search_status', '🔍 Поиск достойного соперника на Арене...');
     }
   });
 
-  // Запуск PvE поединка (Охота на монстров)
+  // 🌲 ЗАПУСК PvE ПОЕДИНКА (БОЙ С МОНСТРОМ В ЛЕСУ)
   socket.on('search_pve_match', async ({ playerData, monsterKey, maxHp }) => {
     try {
       const template = MONSTER_DATABASE[monsterKey];
       if (!template) return socket.emit('error', 'Монстр не найден');
-
       const { data: dbPlayer, error } = await sb.from('players').select('*').eq('id', Number(playerData.id)).single();
       if (error || !dbPlayer) return socket.emit('error', 'Критическая ошибка валидации профиля.');
 
       const roomId = `pve_${playerData.id}_${Date.now()}`;
-      const myRealMaxHp = maxHp || getServerMaxHp(dbPlayer);
+      const flatPlayer = {
+        id: Number(dbPlayer.id), name: dbPlayer.name, gold: Number(dbPlayer.gold || 0), xp: Number(dbPlayer.xp || 0), level: Number(dbPlayer.level || 1),
+        statpoints: Number(dbPlayer.statpoints !== undefined ? dbPlayer.statpoints : 0), equipped: dbPlayer.equipped || {},
+        strength: Number(dbPlayer.strength !== undefined ? dbPlayer.strength : 1), agility: Number(dbPlayer.agility !== undefined ? dbPlayer.agility : 1),
+        endurance: Number(dbPlayer.endurance !== undefined ? dbPlayer.endurance : 1), intellect: Number(dbPlayer.intellect !== undefined ? dbPlayer.intellect : 1), luck: Number(dbPlayer.luck !== undefined ? dbPlayer.luck : 1)
+      };
+      const myRealMaxHp = maxHp || getServerMaxHp(flatPlayer);
       const monsterMaxHp = (template.stats.endurance || 10) * 10;
 
       activeRooms[roomId] = {
         id: roomId,
-        p1: { socket: socket, data: dbPlayer, currentHp: dbPlayer.hp, maxHp: myRealMaxHp, turn: null },
-        p2: { isAi: true, data: { name: template.name, icon: template.icon, stats: template.stats, rewardXp: template.rewardXp, rewardGold: template.rewardGold }, currentHp: monsterMaxHp, maxHp: monsterMaxHp, turn: null },
+        p1: { socket: socket, data: flatPlayer, currentHp: Number(playerData.hp || dbPlayer.hp), maxHp: myRealMaxHp, turn: null },
+        p2: { isAi: true, data: { name: template.name, icon: template.icon, rewardXp: template.rewardXp, rewardGold: template.rewardGold }, currentHp: monsterMaxHp, maxHp: monsterMaxHp, turn: null, strength: template.stats.strength, agility: template.stats.agility, endurance: template.stats.endurance, intellect: template.stats.intellect, luck: template.stats.luck },
         turnCount: 1, timeoutRef: null
       };
-
       socket.join(roomId);
-      socket.emit('pve_battle_start', { roomId, monster: activeRooms[roomId].p2.data, myMaxHp: myRealMaxHp, monsterMaxHp: monsterMaxHp });
+      socket.emit('pve_battle_start', { roomId, monster: activeRooms[roomId].p2.data, myMaxHp: myRealMaxHp, monsterMaxHp: monsterMaxHp, monsterCurrentHp: monsterMaxHp });
       startServerTurnTimer(roomId);
-    } catch (err) {
-      console.error("Ошибка при старте PvE боя:", err.message);
-    }
+    } catch (err) { console.error("Ошибка при старте PvE боя:", err.message); }
   });
 
-    // 🔥 СИНХРОНИЗАЦИЯ СЕРВЕРА: Жесткий и надежный прием ходов Арены и Леса
+  // ⚔️ ПРИЕМ ХОДОВ И ИНЛАЙН СЛУШАТЕЛИ КЛИКОВ ЗЕЛЬЯ
   socket.on('submit_turn', ({ roomId, attack, defends }) => {
-    const room = activeRooms[roomId];
-    if (!room) return;
-    
-    let activePlayer = null;
-    let opponent = null;
-
-    // Сверяем активный сокет с участниками комнаты
-    if (room.p1.socket && room.p1.socket.id === socket.id) {
-      activePlayer = room.p1; opponent = room.p2;
-    } else if (room.p2.socket && room.p2.socket.id === socket.id) {
-      activePlayer = room.p2; opponent = room.p1;
-    }
-
-    // Резервная привязка сокета при переподключении (F5)
+    const room = activeRooms[roomId]; if (!room) return;
+    let activePlayer = null; let opponent = null;
+    if (room.p1.socket && room.p1.socket.id === socket.id) { activePlayer = room.p1; opponent = room.p2; } 
+    else if (room.p2.socket && room.p2.socket.id === socket.id) { activePlayer = room.p2; opponent = room.p1; }
     if (!activePlayer) {
-      if (!room.p1.socket) {
-        room.p1.socket = socket; activePlayer = room.p1; opponent = room.p2;
-      } else if (!room.p2.isAi && !room.p2.socket) {
-        room.p2.socket = socket; activePlayer = room.p2; opponent = room.p1;
-      }
+      if (!room.p1.socket) { room.p1.socket = socket; activePlayer = room.p1; opponent = room.p2; } 
+      else if (!room.p2.isAi && !room.p2.socket) { room.p2.socket = socket; activePlayer = room.p2; opponent = room.p1; }
     }
-
-    // Если игрок уже ходил в этом раунде — игнорируем спам
     if (!activePlayer || activePlayer.turn) return; 
-
-    // Записываем ход строго в плоскую структуру, которую ждет расчет раунда
     activePlayer.turn = { action: null, attack: attack || null, defends: defends || [] };
-    console.log(`✅ Ход сервера зафиксирован для: ${activePlayer.data.name || 'Игрок'}. Зона: ${attack}`);
-
-    if (!room.p2.isAi && opponent && opponent.socket) {
-      opponent.socket.emit('opponent_submitted');
-    }
-
-    // Запускаем расчет, если обе стороны сделали выбор
-    if (room.p1.turn && (room.p2.isAi || room.p2.turn)) {
-      clearTimeout(room.timeoutRef);
-      executeRoundCalculations(roomId);
-    }
+    if (!room.p2.isAi && opponent && opponent.socket) opponent.socket.emit('opponent_submitted');
+    if (room.p1.turn && (room.p2.isAi || room.p2.turn)) { clearTimeout(room.timeoutRef); executeRoundCalculations(roomId); }
   });
 
-  // Мгновенное лечение банкой (ИСПРАВЛЕННОЕ И БЕЗОПАСНОЕ)
   socket.on('instant_use_potion', async ({ roomId }) => {
-    const room = activeRooms[roomId];
-    if (!room) return;
-    
+    const room = activeRooms[roomId]; if (!room) return;
     const isP1 = room.p1.socket && room.p1.socket.id === socket.id;
     const activePlayer = isP1 ? room.p1 : room.p2;
     const opponent = isP1 ? room.p2 : room.p1;
-    
     const potionId = activePlayer.data.equipped?.potion;
     const potionData = CONSUMABLE_DATABASE[potionId];
-
     if (potionData) {
-      // 1. Считаем новое здоровье строго на сервере
       const calculatedHp = Math.min(activePlayer.maxHp, activePlayer.currentHp + potionData.heal);
       activePlayer.currentHp = calculatedHp;
-      
-      // Стираем банку в памяти сервера
       if (activePlayer.data.equipped) activePlayer.data.equipped.potion = null;
-      
-      // 2. Отправляем пакеты обоим игрокам МГНОВЕННО, не дожидаясь ответа медленной базы данных!
-      // Это уберёт задержку интерфейса у игроков
-      if (activePlayer.socket) {
-        activePlayer.socket.emit('opponent_healed_instant', { 
-          oppHp: activePlayer.currentHp, 
-          logMsg: `🧪 Вы выпили зелье и восстановили ${potionData.heal} HP!` 
-        });
-      }
-      
-      if (!room.p2.isAi && opponent && opponent.socket) {
-        opponent.socket.emit('opponent_healed_instant', { 
-          oppHp: activePlayer.currentHp, 
-          logMsg: `🧪 Соперник ${activePlayer.data.name} выпил зелье и восстановил здоровье!` 
-        });
-      }
-
-      // 3. Асинхронно сохраняем в Supabase в фоновом режиме
-      sb.from('players')
-        .update({ hp: calculatedHp, equipped: activePlayer.data.equipped })
-        .eq('id', Number(activePlayer.data.id))
-        .then(({ error }) => {
-          if (error) console.error("❌ Ошибка фонового сохранения зелья:", error.message);
-          else console.log(`☁️ ХП после зелья успешно сохранено для игрока ${activePlayer.data.id}`);
-        });
+      if (activePlayer.socket) activePlayer.socket.emit('opponent_healed_instant', { oppHp: activePlayer.currentHp, logMsg: `🧪 Вы выпили зелье и восстановили ${potionData.heal} HP!` });
+      if (!room.p2.isAi && opponent && opponent.socket) opponent.socket.emit('opponent_healed_instant', { oppHp: activePlayer.currentHp, logMsg: `🧪 Соперник ${activePlayer.data.name} выпил зелье!` });
+      sb.from('players').update({ hp: calculatedHp, equipped: activePlayer.data.equipped }).eq('id', Number(activePlayer.data.id)).then(({ error }) => { if (error) console.error("❌ Ошибка банки:", error.message); });
     }
   });
 
@@ -342,13 +258,12 @@ io.on('connection', (socket) => {
     });
   });
 });
+
 // ============================================================================
 // ===== 🛡️ ИСПРАВЛЕННЫЙ СЕРВЕР RPG: ЧАСТЬ 3 — РАСЧЕТ РАУНДОВ И СУПАБЕЙС =====
 // ============================================================================
-
 function startServerTurnTimer(roomId) {
-  const room = activeRooms[roomId];
-  if (!room) return;
+  const room = activeRooms[roomId]; if (!room) return;
   room.timeoutRef = setTimeout(() => {
     if (!room.p1.turn) room.p1.turn = { action: null, attack: null, defends: [] };
     if (!room.p2.isAi && !room.p2.turn) room.p2.turn = { action: null, attack: null, defends: [] };
@@ -357,112 +272,77 @@ function startServerTurnTimer(roomId) {
 }
 
 function executeRoundCalculations(roomId) {
-  const room = activeRooms[roomId];
-  if (!room) return;
-
-  const logs = [];
-  const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  const room = activeRooms[roomId]; if (!room) return;
+  const logs = []; const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
   if (room.p2.isAi) {
     const zones = ["head", "breast", "torso", "belt", "legs"];
-    const mAttack = zones[rand(0, 4)];
-    const mDefend = [];
-    while (mDefend.length < 2) { 
-      const rz = zones[rand(0, 4)]; 
-      if (!mDefend.includes(rz)) mDefend.push(rz); 
-    }
+    const mAttack = zones[rand(0, 4)]; const mDefend = [];
+    while (mDefend.length < 2) { const rz = zones[rand(0, 4)]; if (!mDefend.includes(rz)) mDefend.push(rz); }
     room.p2.turn = { action: null, attack: mAttack, defends: mDefend };
   }
 
-  // Атака P1
+  // АТАКА И КРИТЫ ПЕРВОГО ИГРОКА (P1)
   if (!room.p1.turn || room.p1.turn.attack === null) {
     logs.push(`❌ ${room.p1.data.name} пропустил атаку!`);
   } else if (room.p2.turn.defends.includes(room.p1.turn.attack)) {
     logs.push(`🛡️ ${room.p2.data.name} заблокировал ваш удар в ${ZONE_NAMES[room.p1.turn.attack]}!`);
   } else {
-    let pCrit = Math.min(50, 5 + ((room.p1.data.stats?.luck || 10) * 0.5));
+    let pCrit = Math.min(50, 5 + (Number(room.p1.data.luck || 1) * 0.5));
     let isCrit = rand(1, 100) <= pCrit;
     let baseDmg = isCrit ? Math.floor(getServerAtk(room.p1.data) * 1.5) : getServerAtk(room.p1.data);
-    let targetDef = room.p2.isAi ? Math.floor((room.p2.data.stats?.endurance || 10) * 0.5) : getServerDef(room.p2.data);
-    let dmg = Math.max(1, baseDmg - targetDef); 
-    room.p2.currentHp -= dmg;
+    let targetDef = room.p2.isAi ? Math.floor(Number(room.p2.endurance || 1) * 0.5) : getServerDef(room.p2.data);
+    let dmg = Math.max(1, baseDmg - targetDef); room.p2.currentHp -= dmg;
     logs.push(`⚔️ ${room.p1.data.name} пробил ${ZONE_NAMES[room.p1.turn.attack]} на ${dmg} урона ${isCrit ? '💥 КРИТ!' : ''}`);
   }
 
-  // Атака P2
+  // АТАКА И КРИТЫ ВТОРОГО ИГРОКА ИЛИ МОНСТРА (P2)
   if (room.p2.currentHp > 0) {
     if (!room.p2.turn || room.p2.turn.attack === null) {
       logs.push(`❌ ${room.p2.data.name} пропустил атаку!`);
     } else if (room.p1.turn && room.p1.turn.defends.includes(room.p2.turn.attack)) {
       logs.push(`🛡️ Вы успешно заблокировали удар соперника в ${ZONE_NAMES[room.p2.turn.attack]}!`);
     } else {
-      let isCrit = false;
-      let baseDmg = 0;
-      
+      let isCrit = false; let baseDmg = 0;
       if (room.p2.isAi) {
-        let mCrit = Math.min(50, 5 + ((room.p2.data.stats?.luck || 8) * 0.5));
-        isCrit = rand(1, 100) <= mCrit;
-        baseDmg = isCrit ? Math.floor(Math.floor((room.p2.data.stats?.strength || 8) * 1.5) * 1.5) : Math.floor((room.p2.data.stats?.strength || 8) * 1.5);
+        let mCrit = Math.min(50, 5 + (Number(room.p2.luck || 1) * 0.5)); isCrit = rand(1, 100) <= mCrit;
+        baseDmg = isCrit ? Math.floor(Math.floor(Number(room.p2.strength || 1) * 1.5) * 1.5) : Math.floor(Number(room.p2.strength || 1) * 1.5);
       } else {
-        let pCrit = Math.min(50, 5 + ((room.p2.data.stats?.luck || 10) * 0.5));
-        isCrit = rand(1, 100) <= pCrit;
+        let pCrit = Math.min(50, 5 + (Number(room.p2.data.luck || 1) * 0.5)); isCrit = rand(1, 100) <= pCrit;
         baseDmg = isCrit ? Math.floor(getServerAtk(room.p2.data) * 1.5) : getServerAtk(room.p2.data);
       }
-
-      let playerDef = getServerDef(room.p1.data);
-      let dmg = Math.max(1, baseDmg - playerDef);
-      room.p1.currentHp -= dmg;
+      let playerDef = getServerDef(room.p1.data); let dmg = Math.max(1, baseDmg - playerDef); room.p1.currentHp -= dmg;
       logs.push(`🩸 ${room.p2.data.name} нанес вам ${dmg} урона в ${ZONE_NAMES[room.p2.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
     }
   }
 
-  // На сервере в конце расчетов раунда:
-  // Если где-то в расчетах урона получился NaN, сбрасываем в безопасное число
-  if (isNaN(room.p1.currentHp) || room.p1.currentHp === undefined || room.p1.currentHp === null) {
-    room.p1.currentHp = room.p1.maxHp;
-  }
-  if (isNaN(room.p2.currentHp) || room.p2.currentHp === undefined || room.p2.currentHp === null) {
-    room.p2.currentHp = room.p2.maxHp;
-  }
-
+  if (isNaN(room.p1.currentHp)) room.p1.currentHp = room.p1.maxHp;
+  if (isNaN(room.p2.currentHp)) room.p2.currentHp = room.p2.maxHp;
   if (room.p1.currentHp <= 0) room.p1.currentHp = 0;
   if (room.p2.currentHp <= 0) room.p2.currentHp = 0;
 
-  const currentRound = room.turnCount;
-  room.turnCount++;
-  room.p1.turn = null; room.p2.turn = null;
+  const currentRound = room.turnCount; room.turnCount++; room.p1.turn = null; room.p2.turn = null;
+  const isP1Dead = room.p1.currentHp <= 0; const isP2Dead = room.p2.currentHp <= 0;
 
-  const isP1Dead = room.p1.currentHp <= 0;
-  const isP2Dead = room.p2.currentHp <= 0;
-
- if (isP1Dead || isP2Dead || room.turnCount > 40) {
+  if (isP1Dead || isP2Dead || room.turnCount > 40) {
     let resultType = 'draw';
     if (room.p2.isAi) {
       if (!isP1Dead && isP2Dead) resultType = 'p1_win';
       if (isP1Dead && !isP2Dead) resultType = 'monster_win';
-      
-      if (room.p1.socket) {
-        room.p1.socket.emit('round_result', { myHp: room.p1.currentHp, enemyHp: room.p2.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: room.p1.data.gold + (resultType === 'p1_win' ? room.p2.data.rewardGold : 0), serverXp: room.p1.data.xp + (resultType === 'p1_win' ? room.p2.data.rewardXp : 0) });
-      }
+      if (room.p1.socket) room.p1.socket.emit('round_result', { myHp: room.p1.currentHp, enemyHp: room.p2.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: room.p1.data.gold + (resultType === 'p1_win' ? room.p2.data.rewardGold : 0), serverXp: room.p1.data.xp + (resultType === 'p1_win' ? room.p2.data.rewardXp : 0) });
       savePveResultsToSupabase(room.p1, room.p2, resultType);
     } else {
-      // PvP Финал
-      if (!isP1Dead && isP2Dead) resultType = 'p1_win';
-      if (isP1Dead && !isP2Dead) resultType = 'p2_win';
-      
+      if (!isP1Dead && isP2Dead) resultType = 'p1_win'; if (isP1Dead && !isP2Dead) resultType = 'p2_win';
       if (room.p1.socket) room.p1.socket.emit('round_result', { myHp: room.p1.currentHp, enemyHp: room.p2.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: room.p1.data.gold + (resultType === 'p1_win' ? 25 : 0), serverXp: room.p1.data.xp + (resultType === 'p1_win' ? 30 : 0) });
       if (room.p2.socket) room.p2.socket.emit('round_result', { myHp: room.p2.currentHp, enemyHp: room.p1.currentHp, logs, isOver: true, resultType, turnCount: currentRound, serverGold: room.p2.data.gold + (resultType === 'p2_win' ? 25 : 0), serverXp: room.p2.data.xp + (resultType === 'p2_win' ? 30 : 0) });
       saveBattleResultsToSupabase(room.p1, room.p2, resultType);
     }
-    
     if (room.p1.socket) room.p1.socket.leave(room.id);
     if (!room.p2.isAi && room.p2.socket) room.p2.socket.leave(room.id);
     delete activeRooms[roomId];
   } else {
-    // Живой раунд боя: шлем каждому сокету его ЛИЧНЫЕ MyHp и EnemyHp!
     if (room.p1.socket) room.p1.socket.emit('round_result', { myHp: room.p1.currentHp, enemyHp: room.p2.currentHp, logs, isOver: false, turnCount: currentRound });
     if (!room.p2.isAi && room.p2.socket) room.p2.socket.emit('round_result', { myHp: room.p2.currentHp, enemyHp: room.p1.currentHp, logs, isOver: false, turnCount: currentRound });
-    
     startServerTurnTimer(roomId);
   }
 }
