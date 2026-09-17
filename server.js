@@ -467,41 +467,79 @@ async function savePveResultsToSupabase(playerRoomObject, monster, resultType) {
     let newXp = resultType === 'p1_win' ? (playerRoomObject.data.xp + monster.data.rewardXp) : playerRoomObject.data.xp;
     let finalHp = resultType === 'p1_win' ? Math.max(0, playerRoomObject.currentHp) : Math.max(1, Math.floor(playerRoomObject.maxHp * 0.2)); 
     
-    // Считаем выносливость игрока
-    const totalEndurance = (playerRoomObject.data.stats?.endurance || 10) + getServerEquipmentBonus(playerRoomObject.data, 'endurance');
-    
-    // 🔥 НАДЕЖНЫЙ РАСЧЕТ ЛЕВЕЛАПА ПО ТАБЛИЦЕ КЛИЕНТА
+    // Высчитываем новый уровень по опыту
     let currentLevel = playerRoomObject.data.level || 1;
-    let currentStatPoints = playerRoomObject.data.statpoints || playerRoomObject.data.statPoints || 0;
-    
-    // Функция получения опыта для следующего уровня по нашей таблице
     const getXpLimit = (lvl) => {
       const nextLevel = lvl + 1;
-      if (nextLevel < SERVER_XP_TABLE.length) {
-        return SERVER_XP_TABLE[nextLevel];
-      }
-      return nextLevel * 1000; // Резервный расчет, если уровень ушел за пределы таблицы
+      if (nextLevel < SERVER_XP_TABLE.length) return SERVER_XP_TABLE[nextLevel];
+      return nextLevel * 1000;
     };
     
-    // Цикл левелапа
+    const startingLevel = currentLevel;
     while (newXp >= getXpLimit(currentLevel)) {
       currentLevel++;
-      currentStatPoints += 5;
-      if (resultType === 'p1_win') finalHp = (totalEndurance * 10); 
     }
 
-    // Сохраняем все обновленные параметры в Supabase
+    // Жестко считываем свободные очки из базы
+    let currentStatPoints = playerRoomObject.data.statpoints !== undefined ? Number(playerRoomObject.data.statpoints) : Number(playerRoomObject.data.statPoints || 0);
+
+    if (currentLevel > startingLevel) {
+      const levelsGained = currentLevel - startingLevel;
+      currentStatPoints += (levelsGained * 5); // +5 очков за каждый левелап
+    }
+
+    // ============================================================================
+    // 🛡️ АНТИЧИТ-БЛОК: ПРОВЕРКА НА НАКРУТКУ ХАРАКТЕРИСТИК (БАЗА СТАТОВ = 1)
+    // ============================================================================
+    let pStats = playerRoomObject.data.stats || { strength: 1, agility: 1, endurance: 1, intellect: 1, luck: 1 };
+    
+    // Гарантируем, что под капотом бэкенда нет NaN в статах
+    const str = Number(pStats.strength || 1);
+    const agi = Number(pStats.agility || 1);
+    const end = Number(pStats.endurance || 1);
+    const int = Number(pStats.intellect || 1);
+    const lck = Number(pStats.luck || 1);
+
+    // Считаем, сколько очков характеристик игрок УЖЕ распределил
+    // Вычитаем 5, так как теперь базовые статы равны 1 (1+1+1+1+1 = 5)
+    const distributedPoints = (str + agi + end + int + lck) - 5;
+    
+    // Высчитываем абсолютный максимум очков, который вообще доступен игроку на данном уровне
+    // Формула: Стартовые 5 очков + по 5 очков за каждый уровень после 1-го
+    const maxPossibleTotalPoints = 5 + ((currentLevel - 1) * 5);
+
+    // Сумма распределенных и свободных очков не должна превышать лимит
+    if (distributedPoints + currentStatPoints > maxPossibleTotalPoints) {
+      console.warn(`🚨 АНТИЧИТ: Обнаружена накрутка статов у игрока ID ${userId}! Сброс в легальные лимиты.`);
+      
+      // Наказываем читера: обнуляем распределенные статы до единиц, 
+      // а все легальные очки за его уровень возвращаем в свободные (statPoints)
+      pStats = { strength: 1, agility: 1, endurance: 1, intellect: 1, luck: 1 };
+      currentStatPoints = maxPossibleTotalPoints;
+    }
+    // ============================================================================
+
+    // Считаем итоговую выносливость для коррекции здоровья
+    const totalEndurance = end + getServerEquipmentBonus(playerRoomObject.data, 'endurance');
+    if (currentLevel > startingLevel && resultType === 'p1_win') {
+      finalHp = (totalEndurance * 10); // Полное лечение при честном левелапе
+    }
+
+    // Сохраняем проверенный и очищенный профиль в Supabase
     await sb.from('players').update({ 
       gold: newGold, 
       xp: newXp, 
       hp: finalHp, 
       level: currentLevel,
       statpoints: currentStatPoints, 
+      stats: pStats, // Перезаписываем проверенные характеристики
       equipped: playerRoomObject.data.equipped 
     }).eq('id', Number(userId));
     
-    console.log(`☁️ Итоги боя и левелап сохранены в Supabase для игрока ID ${userId}. Уровень: ${currentLevel}`);
-  } catch (err) { console.error("Ошибка Supabase PvE:", err.message); }
+    console.log(`☁️ Безопасный профиль сохранен в Supabase. Уровень: ${currentLevel}, Свободные очки: ${currentStatPoints}`);
+  } catch (err) { 
+    console.error("❌ Ошибка античита Supabase PvE:", err.message); 
+  }
 }
 
 async function saveBattleResultsToSupabase(winner, loser, resultType) {
