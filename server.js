@@ -395,8 +395,8 @@ function executeRoundCalculations(roomId) {
     room.p2.currentHp = room.p2.maxHp;
   }
 
-  if (room.p1.currentHp < 0) room.p1.currentHp = 0;
-  if (room.p2.currentHp < 0) room.p2.currentHp = 0;
+  if (room.p1.currentHp <= 0) room.p1.currentHp = 0;
+  if (room.p2.currentHp <= 0) room.p2.currentHp = 0;
 
   const currentRound = room.turnCount;
   room.turnCount++;
