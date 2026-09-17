@@ -77,22 +77,29 @@ function getServerEquipmentBonus(playerData, bonusKey) {
   return totalBonus;
 }
 
-function getServerAtk(playerData) {
-  const totalStrength = (playerData.stats?.strength || 10) + getServerEquipmentBonus(playerData, 'strength');
-  const baseAtk = Math.floor(2 + (totalStrength * 1.5));
-  const weaponAtk = getServerEquipmentBonus(playerData, 'atk');
-  return baseAtk + weaponAtk;
-}
-
+// 🔥 ОБНОВЛЕННЫЙ КАЛЬКУЛЯТОР ЗАЩИТЫ НА СЕРВЕРЕ (ПОД ПЛОСКИЕ КОЛОНКИ)
 function getServerDef(playerData) {
-  const totalEndurance = (playerData.stats?.endurance || 10) + getServerEquipmentBonus(playerData, 'endurance');
+  // Заменяем playerData.stats?.endurance на прямую переменную playerData.endurance
+  // Ставим базовую единицу на случай, если поле пришло пустым
+  const totalEndurance = Number(playerData.endurance !== undefined ? playerData.endurance : 1) + getServerEquipmentBonus(playerData, 'endurance');
   const baseDef = Math.floor(totalEndurance * 0.5); 
   const armorDef = getServerEquipmentBonus(playerData, 'def');
   return baseDef + armorDef;
 }
 
+// 🔥 ОБНОВЛЕННЫЙ КАЛЬКУЛЯТОР АТАКИ НА СЕРВЕРЕ (ПОД ПЛОСКИЕ КОЛОНКИ)
+function getServerAtk(playerData) {
+  // Заменяем playerData.stats?.strength на прямую переменную playerData.strength
+  const totalStrength = Number(playerData.strength !== undefined ? playerData.strength : 1) + getServerEquipmentBonus(playerData, 'strength');
+  const baseAtk = Math.floor(2 + (totalStrength * 1.5));
+  const weaponAtk = getServerEquipmentBonus(playerData, 'atk');
+  return baseAtk + weaponAtk;
+}
+
+// 🔥 ОБНОВЛЕННЫЙ КАЛЬКУЛЯТОР МАКСИМАЛЬНОГО ЗДОРОВЬЯ НА СЕРВЕРЕ (ПОД ПЛОСКИЕ КОЛОНКИ)
 function getServerMaxHp(playerData) {
-  const totalEndurance = (playerData.stats?.endurance || 10) + getServerEquipmentBonus(playerData, 'endurance');
+  // Заменяем playerData.stats?.endurance на прямую переменную playerData.endurance
+  const totalEndurance = Number(playerData.endurance !== undefined ? playerData.endurance : 1) + getServerEquipmentBonus(playerData, 'endurance');
   const armorHp = getServerEquipmentBonus(playerData, 'hp');
   return (totalEndurance * 10) + armorHp;
 }
@@ -489,32 +496,28 @@ async function savePveResultsToSupabase(playerRoomObject, monster, resultType) {
     }
 
     // ============================================================================
-    // 🛡️ АНТИЧИТ-БЛОК: ПРОВЕРКА НА НАКРУТКУ ХАРАКТЕРИСТИК (БАЗА СТАТОВ = 1)
+    // 🛡️ АНТИЧИТ-БЛОК: ПРОВЕРКА НА НАКРУТКУ (ПЕРЕПИСАНО ПОД ПЛОСКИЕ КОЛОНКИ БАЗЫ)
     // ============================================================================
-    let pStats = playerRoomObject.data.stats || { strength: 1, agility: 1, endurance: 1, intellect: 1, luck: 1 };
-    
-    // Гарантируем, что под капотом бэкенда нет NaN в статах
-    const str = Number(pStats.strength || 1);
-    const agi = Number(pStats.agility || 1);
-    const end = Number(pStats.endurance || 1);
-    const int = Number(pStats.intellect || 1);
-    const lck = Number(pStats.luck || 1);
+    // 🔥 ФИКС: Считываем характеристики напрямую из числовых полей, а не из объекта .stats!
+    let str = Number(playerRoomObject.data.strength !== undefined ? playerRoomObject.data.strength : 1);
+    let agi = Number(playerRoomObject.data.agility !== undefined ? playerRoomObject.data.agility : 1);
+    let end = Number(playerRoomObject.data.endurance !== undefined ? playerRoomObject.data.endurance : 1);
+    let int = Number(playerRoomObject.data.intellect !== undefined ? playerRoomObject.data.intellect : 1);
+    let lck = Number(playerRoomObject.data.luck !== undefined ? playerRoomObject.data.luck : 1);
 
     // Считаем, сколько очков характеристик игрок УЖЕ распределил
     // Вычитаем 5, так как теперь базовые статы равны 1 (1+1+1+1+1 = 5)
     const distributedPoints = (str + agi + end + int + lck) - 5;
     
     // Высчитываем абсолютный максимум очков, который вообще доступен игроку на данном уровне
-    // Формула: Стартовые 5 очков + по 5 очков за каждый уровень после 1-го
     const maxPossibleTotalPoints = 5 + ((currentLevel - 1) * 5);
 
     // Сумма распределенных и свободных очков не должна превышать лимит
     if (distributedPoints + currentStatPoints > maxPossibleTotalPoints) {
       console.warn(`🚨 АНТИЧИТ: Обнаружена накрутка статов у игрока ID ${userId}! Сброс в легальные лимиты.`);
       
-      // Наказываем читера: обнуляем распределенные статы до единиц, 
-      // а все легальные очки за его уровень возвращаем в свободные (statPoints)
-      pStats = { strength: 1, agility: 1, endurance: 1, intellect: 1, luck: 1 };
+      // Наказываем читера: обнуляем распределенные статы до единиц
+      str = 1; agi = 1; end = 1; int = 1; lck = 1;
       currentStatPoints = maxPossibleTotalPoints;
     }
     // ============================================================================
@@ -525,18 +528,25 @@ async function savePveResultsToSupabase(playerRoomObject, monster, resultType) {
       finalHp = (totalEndurance * 10); // Полное лечение при честном левелапе
     }
 
-    // Сохраняем проверенный и очищенный профиль в Supabase
+    // 🔥 ФИКС СОХРАНЕНИЯ: Теперь отправляем плоские независимые столбцы вместо stats: pStats!
     await sb.from('players').update({ 
       gold: newGold, 
       xp: newXp, 
       hp: finalHp, 
       level: currentLevel,
       statpoints: currentStatPoints, 
-      stats: pStats, // Перезаписываем проверенные характеристики
+      
+      // Пишем строго в новые числовые ячейки
+      strength: str,
+      agility: agi,
+      endurance: end,
+      intellect: int,
+      luck: lck,
+
       equipped: playerRoomObject.data.equipped 
     }).eq('id', Number(userId));
     
-    console.log(`☁️ Безопасный профиль сохранен в Supabase. Уровень: ${currentLevel}, Свободные очки: ${currentStatPoints}`);
+    console.log(`☁️ Безопасный плоский профиль сохранен в Supabase. Уровень: ${currentLevel}, Свободные очки: ${currentStatPoints}`);
   } catch (err) { 
     console.error("❌ Ошибка античита Supabase PvE:", err.message); 
   }
