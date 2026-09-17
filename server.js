@@ -109,13 +109,14 @@ function getServerMaxHp(playerData) {
 io.on('connection', (socket) => {
   console.log(`🔌 Игрок подключился к сокету: ${socket.id}`);
 
- // 🔄 УЛЬТИМАТИВНЫЙ ХЕНДЛЕР RECONNECT (ФИКС PvE ПОСЛЕ F5 И СТАРТА PvP)
+  // 🔄 ИСПРАВЛЕННЫЙ ХЕНДЛЕР RECONNECT (РАБОТАЕТ НА ТВОИХ РОДНЫХ ПАКЕТАХ КЛИЕНТА)
   socket.on('check_active_battle', ({ userId }) => {
     if (!userId) return;
     const uid = Number(userId);
 
     console.log(`🔍 Сервер проверяет активные сессии для игрока ID ${uid}...`);
 
+    // Безопасный поиск активной комнаты в памяти бэкенда
     const foundRoomId = Object.keys(activeRooms).find(roomId => {
       const room = activeRooms[roomId];
       if (!room || !room.p1) return false;
@@ -131,52 +132,48 @@ io.on('connection', (socket) => {
       const isP1 = Number(room.p1.data?.id || 0) === uid;
       socket.join(foundRoomId);
       
-      if (isP1) {
-        room.p1.socket = socket; // Перевязываем живой сокет игрока P1
+      // 🌲 Вариант А: Если это PvE бой в Лесу
+      if (room.p2.isAi) {
+        room.p1.socket = socket; // Перевязываем сокет вернувшегося игрока
         
-        // 🔥 ФИКС БАГА: Собираем безопасный плоский объект оппонента для Игрока 1
-        const oppData = room.p2.isAi ? {
-          name: room.p2.name || "Монстр",
-          icon: room.p2.icon || "👹"
-        } : {
-          name: room.p2.data?.name || "Игрок 2",
-          icon: "👤"
-        };
-
-        socket.emit('reconnect_battle_success', {
-          roomId: foundRoomId, 
-          isPve: !!room.p2.isAi, 
-          opponent: oppData, // Гарантируем наличие name и icon
-          myMaxHp: room.p1.maxHp, 
-          oppMaxHp: room.p2.maxHp, 
-          myCurrentHp: room.p1.currentHp, 
-          oppCurrentHp: room.p2.currentHp, 
-          turnCount: room.turnCount
+        // Отправляем твой родной клиентский пакет pve_battle_start!
+        socket.emit('pve_battle_start', {
+          roomId: foundRoomId,
+          monster: { 
+            name: room.p2.data?.name || room.p2.name, 
+            icon: room.p2.icon || '👹' 
+          },
+          myMaxHp: room.p1.maxHp,
+          monsterMaxHp: room.p2.maxHp,
+          monsterCurrentHp: room.p2.currentHp // Передаем текущее ХП монстра, чтобы бой не сбрасывался!
         });
-        console.log(`☁️ Игрок P1 (ID ${uid}) успешно возвращен в бой ${foundRoomId}`);
-      } else {
-        room.p2.socket = socket; // Перевязываем живой сокет игрока P2
-        
-        // 🔥 ФИКС БАГА: Собираем безопасный плоский объект оппонента для Игрока 2 (Всегда PvP)
-        const oppData = {
-          name: room.p1.data?.name || "Игрок 1",
-          icon: "👤"
-        };
-
-        socket.emit('reconnect_battle_success', {
-          roomId: foundRoomId, 
-          isPve: false, 
-          opponent: oppData, 
-          myMaxHp: room.p2.maxHp, 
-          oppMaxHp: room.p1.maxHp, 
-          myCurrentHp: room.p2.currentHp, 
-          oppCurrentHp: room.p1.currentHp, 
-          turnCount: room.turnCount
-        });
-        console.log(`☁️ Игрок P2 (ID ${uid}) успешно возвращен в бой ${foundRoomId}`);
+        console.log(`🌲 Сигнал pve_battle_start успешно отправлен для игрока ID ${uid}`);
+      } 
+      // 🏆 Вариант Б: Если это PvP бой на Арене
+      else {
+        if (isP1) {
+          room.p1.socket = socket;
+          socket.emit('battle_start', {
+            roomId: foundRoomId,
+            opponent: room.p2.data,
+            myMaxHp: room.p1.maxHp,
+            oppMaxHp: room.p2.maxHp,
+            oppCurrentHp: room.p2.currentHp // Передаем текущее ХП врага
+          });
+        } else {
+          room.p2.socket = socket;
+          socket.emit('battle_start', {
+            roomId: foundRoomId,
+            opponent: room.p1.data,
+            myMaxHp: room.p2.maxHp,
+            oppMaxHp: room.p1.maxHp,
+            oppCurrentHp: room.p1.currentHp // Передаем текущее ХП врага
+          });
+        }
+        console.log(`🏆 Сигнал battle_start успешно отправлен для игрока ID ${uid}`);
       }
     } else {
-      console.log(`📭 Активных боев в памяти сервера для ID ${uid} не найдено.`);
+      console.log(`📭 Активных боев в ОЗУ сервера для ID ${uid} не найдено.`);
     }
   });
 
