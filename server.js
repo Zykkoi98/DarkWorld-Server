@@ -279,27 +279,50 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Мгновенное лечение банкой
+  // Мгновенное лечение банкой (ИСПРАВЛЕННОЕ И БЕЗОПАСНОЕ)
   socket.on('instant_use_potion', async ({ roomId }) => {
     const room = activeRooms[roomId];
     if (!room) return;
+    
     const isP1 = room.p1.socket && room.p1.socket.id === socket.id;
     const activePlayer = isP1 ? room.p1 : room.p2;
+    const opponent = isP1 ? room.p2 : room.p1;
+    
     const potionId = activePlayer.data.equipped?.potion;
     const potionData = CONSUMABLE_DATABASE[potionId];
 
     if (potionData) {
-      activePlayer.currentHp = Math.min(activePlayer.maxHp, activePlayer.currentHp + potionData.heal);
+      // 1. Считаем новое здоровье строго на сервере
+      const calculatedHp = Math.min(activePlayer.maxHp, activePlayer.currentHp + potionData.heal);
+      activePlayer.currentHp = calculatedHp;
+      
+      // Стираем банку в памяти сервера
       if (activePlayer.data.equipped) activePlayer.data.equipped.potion = null;
       
-      await sb.from('players').update({ hp: activePlayer.currentHp, equipped: activePlayer.data.equipped }).eq('id', Number(activePlayer.data.id));
-
-      if (!room.p2.isAi) {
-        const opponent = isP1 ? room.p2 : room.p1;
-        if (opponent.socket) {
-          opponent.socket.emit('opponent_healed_instant', { oppHp: activePlayer.currentHp, logMsg: `🧪 Соперник ${activePlayer.data.name} выпил зелье и восстановил здоровье!` });
-        }
+      // 2. Отправляем пакеты обоим игрокам МГНОВЕННО, не дожидаясь ответа медленной базы данных!
+      // Это уберёт задержку интерфейса у игроков
+      if (activePlayer.socket) {
+        activePlayer.socket.emit('opponent_healed_instant', { 
+          oppHp: activePlayer.currentHp, 
+          logMsg: `🧪 Вы выпили зелье и восстановили ${potionData.heal} HP!` 
+        });
       }
+      
+      if (!room.p2.isAi && opponent && opponent.socket) {
+        opponent.socket.emit('opponent_healed_instant', { 
+          oppHp: activePlayer.currentHp, 
+          logMsg: `🧪 Соперник ${activePlayer.data.name} выпил зелье и восстановил здоровье!` 
+        });
+      }
+
+      // 3. Асинхронно сохраняем в Supabase в фоновом режиме
+      sb.from('players')
+        .update({ hp: calculatedHp, equipped: activePlayer.data.equipped })
+        .eq('id', Number(activePlayer.data.id))
+        .then(({ error }) => {
+          if (error) console.error("❌ Ошибка фонового сохранения зелья:", error.message);
+          else console.log(`☁️ ХП после зелья успешно сохранено для игрока ${activePlayer.data.id}`);
+        });
     }
   });
 
