@@ -248,18 +248,13 @@ io.on('connection', (socket) => {
 });
 
 function startServerTurnTimer(roomId) {
-  const room = activeRooms[roomId];
-  if (!room) return;
-
+  const room = activeRooms[roomId]; if (!room) return;
   room.timeoutRef = setTimeout(() => {
     room.teamA.forEach(f => {
       if (!f.isBot && !f.turn && f.currentHp > 0) {
-        const aliveEnemies = room.teamB.filter(e => e.currentHp > 0);
-        f.turn = {
-          targetUuid: aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null,
-          attack: null,
-          defends: []
-        };
+        const enemies = room.teamB.filter(e => e.currentHp > 0);
+        // Берем uuid первого живого врага
+        f.turn = { targetUuid: enemies.length > 0 ? enemies[0].uuid : null, attack: null, defends: [] };
       }
     });
     executeRoundCalculations(roomId);
@@ -364,35 +359,44 @@ function executeRoundCalculations(roomId) {
   }
 }
 
-// 💎 БЭКЕНД-РАСЧЕТ НАГРАД ИЗ LOOT_TABLE И ИХ СОХРАНЕНИЕ В SUPABASE
+// ============================================================================
+// ===== 💎 ИСПРАВЛЕННЫЙ РАСЧЕТ НАГРАД PvE (ФИКС МАССИВА ИГРОКОВ) =====
+// ============================================================================
 async function finalizePveBattle(room, result, logs, finalRound) {
-  const player = room.teamA[0];
-  let gainedXp = 0;
+  // 🔥 ФИКС: Извлекаем именно первого ЖИВОГО игрока из массива команды А!
+  const player = room.teamA[0]; 
+  
+  if (!player) {
+    console.error("🚨 КРИТИЧЕСКАЯ ОШИБКА: Игрок не найден в комнате боя!");
+    delete activeRooms[room.id];
+    return;
+  }
+
+  let gainedXp = 0; 
   let gainedGold = 0;
-  let textLootReport = [];
+  let textLootReport = []; 
   let droppedItems = [];
 
   if (result === 'win') {
     // 1. Собираем золото и опыт со всей пачки монстров
     room.teamB.forEach(monster => {
-      gainedXp += monster.rewardXp || 0;
+      gainedXp += monster.rewardXp || 0; 
       gainedGold += monster.rewardGold || 0;
-
-      // 2. Расчет шансов выпадения лута на сервере
+      
+      // Расчет шансов выпадения лута на сервере
       if (monster.lootTable && Array.isArray(monster.lootTable)) {
         monster.lootTable.forEach(loot => {
           if (Math.random() <= loot.chance) {
             const count = Math.floor(Math.random() * (loot.maxCount - loot.minCount + 1)) + loot.minCount;
-            droppedItems.push({ itemId: loot.itemId, count: count });
+            droppedItems.push({ itemId: loot.itemId, count });
           }
         });
       }
     });
 
-    player.gold += gainedGold;
+    player.gold += gainedGold; 
     player.xp += gainedXp;
-
-    // Расчет уровня и левелапа
+    
     let currentLevel = player.level;
     const getXpLimit = (lvl) => (lvl + 1 < SERVER_XP_TABLE.length) ? SERVER_XP_TABLE[lvl + 1] : (lvl + 1) * 1000;
     const startingLevel = currentLevel;
@@ -400,52 +404,57 @@ async function finalizePveBattle(room, result, logs, finalRound) {
 
     if (currentLevel > startingLevel) {
       const levelsGained = currentLevel - startingLevel;
-      player.statpoints += (levelsGained * 5);
+      player.statpoints += (levelsGained * 5); 
       player.currentHp = currentLevel * 10;
-      logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${currentLevel} уровня! Получено +${levelsGained * 5} очков.`);
+      logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Достигнут ${currentLevel} уровень! Получено +${levelsGained * 5} очков.`);
     }
     player.level = currentLevel;
 
-    // 3. Записываем выпавший лут в инвентарь игрока
     if (droppedItems.length > 0) {
       if (!player.inventory.resources) player.inventory.resources = [];
       droppedItems.forEach(drop => {
         const existing = player.inventory.resources.find(i => i.id === drop.itemId);
-        if (existing) {
-          existing.count = (existing.count || 1) + drop.count;
-        } else {
-          player.inventory.resources.push({ id: drop.itemId, count: drop.count });
-        }
+        if (existing) { existing.count = (existing.count || 1) + drop.count; } 
+        else { player.inventory.resources.push({ id: drop.itemId, count: drop.count }); }
         textLootReport.push(`${drop.itemId} x${drop.count}`);
       });
     }
 
-    logs.push(`🏁 <strong>ПОБЕДА!</strong> Вы заработали: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
+    logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
     if (textLootReport.length > 0) logs.push(`💎 <strong>Добыча:</strong> ${textLootReport.join(', ')}`);
   } else {
     player.currentHp = Math.max(1, Math.floor(player.maxHp * 0.2));
     logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе (20% HP).`);
   }
 
-  // 4. Синхронизируем итоговый измененный профиль с Supabase
+  // 2. Синхронизируем измененный профиль с Supabase
   try {
     await sb.from('players').update({
-      gold: player.gold, xp: player.xp, hp: player.currentHp,
-      level: player.level, statpoints: player.statpoints, inventory: player.inventory
+      gold: player.gold, 
+      xp: player.xp, 
+      hp: player.currentHp,
+      level: player.level, 
+      statpoints: player.statpoints, 
+      inventory: player.inventory
     }).eq('id', Number(player.id));
-    console.log(`☁️ Итоги массового боя зафиксированы в Supabase.`);
-  } catch (err) {
-    console.error("Ошибка сохранения Supabase:", err.message);
+    console.log(`☁️ Итоги массового PvE боя успешно сохранены в Supabase.`);
+  } catch (err) { 
+    console.error("Ошибка сохранения в Supabase:", err.message); 
   }
 
-  // 5. Отправляем финальный пакет раунда клиенту и закрываем комнату
+  // 3. Отправляем финальный пакет раунда клиенту и закрываем комнату
   if (player.socketId) {
     io.to(player.socketId).emit('round_result', {
-      turnCount: finalRound, logs: logs, isOver: true, resultType: result,
-      teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB)
+      turnCount: finalRound, 
+      logs, 
+      isOver: true, 
+      resultType: result,
+      teamA: sanitizeTeam(room.teamA), 
+      teamB: sanitizeTeam(room.teamB)
     });
     io.sockets.sockets.get(player.socketId)?.leave(room.id);
   }
+  
   delete activeRooms[room.id];
 }
 
