@@ -248,104 +248,63 @@ socket.on('save_game_secure', async ({ player }) => {
     console.error("❌ Сбой безопасного сохранения на сервере:", e);
   }
 });
+ // 🔥 Безопасное сохранение статов из буфера за один раз
+  socket.on('confirm_stat_distribution_secure', async ({ userId, distribution }) => {
+    console.log(`📥 Запрос статов от игрока ${userId}:`, distribution);
+    try {
+      const nUserId = Number(userId);
+      if (!distribution) return socket.emit('stat_distribution_error', 'Данные пусты.');
 
-// ============================================================================
-// 🛡️ БЕЗОПАСНОЕ ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ ВСЕХ РАСПРЕДЕЛЕННЫХ СТАТОВ ЗА РАЗ
-// ============================================================================
-socket.on('confirm_stat_distribution_secure', async ({ userId, distribution }) => {
-  try {
-    const nUserId = Number(userId);
-    if (!distribution) return socket.emit('error', 'Данные распределения пусты.');
+      const { data: dbPlayer, error: fetchErr } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+      if (fetchErr || !dbPlayer) return socket.emit('stat_distribution_error', 'Игрок не найден.');
 
-    // 1. Извлекаем чистые данные из базы данных
-    const { data: dbPlayer, error: fetchErr } = await sb
-      .from('players')
-      .select('*')
-      .eq('id', nUserId)
-      .maybeSingle();
-
-    if (fetchErr || !dbPlayer) return socket.emit('error', 'Персонаж не найден.');
-
-    const currentPoints = Number(dbPlayer.statpoints || 0);
-
-    // 2. Валидация присланного пакета
-    let totalSpent = 0;
-    const statsKeys = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
-    
-    for (const key of statsKeys) {
-      const spentInStat = Number(distribution[key] || 0);
-      if (spentInStat < 0) {
-        return socket.emit('error', '🚨 Обнаружена аномалия: отрицательное вложение!');
+      const currentPoints = Number(dbPlayer.statpoints || 0);
+      let totalSpent = 0;
+      const statsKeys = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
+      
+      for (const key of statsKeys) {
+        const spent = Number(distribution[key] || 0);
+        if (spent < 0) return socket.emit('stat_distribution_error', '🚨 Замечена отрицательная аномалия!');
+        totalSpent += spent;
       }
-      totalSpent += spentInStat;
+
+      if (totalSpent > currentPoints) return socket.emit('stat_distribution_error', '🛡️ Античит: Превышен лимит очков!');
+      if (totalSpent === 0) return socket.emit('stat_distribution_error', 'Вы ничего не вложили.');
+
+      const updatedStats = {
+        strength: Number(dbPlayer.strength ?? 1) + (Number(distribution.strength) || 0),
+        agility: Number(dbPlayer.agility ?? 1) + (Number(distribution.agility) || 0),
+        endurance: Number(dbPlayer.endurance ?? 1) + (Number(distribution.endurance) || 0),
+        intellect: Number(dbPlayer.intellect ?? 1) + (Number(distribution.intellect) || 0),
+        luck: Number(dbPlayer.luck ?? 1) + (Number(distribution.luck) || 0)
+      };
+
+      let newHp = Number(dbPlayer.hp);
+      const addedEnd = Number(distribution.endurance) || 0;
+      if (addedEnd > 0) newHp += (addedEnd * 10);
+
+      const { error: updateErr } = await sb.from('players').update({
+        strength: updatedStats.strength, agility: updatedStats.agility, endurance: updatedStats.endurance,
+        intellect: updatedStats.intellect, luck: updatedStats.luck, statpoints: currentPoints - totalSpent, hp: newHp
+      }).eq('id', nUserId);
+
+      if (updateErr) return socket.emit('stat_distribution_error', 'Не удалось обновить БД.');
+
+      const refreshedProfile = {
+        id: dbPlayer.id, name: dbPlayer.name, avatar: dbPlayer.avatar, level: Number(dbPlayer.level || 1),
+        gold: Number(dbPlayer.gold || 0), xp: Number(dbPlayer.xp || 0), hp: newHp, statPoints: currentPoints - totalSpent,
+        currentTownIndex: Number(dbPlayer.currenttownindex || 0), stats: updatedStats,
+        inventory: dbPlayer.inventory || { equipment: [], resources: [], consumables: [] },
+        equipped: dbPlayer.equipped || { rings: [null, null, null] }
+      };
+
+      socket.emit('load_game_success', { player: refreshedProfile });
+    } catch (err) {
+      console.error(err);
+      socket.emit('stat_distribution_error', 'Внутренняя ошибка сервера.');
     }
+  });
 
-    // 🔥 АНТИЧИТ: Проверяем, не пытается ли игрок потратить больше, чем у него есть в БД
-    if (totalSpent > currentPoints) {
-      return socket.emit('error', '🛡️ Попытка потратить больше очков, чем доступно!');
-    }
-
-    if (totalSpent === 0) {
-      return socket.emit('error', 'Вы не распределили ни одного очка.');
-    }
-
-    // 3. Рассчитываем новые характеристики
-    const updatedStats = {
-      strength: Number(dbPlayer.strength ?? 1) + (Number(distribution.strength) || 0),
-      agility: Number(dbPlayer.agility ?? 1) + (Number(distribution.agility) || 0),
-      endurance: Number(dbPlayer.endurance ?? 1) + (Number(distribution.endurance) || 0),
-      intellect: Number(dbPlayer.intellect ?? 1) + (Number(distribution.intellect) || 0),
-      luck: Number(dbPlayer.luck ?? 1) + (Number(distribution.luck) || 0)
-    };
-
-    const newStatPoints = currentPoints - totalSpent;
-
-    // Рассчитываем прибавку HP от вложенной Выносливости
-    let newHp = Number(dbPlayer.hp);
-    const addedEndurance = Number(distribution.endurance) || 0;
-    if (addedEndurance > 0) {
-      newHp += (addedEndurance * 10);
-    }
-
-    // 4. Записываем результаты в Supabase
-    const { error: updateErr } = await sb
-      .from('players')
-      .update({
-        strength: updatedStats.strength,
-        agility: updatedStats.agility,
-        endurance: updatedStats.endurance,
-        intellect: updatedStats.intellect,
-        luck: updatedStats.luck,
-        statpoints: newStatPoints,
-        hp: newHp
-      })
-      .eq('id', nUserId);
-
-    if (updateErr) return socket.emit('error', 'Не удалось сохранить характеристики.');
-
-    // 5. Возвращаем клиенту обновленный чистый профиль
-    const refreshedPlayerProfile = {
-      id: dbPlayer.id,
-      name: dbPlayer.name,
-      avatar: dbPlayer.avatar,
-      level: Number(dbPlayer.level || 1),
-      gold: Number(dbPlayer.gold || 0),
-      xp: Number(dbPlayer.xp || 0),
-      hp: newHp,
-      statPoints: newStatPoints,
-      currentTownIndex: Number(dbPlayer.currenttownindex || 0),
-      stats: updatedStats,
-      inventory: dbPlayer.inventory || { equipment: [], resources: [], consumables: [] },
-      equipped: dbPlayer.equipped || { rings: [null, null, null] }
-    };
-
-    socket.emit('load_game_success', { player: refreshedPlayerProfile });
-
-  } catch (err) {
-    console.error("❌ Ошибка распределения статов на сервере:", err);
-    socket.emit('error', 'Внутренняя ошибка сервера.');
-  }
-});
 
   // ============================================================================
   // 🏆 2. УПРАВЛЕНИЕ ЛОББИ АРЕНЫ ЧЕРЕЗ БЭКЕНД
