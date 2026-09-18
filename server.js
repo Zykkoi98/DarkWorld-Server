@@ -265,17 +265,35 @@ io.on('connection', (socket) => {
 });
 
 function startServerTurnTimer(roomId) {
-  const room = activeRooms[roomId]; if (!room) return;
+  const room = activeRooms[roomId]; 
+  if (!room) return;
+
+  // Очищаем старые ссылки, если они зависли
+  if (room.timeoutRef) clearTimeout(room.timeoutRef);
+
   room.timeoutRef = setTimeout(() => {
+    // Еще раз проверяем, жива ли комната (ее могли закрыть во время тика)
+    if (!activeRooms[roomId]) return;
+
     room.teamA.forEach(f => {
       if (!f.isBot && !f.turn && f.currentHp > 0) {
-        const enemies = room.teamB.filter(e => e.currentHp > 0);
-        // Берем uuid первого живого врага
-        f.turn = { targetUuid: enemies.length > 0 ? enemies[0].uuid : null, attack: null, defends: [] };
+        const aliveEnemies = room.teamB.filter(e => e.currentHp > 0);
+        
+        // 🔥 ЖЕСТКИЙ ФИКС: Берем uuid ПЕРВОГО [0] живого врага из массива!
+        const autoTargetUuid = aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null;
+        
+        f.turn = { 
+          targetUuid: autoTargetUuid, 
+          attack: null, // Пропуск атаки
+          defends: []   // Без блоков
+        };
+        console.log(`⏱️ Автотаймер: Игрок ${f.name} проспал ход. Выбрана автоцель: ${autoTargetUuid}`);
       }
     });
+    
+    // Запускаем вычисления раунда
     executeRoundCalculations(roomId);
-  }, 30000);
+  }, 30000); // 30 секунд на размышление
 }
 // ============================================================================
 // ===== ЧАСТЬ 3: РАСЧЕТ РАУНДОВ ПО ЛОВКОСТИ И ВЫДАЧА НАГРАД (ЛУТА) =====
