@@ -70,19 +70,42 @@ io.on('connection', (socket) => {
   console.log(`🔌 Боец подключился к сокету: ${socket.id}`);
 
   /**
-   * 🌲 ЗАПУСК PvE ПОЕДИНКА (СКАЧИВАНИЕ ДАННЫХ ИЗ SUPABASE)
+   * 🌲 ЗАПУСК PvE ПОЕДИНКА (С ФИКСОМ ЗАПРОСА МОНСТРА)
    */
   socket.on('search_pve_match', async ({ playerData, monsterKey, count }) => {
     try {
       const monsterCount = Math.min(5, Math.max(1, Number(count || 1)));
 
-      // 1. Точечно загружаем свежие характеристики монстра из нашей таблицы bots в Supabase
-      const { data: dbMonster, error: mErr } = await sb.from('bots').select('*').eq('id', monsterKey).single();
-      if (mErr || !dbMonster) return socket.emit('error', 'Монстр не найден в Supabase таблице bots!');
+      console.log(`📡 Сервер получил запрос на бой. Ищем монстра с ID: "${monsterKey}"...`);
+
+      // 🔥 ИСПРАВЛЕНИЕ: Используем .maybeSingle() вместо .single(), чтобы защитить сервер от падения
+      const { data: dbMonster, error: mErr } = await sb
+        .from('bots')
+        .select('*')
+        .eq('id', monsterKey)
+        .maybeSingle();
+
+      // Если Supabase вернул ошибку (например, неверные ключи доступа API в server.js)
+      if (mErr) {
+        console.error("🚨 Ошибка запроса к Supabase в таблице bots:", mErr);
+        return socket.emit('error', `Ошибка БД: ${mErr.message}`);
+      }
+
+      // Если монстр с таким ID физически не найден в таблице
+      if (!dbMonster) {
+        console.error(`❌ ВНИМАНИЕ: Монстр с ID "${monsterKey}" не найден в таблице public.bots!`);
+        return socket.emit('error', `Монстр "${monsterKey}" не существует в базе данных.`);
+      }
+
+      console.log(`✅ Монстр найден: ${dbMonster.name} [Lv. ${dbMonster.level}]. Формируем боевую комнату...`);
 
       // 2. Скачиваем актуальный профиль игрока из таблицы players
       const { data: dbPlayer, error: pErr } = await sb.from('players').select('*').eq('id', Number(playerData.id)).single();
-      if (pErr || !dbPlayer) return socket.emit('error', 'Критическая ошибка валидации вашего профиля.');
+      if (pErr || !dbPlayer) {
+        console.error("🚨 Ошибка загрузки профиля игрока из Supabase:", pErr);
+        return socket.emit('error', 'Ошибка валидации вашего профиля.');
+      }
+
 
       const roomId = `room_pve_${dbPlayer.id}_${Date.now()}`;
       const pMaxHp = dbPlayer.endurance * 10;
