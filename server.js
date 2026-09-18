@@ -72,6 +72,22 @@ function sanitizeTeam(team) {
 io.on('connection', (socket) => {
   console.log(`🔌 Боец подключился к сокету: ${socket.id}`);
 
+      /**
+   * 🔍 ПРЯМОЙ ОБРАТНЫЙ ВЫЗОВ ПРОВЕРКИ БОЯ ДЛЯ ВКЛАДКИ БОЯ
+   */
+  socket.on('check_active_battle_directly', ({ userId }, callback) => {
+    const sUserId = String(userId);
+    const activeRoomId = Object.keys(activeRooms).find(roomId => {
+      return activeRooms[roomId].teamA.some(fighter => String(fighter.id) === sUserId);
+    });
+    
+    // Если бой найден, возвращаем его ID прямо в коллбэк функции клиента
+    if (activeRoomId) {
+      callback({ activeRoomId: activeRoomId });
+    } else {
+      callback({ activeRoomId: null });
+    }
+  });
    /**
    * 🔄 СЛУШАТЕЛЬ ПЕРЕПОДКЛЮЧЕНИЯ ВО ВКЛАДКЕ БОЯ (ДЛЯ ОБОРВАННЫХ СЕССИЙ)
    */
