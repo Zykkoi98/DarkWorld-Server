@@ -11,10 +11,19 @@ const app = express();
 app.get('/', (req, res) => res.send('⚔️ Защищенный боевой сервер Dark World активен!'));
 
 const server = http.createServer(app);
+// 🔥 ИСПРАВЛЕННЫЙ БЛОК ИНИЦИАЛИЗАЦИИ СОКЕТОВ С ПОЛНЫМ КАНАЛОМ CORS
 const io = new Server(server, { 
   cors: { 
-    origin: ["https://github.io", "http://localhost:3000"],
-    methods: ["GET", "POST"]
+    // Разрешаем запросы со всех твоих адресов разработки и продакшена
+    origin: [
+      "https://Zykkoi98.github.io", 
+      "https://github.io", // Вариант с закрывающим слэшем
+      "http://localhost:3000",
+      "http://127.0.0.1:5500" // Локальный сервер VS Code Live Server на случай тестов
+    ],
+    methods: ["GET", "POST"],
+    allowedHeaders: ["my-custom-header"],
+    credentials: true // Важный флаг для правильного прохождения авторизации сокетов
   } 
 });
 
