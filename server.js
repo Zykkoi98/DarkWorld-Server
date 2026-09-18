@@ -72,17 +72,20 @@ function sanitizeTeam(team) {
 io.on('connection', (socket) => {
   console.log(`🔌 Боец подключился к сокету: ${socket.id}`);
 
-      /**
-   * 🔍 ПРЯМОЙ ОБРАТНЫЙ ВЫЗОВ ПРОВЕРКИ БОЯ ДЛЯ ВКЛАДКИ БОЯ
+  /**
+   * 🔍 МГНОВЕННЫЙ ПРЯМОЙ ОТВЕТ О СТАТУСЕ БОЯ ДЛЯ СТАРТОВОГО ЭКРАНА СИТИ
    */
   socket.on('check_active_battle_directly', ({ userId }, callback) => {
     const sUserId = String(userId);
+    
+    // Ищем в оперативной памяти сервера комнату, где этот игрок числится в команде А
     const activeRoomId = Object.keys(activeRooms).find(roomId => {
       return activeRooms[roomId].teamA.some(fighter => String(fighter.id) === sUserId);
     });
     
-    // Если бой найден, возвращаем его ID прямо в коллбэк функции клиента
     if (activeRoomId) {
+      console.log(`🔄 Экспресс-перехват: Игрок ID ${sUserId} обнаружен в активном бою ${activeRoomId}. Отправляем редирект.`);
+      // Вызываем функцию обратного вызова на клиенте и передаем ID комнаты
       callback({ activeRoomId: activeRoomId });
     } else {
       callback({ activeRoomId: null });
