@@ -28,6 +28,7 @@ const CONSUMABLE_DATABASE = {
 };
 
 const app = express();
+app.get('/', (req, res) => res.send('⚔️ Боевой сервер Dark World активен и работает!'));
 const server = http.createServer(app);
 const io = new Server(server, { 
   cors: { 
