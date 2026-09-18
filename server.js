@@ -89,48 +89,62 @@ io.on('connection', (socket) => {
       socket.emit('arena_redirect_to_battle', { roomId: activeRoomId });
     }
   });
-  /**
-   * 🌲 ЗАПУСК PvE ПОЕДИНКА (С ФИКСОМ ЗАПРОСА МОНСТРА)
-   */
+  // ============================================================================
+  // ===== 🌲 ОБНОВЛЕННЫЙ СЛУШАТЕЛЬ PvE С ХАРД-ЗАЩИТОЙ ОТ ДУБЛИРОВАНИЯ БОЕВ =====
+  // ============================================================================
   socket.on('search_pve_match', async ({ playerData, monsterKey, count }) => {
     try {
+      const sPlayerId = String(playerData.id);
+
+      // 1. 🔥 ХАРД-ЗАЩИТА: Ищем, нет ли у этого игрока УЖЕ ЗАПУЩЕННОГО боя в памяти ОЗУ сервера
+      const existingRoomId = Object.keys(activeRooms).find(rId => {
+        return activeRooms[rId].teamA.some(fighter => fighter.id === sPlayerId);
+      });
+
+      // 🛑 Если бой уже идет, ЖЕСТКО ЗАПРЕЩАЕМ создавать новый и просто возвращаем на арену!
+      if (existingRoomId) {
+        console.log(`⚠️ Игрок [ID: ${sPlayerId}] уже находится в бою ${existingRoomId}! Перехватываем дубликат.`);
+        
+        const existingRoom = activeRooms[existingRoomId];
+        
+        // Обновляем сокет игрока на актуальный (так как страница была перезагружена)
+        const pFighter = existingRoom.teamA.find(fighter => fighter.id === sPlayerId);
+        if (pFighter) {
+          pFighter.socketId = socket.id;
+        }
+
+        // Привязываем новый сокет перезагрузившейся страницы к старой сокет-комнате на сервере
+        socket.join(existingRoomId);
+
+        // Мгновенно возвращаем игроку данные его текущего незавершенного поединка
+        return socket.emit('battle_init_data', {
+          roomId: existingRoomId,
+          turnCount: existingRoom.turnCount,
+          myUuid: pFighter ? pFighter.uuid : `player_${sPlayerId}`,
+          teamA: sanitizeTeam(existingRoom.teamA),
+          teamB: sanitizeTeam(existingRoom.teamB)
+        });
+      }
+
+      // -------------------------------------------------------------------------
+      // 2. ЛОГИКА СОЗДАНИЯ НОВОГО БОЯ (сработает, только если игрок действительно свободен)
+      // -------------------------------------------------------------------------
       const monsterCount = Math.min(5, Math.max(1, Number(count || 1)));
+      console.log(`📡 Игрок ID ${sPlayerId} свободен. Ищем монстра с ID: "${monsterKey}" для новой комнаты...`);
 
-      console.log(`📡 Сервер получил запрос на бой. Ищем монстра с ID: "${monsterKey}"...`);
+      // Безопасный maybeSingle() защищает сервер от вылетов
+      const { data: dbMonster, error: mErr } = await sb.from('bots').select('*').eq('id', monsterKey).maybeSingle();
+      if (mErr) return socket.emit('error', `Ошибка базы bots: ${mErr.message}`);
+      if (!dbMonster) return socket.emit('error', `Монстр "${monsterKey}" не найден в Supabase!`);
 
-      // 🔥 ИСПРАВЛЕНИЕ: Используем .maybeSingle() вместо .single(), чтобы защитить сервер от падения
-      const { data: dbMonster, error: mErr } = await sb
-        .from('bots')
-        .select('*')
-        .eq('id', monsterKey)
-        .maybeSingle();
-
-      // Если Supabase вернул ошибку (например, неверные ключи доступа API в server.js)
-      if (mErr) {
-        console.error("🚨 Ошибка запроса к Supabase в таблице bots:", mErr);
-        return socket.emit('error', `Ошибка БД: ${mErr.message}`);
-      }
-
-      // Если монстр с таким ID физически не найден в таблице
-      if (!dbMonster) {
-        console.error(`❌ ВНИМАНИЕ: Монстр с ID "${monsterKey}" не найден в таблице public.bots!`);
-        return socket.emit('error', `Монстр "${monsterKey}" не существует в базе данных.`);
-      }
-
-      console.log(`✅ Монстр найден: ${dbMonster.name} [Lv. ${dbMonster.level}]. Формируем боевую комнату...`);
-
-      // 2. Скачиваем актуальный профиль игрока из таблицы players
+      // Скачиваем актуальный профиль игрока из таблицы players
       const { data: dbPlayer, error: pErr } = await sb.from('players').select('*').eq('id', Number(playerData.id)).single();
-      if (pErr || !dbPlayer) {
-        console.error("🚨 Ошибка загрузки профиля игрока из Supabase:", pErr);
-        return socket.emit('error', 'Ошибка валидации вашего профиля.');
-      }
-
+      if (pErr || !dbPlayer) return socket.emit('error', 'Ошибка загрузки профиля игрока из базы.');
 
       const roomId = `room_pve_${dbPlayer.id}_${Date.now()}`;
       const pMaxHp = dbPlayer.endurance * 10;
       
-      // Формируем Команду А (Игроки / Союзники)
+      // Формируем Команду А (Игрок)
       const teamA = [{
         uuid: `player_${dbPlayer.id}`,
         id: String(dbPlayer.id),
@@ -180,7 +194,7 @@ io.on('connection', (socket) => {
         });
       }
 
-      // Регистрируем боевую комнату в ОЗУ
+      // Регистрируем новую комнату боя в оперативной памяти бэкенда
       activeRooms[roomId] = {
         id: roomId,
         type: 'pve',
@@ -190,22 +204,25 @@ io.on('connection', (socket) => {
         timeoutRef: null
       };
 
+      // Подписываем текущий сокет на изолированную сокет-комнату
       socket.join(roomId);
       
-      // Отправляем пакет начальных данных на клиент боевой вкладки
+      // Отправляем стартовый пакет инициализации на клиент боевой вкладки
       socket.emit('battle_init_data', {
-        roomId,
+        roomId: roomId,
         turnCount: 1,
         myUuid: `player_${dbPlayer.id}`,
         teamA: sanitizeTeam(teamA),
         teamB: sanitizeTeam(teamB)
       });
 
+      // Запускаем 30-секундный автотаймер раунда
       startServerTurnTimer(roomId);
-      console.log(`🌲 Создан массовый PvE бой: ${roomId} (1 против ${monsterCount})`);
-
+      console.log(`🌲 [УСПЕХ] Новый массовый PvE бой ${roomId} успешно создан (1 против ${monsterCount}).`);
+      
     } catch (err) {
-      console.error("Ошибка старта массового PvE:", err.message);
+      console.error("🚨 КРИТИЧЕСКАЯ ОШИБКА НА СЕРВЕРЕ ПРИ СТАРТЕ PvE БОЯ:", err);
+      socket.emit('error', `Внутренняя ошибка сервера: ${err.message}`);
     }
   });
 
