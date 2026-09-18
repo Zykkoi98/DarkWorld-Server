@@ -72,6 +72,23 @@ function sanitizeTeam(team) {
 io.on('connection', (socket) => {
   console.log(`🔌 Боец подключился к сокету: ${socket.id}`);
 
+   /**
+   * 🔍 СЛУШАТЕЛЬ ПРОВЕРКИ АКТИВНОГО БОЯ ПРИ ПЕРЕЗАГРУЗКЕ ГОРОДА
+   */
+  socket.on('check_active_battle', ({ userId }) => {
+    const sUserId = String(userId);
+    
+    // Ищем в оперативной памяти комнату, где участвует этот игрок
+    const activeRoomId = Object.keys(activeRooms).find(roomId => {
+      return activeRooms[roomId].teamA.some(f => f.id === sUserId);
+    });
+
+    if (activeRoomId) {
+      console.log(`🔄 Игрок ID ${sUserId} вернулся в сеть. Возвращаем его в бой ${activeRoomId}`);
+      // Отправляем команду на клиент города перенаправить игрока обратно в battle.html
+      socket.emit('arena_redirect_to_battle', { roomId: activeRoomId });
+    }
+  });
   /**
    * 🌲 ЗАПУСК PvE ПОЕДИНКА (С ФИКСОМ ЗАПРОСА МОНСТРА)
    */
