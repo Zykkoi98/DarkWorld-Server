@@ -468,11 +468,8 @@ function executeRoundCalculations(roomId) {
 // ===== 💎 ИСПРАВЛЕННЫЙ РАСЧЕТ НАГРАД PvE (ФИКС МАССИВА ИГРОКОВ) =====
 // ============================================================================
 async function finalizePveBattle(room, result, logs, finalRound) {
-  // 🔥 ФИКС: Извлекаем именно первого ЖИВОГО игрока из массива команды А!
-  const player = room.teamA[0]; 
-  
+  const player = room.teamA[0]; // Извлекаем игрока из массива
   if (!player) {
-    console.error("🚨 КРИТИЧЕСКАЯ ОШИБКА: Игрок не найден в комнате боя!");
     delete activeRooms[room.id];
     return;
   }
@@ -482,13 +479,13 @@ async function finalizePveBattle(room, result, logs, finalRound) {
   let textLootReport = []; 
   let droppedItems = [];
 
+  // Сохраняем ХП, которое было на момент окончания боя, чтобы отправить клиенту честный ноль
+  const battleEndHp = player.currentHp; 
+
   if (result === 'win') {
-    // 1. Собираем золото и опыт со всей пачки монстров
     room.teamB.forEach(monster => {
       gainedXp += monster.rewardXp || 0; 
       gainedGold += monster.rewardGold || 0;
-      
-      // Расчет шансов выпадения лута на сервере
       if (monster.lootTable && Array.isArray(monster.lootTable)) {
         monster.lootTable.forEach(loot => {
           if (Math.random() <= loot.chance) {
@@ -527,27 +524,15 @@ async function finalizePveBattle(room, result, logs, finalRound) {
 
     logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
     if (textLootReport.length > 0) logs.push(`💎 <strong>Добыча:</strong> ${textLootReport.join(', ')}`);
-  } else {
-    player.currentHp = Math.max(1, Math.floor(player.maxHp * 0.2));
+  } 
+  // 💀 ЕСЛИ ИГРОК ПРОИГРАЛ:
+  else {
     logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе (20% HP).`);
+    // На самом сервере в ОЗУ комнаты ХП пока остается равным 0, чтобы клиент отрендерил смерть!
   }
 
-  // 2. Синхронизируем измененный профиль с Supabase
-  try {
-    await sb.from('players').update({
-      gold: player.gold, 
-      xp: player.xp, 
-      hp: player.currentHp,
-      level: player.level, 
-      statpoints: player.statpoints, 
-      inventory: player.inventory
-    }).eq('id', Number(player.id));
-    console.log(`☁️ Итоги массового PvE боя успешно сохранены в Supabase.`);
-  } catch (err) { 
-    console.error("Ошибка сохранения в Supabase:", err.message); 
-  }
-
-  // 3. Отправляем финальный пакет раунда клиенту и закрываем комнату
+  // 🔥 ЭТАП 1: Отправляем финальный пакет раунда клиенту ДО ТОГО, как изменим ХП для Supabase!
+  // В sanitizeTeam улетит player.currentHp, который равен 0 при проигрыше.
   if (player.socketId) {
     io.to(player.socketId).emit('round_result', {
       turnCount: finalRound, 
@@ -558,6 +543,26 @@ async function finalizePveBattle(room, result, logs, finalRound) {
       teamB: sanitizeTeam(room.teamB)
     });
     io.sockets.sockets.get(player.socketId)?.leave(room.id);
+  }
+
+  // 🔥 ЭТАП 2: Только ПОСЛЕ отправки пакета начисляем штрафное ХП воскрешения для записи в облако!
+  if (result !== 'win') {
+    player.currentHp = Math.max(1, Math.floor(player.maxHp * 0.2));
+  }
+
+  // Синхронизируем измененный профиль с базой данных Supabase
+  try {
+    await sb.from('players').update({
+      gold: player.gold, 
+      xp: player.xp, 
+      hp: player.currentHp, // В базу запишется воскрешенное ХП (например, 6)
+      level: player.level, 
+      statpoints: player.statpoints, 
+      inventory: player.inventory
+    }).eq('id', Number(player.id));
+    console.log(`☁️ Итоги PvE сохранены. Игрок воскрешен в бд с ХП: ${player.currentHp}`);
+  } catch (err) { 
+    console.error("Ошибка сохранения в Supabase:", err.message); 
   }
   
   delete activeRooms[room.id];
