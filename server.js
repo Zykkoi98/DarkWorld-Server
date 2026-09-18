@@ -62,8 +62,16 @@ function getServerMaxHp(fighter) {
 
 function sanitizeTeam(team) {
   return team.map(f => ({
-    uuid: f.uuid, name: f.name, icon: f.icon, level: f.level,
-    currentHp: f.currentHp, maxHp: f.maxHp, isBot: f.isBot, hasSubmitted: !!f.turn
+    uuid: f.uuid, 
+    name: f.name, 
+    icon: f.icon, 
+    level: f.level,
+    currentHp: f.currentHp, 
+    maxHp: f.maxHp, 
+    isBot: f.isBot, 
+    hasSubmitted: !!f.turn,
+    // 🔥 ФИКС: Прокидываем на клиент надетое снаряжение персонажа (зелья, свитки и т.д.)
+    equipped: f.equipped || null 
   }));
 }
 // ============================================================================
