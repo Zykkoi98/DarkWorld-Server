@@ -40,6 +40,9 @@ const io = new Server(server, {
 const SUPABASE_URL = "https://ylslpgujwgxtsabkzgbd.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsc2xwZ3Vqd2d4dHNhYmt6Z2JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzMDM3ODksImV4cCI6MjEwNDg3OTc4OX0.GKocc3hnVQVSYaOnm1QhHca54sBn8AsiN8mHo6J0ENY";
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+// 🔥 ВОТ ЭТОТ ЖЕЛЕЗНЫЙ БЛОК ХРАНИЛИЩА:
+let activeRooms = {}; 
+const ZONE_NAMES = { head: "Голову", breast: "Грудь", torso: "Торс", belt: "Пояс", legs: "Ноги" };
 
 // Функции расчета чистых боевых параметров на стороне сервера
 function getServerDef(fighter) {
