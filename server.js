@@ -225,45 +225,67 @@ io.on('connection', (socket) => {
     io.emit('arena_lobby_updated');
   });
 
-  // 3. Один игрок принял вызов другого (Нажата кнопка "В БОЙ")
-  socket.on('accept_arena_challenge', async ({ myId, opponentId, myMaxHp, oppMaxHp }) => {
+  // ============================================================================
+  // 🏆 ИСПРАВЛЕННЫЙ ХЕНДЛЕР АРЕНЫ: РАСЧЕТ ЗДОРОВЬЯ НА СТОРONE СЕРВЕРА
+  // ============================================================================
+  socket.on('accept_arena_challenge', async ({ myId, opponentId }) => { // <-- Убрали myMaxHp и oppMaxHp из аргументов
     try {
-      // 🔥 ФИКС: Сохраняем типы как строки, чтобы int8 из базы не округлялся в ОЗУ Node.js
       const roomOppId = String(opponentId);
       const roomMyId = String(myId);
 
-      // Скачиваем свежие профили обоих участников боя
+      // Скачиваем свежие, защищенные профили из Supabase
       const { data: p1Data } = await sb.from('players').select('*').eq('id', roomOppId).single();
       const { data: p2Data } = await sb.from('players').select('*').eq('id', roomMyId).single();
 
       if (!p1Data || !p2Data) {
-        console.log(`❌ Ошибка: Не найден игрок в базе. Запрашивали ID: ${roomOppId} и ${roomMyId}`);
-        return socket.emit('error', 'Боец не найден в базе данных.');
+        console.log(`❌ Ошибка: Не найден игрок в базе.`);
+        return socket.emit('error', 'Боевец не найден в базе данных.');
       }
 
       const roomId = `room_${roomOppId}_${roomMyId}_${Date.now()}`;
-      console.log(`⚔️ БОЙ НАЧАЛСЯ ИЗ ЛОББИ! Комната: ${roomId} [${p1Data.name} vs ${p2Data.name}]`);
 
       // Функция сборки быстрых плоских характеристик
       const buildFlatData = (p) => ({
-        id: String(p.id), // 🔥 ФИКС: Храним ID внутри ОЗУ боя как строку
+        id: String(p.id),
         name: p.name, gold: Number(p.gold || 0), xp: Number(p.xp || 0), level: Number(p.level || 1),
         statpoints: Number(p.statpoints !== undefined ? p.statpoints : 0), equipped: p.equipped || {},
-        strength: Number(p.strength || 1), agility: Number(p.agility || 1), endurance: Number(p.endurance || 1), intellect: Number(p.intellect || 1), luck: Number(p.luck || 1)
+        strength: Number(p.strength || 1), agility: Number(p.agility || 1), 
+        endurance: Number(p.endurance || 1), intellect: Number(p.intellect || 1), luck: Number(p.luck || 1)
       });
 
-      // Регистрируем боевую комнату в оперативной памяти сервера
+      const flatP1 = buildFlatData(p1Data);
+      const flatP2 = buildFlatData(p2Data);
+
+      // 🔥 ФИКС БЕЗОПАСНОСТИ: Высчитываем максимальное ХП на сервере на основе характеристик и брони из БД!
+      const realP1MaxHp = getServerMaxHp(flatP1);
+      const realP2MaxHp = getServerMaxHp(flatP2);
+
+      // Регистрируем боевую комнату в оперативной памяти сервера с железными статами
       activeRooms[roomId] = {
         id: roomId,
-        p1: { socket: null, data: buildFlatData(p1Data), currentHp: Number(p1Data.hp), maxHp: Number(oppMaxHp || 100), turn: null },
-        p2: { socket: socket, data: buildFlatData(p2Data), currentHp: Number(p2Data.hp), maxHp: Number(myMaxHp || 100), turn: null },
-        turnCount: 1, timeoutRef: null
+        // p1 — это opponent (тот, чей вызов приняли)
+        p1: { 
+          socket: null, 
+          data: flatP1, 
+          currentHp: Math.min(Number(p1Data.hp), realP1MaxHp), // Защита от переполнения текущего ХП
+          maxHp: realP1MaxHp, 
+          turn: null 
+        },
+        // p2 — это challenger (тот, кто нажал кнопку "В БОЙ")
+        p2: { 
+          socket: socket, 
+          data: flatP2, 
+          currentHp: Math.min(Number(p2Data.hp), realP2MaxHp), 
+          maxHp: realP2MaxHp, 
+          turn: null 
+        },
+        turnCount: 1, 
+        timeoutRef: null
       };
 
-      // Шлем массовый сигнал обновить доску
       io.emit('arena_lobby_updated');
 
-      // Даем команду обоим клиентам принудительно открыть экран боя! (Передаем СТРОКИ)
+      // Направляем игроков в бой
       io.emit('arena_redirect_to_battle', { opponentId: roomOppId, challengerId: roomMyId, roomId: roomId });
       
     } catch (err) {
