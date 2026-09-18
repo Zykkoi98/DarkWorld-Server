@@ -73,20 +73,54 @@ io.on('connection', (socket) => {
   console.log(`🔌 Боец подключился к сокету: ${socket.id}`);
 
    /**
-   * 🔍 СЛУШАТЕЛЬ ПРОВЕРКИ АКТИВНОГО БОЯ ПРИ ПЕРЕЗАГРУЗКЕ ГОРОДА
+   * 🔄 СЛУШАТЕЛЬ ПЕРЕПОДКЛЮЧЕНИЯ ВО ВКЛАДКЕ БОЯ (ДЛЯ ОБОРВАННЫХ СЕССИЙ)
+   */
+  socket.on('reconnect_to_battle', ({ roomId, userId }) => {
+    const room = activeRooms[roomId];
+    if (!room) {
+      return socket.emit('error', 'Срок действия боевой комнаты истек или бой уже завершился.');
+    }
+
+    const sUserId = String(userId);
+    const pFighter = room.teamA.find(f => String(f.id) === sUserId);
+
+    if (pFighter) {
+      console.log(`🔌 Боец ID ${sUserId} успешно восстановил сокет-соединение с комнатой ${roomId}`);
+      
+      // Привязываем новый сокет вкладки боя к текущей комнате
+      pFighter.socketId = socket.id;
+      socket.join(roomId);
+
+      // Мгновенно высылаем ему текущие ХП участников и лог, снимая шторку загрузки
+      socket.emit('battle_init_data', {
+        roomId: roomId,
+        turnCount: room.turnCount,
+        myUuid: pFighter.uuid,
+        teamA: sanitizeTeam(room.teamA),
+        teamB: sanitizeTeam(room.teamB)
+      });
+    } else {
+      socket.emit('error', 'Вы не являетесь участником этого поединка.');
+    }
+  });
+ /**
+  
+   * 🔍 ИСПРАВЛЕННЫЙ СЛУШАТЕЛЬ ПРОВЕРКИ АКТИВНОГО БОЯ (БЕЗ ОШИБОК ТИПОВ ДАННЫХ)
    */
   socket.on('check_active_battle', ({ userId }) => {
-    const sUserId = String(userId);
+    const sUserId = String(userId); // 🔥 Принудительно приводим ID из города к строке
     
-    // Ищем в оперативной памяти комнату, где участвует этот игрок
+    // Ищем в оперативной памяти комнату, где этот игрок находится в команде teamA
     const activeRoomId = Object.keys(activeRooms).find(roomId => {
-      return activeRooms[roomId].teamA.some(f => f.id === sUserId);
+      return activeRooms[roomId].teamA.some(fighter => String(fighter.id) === sUserId); // 🔥 Сверяем строго как строки!
     });
 
     if (activeRoomId) {
-      console.log(`🔄 Игрок ID ${sUserId} вернулся в сеть. Возвращаем его в бой ${activeRoomId}`);
-      // Отправляем команду на клиент города перенаправить игрока обратно в battle.html
+      console.log(`🔄 Восстановление сессии: Игрок ID ${sUserId} найден в бою ${activeRoomId}. Направляем на арену.`);
+      // Отправляем команду в город сделать принудительный редирект
       socket.emit('arena_redirect_to_battle', { roomId: activeRoomId });
+    } else {
+      console.log(`🔍 Восстановление сессии: Игрок ID ${sUserId} в активных боях не числится.`);
     }
   });
   // ============================================================================
