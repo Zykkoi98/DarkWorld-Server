@@ -195,33 +195,146 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('save_game_secure', async ({ player }) => {
-    if (!player || !player.id) return;
+// ============================================================================
+// 🛡️ ИСПРАВЛЕННОЕ БЕЗОПАСНОЕ СОХРАНЕНИЕ МИРНЫХ ДАННЫХ
+// ============================================================================
+socket.on('save_game_secure', async ({ player }) => {
+  if (!player || !player.id) return;
+  
+  const nUserId = Number(player.id);
+
+  try {
+    // 🔥 Защита: Сначала запрашиваем актуальные критические данные из БД, которым мы верим
+    const { data: dbPlayer, error: fetchErr } = await sb
+      .from('players')
+      .select('gold, xp, level, hp, strength, agility, endurance, intellect, luck, statpoints')
+      .eq('id', nUserId)
+      .maybeSingle();
+
+    if (fetchErr || !dbPlayer) {
+      console.error(`[SAVE ANOMALY] Игрок ${nUserId} не найден при попытке сохранения.`);
+      return;
+    }
+
+    // Собираем пакет для записи: критические статы берем ИЗ БАЗЫ, а рюкзак/куклу — от клиента
     const payload = {
-      id: Number(player.id),
+      id: nUserId,
       name: player.name,
       avatar: player.avatar || "assets/avatars/hero1.png",
-      level: Number(player.level || 1),
-      gold: Number(player.gold || 0),
-      hp: Number(player.hp || 10),
-      xp: Number(player.xp || 0),
-      strength: Number(player.stats?.strength ?? 1),
-      agility: Number(player.stats?.agility ?? 1),
-      endurance: Number(player.stats?.endurance ?? 1),
-      intellect: Number(player.stats?.intellect ?? 1),
-      luck: Number(player.stats?.luck ?? 1),
+      currenttownindex: Number(player.currentTownIndex ?? 0),
+      
+      // Данные инвентаря клиент отправлять может (сортировка, перекладывание)
       inventory: player.inventory,
       equipped: player.equipped,
-      currenttownindex: Number(player.currentTownIndex ?? 0),
-      statpoints: Number(player.statPoints ?? 0)
+
+      // 🛑 ЖЕСТКИЙ ИГНОР КЛИЕНТСКИХ НАКРУТОК: берем строго серверные значения из БД
+      gold: Number(dbPlayer.gold),
+      xp: Number(dbPlayer.xp),
+      level: Number(dbPlayer.level),
+      hp: Number(dbPlayer.hp),
+      strength: Number(dbPlayer.strength),
+      agility: Number(dbPlayer.agility),
+      endurance: Number(dbPlayer.endurance),
+      intellect: Number(dbPlayer.intellect),
+      luck: Number(dbPlayer.luck),
+      statpoints: Number(dbPlayer.statpoints)
     };
-    try {
-      const { error } = await sb.from('players').upsert(payload);
-      if (!error) socket.emit('save_game_success_confirmed');
-    } catch (e) {
-      console.error("❌ Сбой сохранения сервера:", e);
+
+    const { error: upsertErr } = await sb.from('players').upsert(payload);
+    if (!upsertErr) {
+      socket.emit('save_game_success_confirmed');
     }
-  });
+  } catch (e) {
+    console.error("❌ Сбой безопасного сохранения на сервере:", e);
+  }
+});
+
+// ============================================================================
+// 🛡️ НОВЫЙ ОБРАБОТЧИК: БЕЗОПАСНАЯ ПРОКАЧКА ХАРАКТЕРИСТИК НА СЕРВЕРЕ
+// ============================================================================
+socket.on('upgrade_stat_secure', async ({ userId, statName }) => {
+  try {
+    const nUserId = Number(userId);
+    const validStats = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
+    
+    if (!validStats.includes(statName)) {
+      return socket.emit('error', 'Неверное название характеристики.');
+    }
+
+    // 1. Берем данные игрока напрямую из базы
+    const { data: dbPlayer, error: fetchErr } = await sb
+      .from('players')
+      .select('*')
+      .eq('id', nUserId)
+      .maybeSingle();
+
+    if (fetchErr || !dbPlayer) return socket.emit('error', 'Персонаж не найден.');
+
+    // 2. Проверяем, есть ли вообще доступные очки характеристик
+    const currentPoints = Number(dbPlayer.statpoints || 0);
+    if (currentPoints <= 0) {
+      return socket.emit('error', 'У вас нет свободных очков характеристик!');
+    }
+
+    // 3. Рассчитываем новые значения характеристик
+    const updatedStats = {
+      strength: Number(dbPlayer.strength ?? 1),
+      agility: Number(dbPlayer.agility ?? 1),
+      endurance: Number(dbPlayer.endurance ?? 1),
+      intellect: Number(dbPlayer.intellect ?? 1),
+      luck: Number(dbPlayer.luck ?? 1)
+    };
+
+    // Добавляем стат и списываем одно очко
+    updatedStats[statName]++;
+    const newStatPoints = currentPoints - 1;
+
+    // Особая логика для выносливости (увеличение ХП)
+    let newHp = Number(dbPlayer.hp);
+    if (statName === 'endurance') {
+      newHp += 10; 
+    }
+
+    // 4. Записываем строго обновленные параметры обратно в Supabase
+    const { error: updateErr } = await sb
+      .from('players')
+      .update({
+        strength: updatedStats.strength,
+        agility: updatedStats.agility,
+        endurance: updatedStats.endurance,
+        intellect: updatedStats.intellect,
+        luck: updatedStats.luck,
+        statpoints: newStatPoints,
+        hp: newHp
+      })
+      .eq('id', nUserId);
+
+    if (updateErr) return socket.emit('error', 'Не удалось обновить характеристики в БД.');
+
+    // 5. Отправляем клиенту команду «Перезагрузи профиль с актуальными статами из облака»
+    // Для этого просто вызываем уже готовую у тебя процедуру успешной загрузки
+    const refreshedPlayerProfile = {
+      id: dbPlayer.id,
+      name: dbPlayer.name,
+      avatar: dbPlayer.avatar,
+      level: Number(dbPlayer.level || 1),
+      gold: Number(dbPlayer.gold || 0),
+      xp: Number(dbPlayer.xp || 0),
+      hp: newHp,
+      statPoints: newStatPoints,
+      currentTownIndex: Number(dbPlayer.currenttownindex || 0),
+      stats: updatedStats,
+      inventory: dbPlayer.inventory || { equipment: [], resources: [], consumables: [] },
+      equipped: dbPlayer.equipped || { rings: [null, null, null] }
+    };
+
+    socket.emit('load_game_success', { player: refreshedPlayerProfile });
+
+  } catch (err) {
+    console.error("❌ Ошибка прокачки стата на бэкенде:", err);
+    socket.emit('error', 'Внутренняя ошибка сервера при прокачке.');
+  }
+});
 
   // ============================================================================
   // 🏆 2. УПРАВЛЕНИЕ ЛОББИ АРЕНЫ ЧЕРЕЗ БЭКЕНД
