@@ -250,18 +250,14 @@ socket.on('save_game_secure', async ({ player }) => {
 });
 
 // ============================================================================
-// 🛡️ НОВЫЙ ОБРАБОТЧИК: БЕЗОПАСНАЯ ПРОКАЧКА ХАРАКТЕРИСТИК НА СЕРВЕРЕ
+// 🛡️ БЕЗОПАСНОЕ ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ ВСЕХ РАСПРЕДЕЛЕННЫХ СТАТОВ ЗА РАЗ
 // ============================================================================
-socket.on('upgrade_stat_secure', async ({ userId, statName }) => {
+socket.on('confirm_stat_distribution_secure', async ({ userId, distribution }) => {
   try {
     const nUserId = Number(userId);
-    const validStats = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
-    
-    if (!validStats.includes(statName)) {
-      return socket.emit('error', 'Неверное название характеристики.');
-    }
+    if (!distribution) return socket.emit('error', 'Данные распределения пусты.');
 
-    // 1. Берем данные игрока напрямую из базы
+    // 1. Извлекаем чистые данные из базы данных
     const { data: dbPlayer, error: fetchErr } = await sb
       .from('players')
       .select('*')
@@ -270,32 +266,48 @@ socket.on('upgrade_stat_secure', async ({ userId, statName }) => {
 
     if (fetchErr || !dbPlayer) return socket.emit('error', 'Персонаж не найден.');
 
-    // 2. Проверяем, есть ли вообще доступные очки характеристик
     const currentPoints = Number(dbPlayer.statpoints || 0);
-    if (currentPoints <= 0) {
-      return socket.emit('error', 'У вас нет свободных очков характеристик!');
+
+    // 2. Валидация присланного пакета
+    let totalSpent = 0;
+    const statsKeys = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
+    
+    for (const key of statsKeys) {
+      const spentInStat = Number(distribution[key] || 0);
+      if (spentInStat < 0) {
+        return socket.emit('error', '🚨 Обнаружена аномалия: отрицательное вложение!');
+      }
+      totalSpent += spentInStat;
     }
 
-    // 3. Рассчитываем новые значения характеристик
+    // 🔥 АНТИЧИТ: Проверяем, не пытается ли игрок потратить больше, чем у него есть в БД
+    if (totalSpent > currentPoints) {
+      return socket.emit('error', '🛡️ Попытка потратить больше очков, чем доступно!');
+    }
+
+    if (totalSpent === 0) {
+      return socket.emit('error', 'Вы не распределили ни одного очка.');
+    }
+
+    // 3. Рассчитываем новые характеристики
     const updatedStats = {
-      strength: Number(dbPlayer.strength ?? 1),
-      agility: Number(dbPlayer.agility ?? 1),
-      endurance: Number(dbPlayer.endurance ?? 1),
-      intellect: Number(dbPlayer.intellect ?? 1),
-      luck: Number(dbPlayer.luck ?? 1)
+      strength: Number(dbPlayer.strength ?? 1) + (Number(distribution.strength) || 0),
+      agility: Number(dbPlayer.agility ?? 1) + (Number(distribution.agility) || 0),
+      endurance: Number(dbPlayer.endurance ?? 1) + (Number(distribution.endurance) || 0),
+      intellect: Number(dbPlayer.intellect ?? 1) + (Number(distribution.intellect) || 0),
+      luck: Number(dbPlayer.luck ?? 1) + (Number(distribution.luck) || 0)
     };
 
-    // Добавляем стат и списываем одно очко
-    updatedStats[statName]++;
-    const newStatPoints = currentPoints - 1;
+    const newStatPoints = currentPoints - totalSpent;
 
-    // Особая логика для выносливости (увеличение ХП)
+    // Рассчитываем прибавку HP от вложенной Выносливости
     let newHp = Number(dbPlayer.hp);
-    if (statName === 'endurance') {
-      newHp += 10; 
+    const addedEndurance = Number(distribution.endurance) || 0;
+    if (addedEndurance > 0) {
+      newHp += (addedEndurance * 10);
     }
 
-    // 4. Записываем строго обновленные параметры обратно в Supabase
+    // 4. Записываем результаты в Supabase
     const { error: updateErr } = await sb
       .from('players')
       .update({
@@ -309,10 +321,9 @@ socket.on('upgrade_stat_secure', async ({ userId, statName }) => {
       })
       .eq('id', nUserId);
 
-    if (updateErr) return socket.emit('error', 'Не удалось обновить характеристики в БД.');
+    if (updateErr) return socket.emit('error', 'Не удалось сохранить характеристики.');
 
-    // 5. Отправляем клиенту команду «Перезагрузи профиль с актуальными статами из облака»
-    // Для этого просто вызываем уже готовую у тебя процедуру успешной загрузки
+    // 5. Возвращаем клиенту обновленный чистый профиль
     const refreshedPlayerProfile = {
       id: dbPlayer.id,
       name: dbPlayer.name,
@@ -331,8 +342,8 @@ socket.on('upgrade_stat_secure', async ({ userId, statName }) => {
     socket.emit('load_game_success', { player: refreshedPlayerProfile });
 
   } catch (err) {
-    console.error("❌ Ошибка прокачки стата на бэкенде:", err);
-    socket.emit('error', 'Внутренняя ошибка сервера при прокачке.');
+    console.error("❌ Ошибка распределения статов на сервере:", err);
+    socket.emit('error', 'Внутренняя ошибка сервера.');
   }
 });
 
