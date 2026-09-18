@@ -249,7 +249,7 @@ socket.on('save_game_secure', async ({ player }) => {
   }
 });
  // 🔥 Безопасное сохранение статов из буфера за один раз
-  socket.on('confirm_stat_distribution_secure', async ({ userId, distribution }) => {
+ socket.on('confirm_stat_distribution_secure', async ({ userId, distribution }) => {
     console.log(`📥 Запрос статов от игрока ${userId}:`, distribution);
     try {
       const nUserId = Number(userId);
@@ -258,49 +258,75 @@ socket.on('save_game_secure', async ({ player }) => {
       const { data: dbPlayer, error: fetchErr } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
       if (fetchErr || !dbPlayer) return socket.emit('stat_distribution_error', 'Игрок не найден.');
 
-      const currentPoints = Number(dbPlayer.statpoints || 0);
+      // 🔍 СТРАХОВКА НАЗВАНИЙ КЛОНОК: Проверяем оба регистра (маленькие и большие буквы из Supabase)
+      const getDBStat = (key) => Number(dbPlayer[key] ?? dbPlayer[key.toLowerCase()] ?? dbPlayer[key.charAt(0).toUpperCase() + key.slice(1)] ?? 1);
+      const currentPoints = Number(dbPlayer.statpoints ?? dbPlayer.statPoints ?? 0);
+
       let totalSpent = 0;
       const statsKeys = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
-      
       for (const key of statsKeys) {
         const spent = Number(distribution[key] || 0);
-        if (spent < 0) return socket.emit('stat_distribution_error', '🚨 Замечена отрицательная аномалия!');
+        if (spent < 0) return socket.emit('stat_distribution_error', '🚨 Отрицательное вложение!');
         totalSpent += spent;
       }
 
-      if (totalSpent > currentPoints) return socket.emit('stat_distribution_error', '🛡️ Античит: Превышен лимит очков!');
+      if (totalSpent > currentPoints) return socket.emit('stat_distribution_error', `Превышен лимит! Доступно: ${currentPoints}, пришло: ${totalSpent}`);
       if (totalSpent === 0) return socket.emit('stat_distribution_error', 'Вы ничего не вложили.');
 
-      const updatedStats = {
-        strength: Number(dbPlayer.strength ?? 1) + (Number(distribution.strength) || 0),
-        agility: Number(dbPlayer.agility ?? 1) + (Number(distribution.agility) || 0),
-        endurance: Number(dbPlayer.endurance ?? 1) + (Number(distribution.endurance) || 0),
-        intellect: Number(dbPlayer.intellect ?? 1) + (Number(distribution.intellect) || 0),
-        luck: Number(dbPlayer.luck ?? 1) + (Number(distribution.luck) || 0)
+      // Формируем объект для обновления с учетом регистра колонок в твоей таблице
+      const updatePayload = {
+        statpoints: currentPoints - totalSpent
       };
 
-      let newHp = Number(dbPlayer.hp);
+      // Динамически смотрим, какое имя колонки используется в твоей базе данных
+      statsKeys.forEach(key => {
+        let finalKey = key;
+        if (dbPlayer[key] !== undefined) finalKey = key;
+        else if (dbPlayer[key.toLowerCase()] !== undefined) finalKey = key.toLowerCase();
+        else if (dbPlayer[key.charAt(0).toUpperCase() + key.slice(1)] !== undefined) finalKey = key.charAt(0).toUpperCase() + key.slice(1);
+        
+        updatePayload[finalKey] = getDBStat(key) + (Number(distribution[key]) || 0);
+      });
+
+      // Расчет ХП
+      let newHp = Number(dbPlayer.hp ?? dbPlayer.HP ?? 10);
       const addedEnd = Number(distribution.endurance) || 0;
-      if (addedEnd > 0) newHp += (addedEnd * 10);
+      if (addedEnd > 0) {
+        let hpKey = dbPlayer.hp !== undefined ? 'hp' : (dbPlayer.HP !== undefined ? 'HP' : 'hp');
+        updatePayload[hpKey] = newHp + (addedEnd * 10);
+      }
 
-      const { error: updateErr } = await sb.from('players').update({
-        strength: updatedStats.strength, agility: updatedStats.agility, endurance: updatedStats.endurance,
-        intellect: updatedStats.intellect, luck: updatedStats.luck, statpoints: currentPoints - totalSpent, hp: newHp
-      }).eq('id', nUserId);
+      console.log(`📤 Отправка апдейта в Supabase для ${nUserId}:`, updatePayload);
 
-      if (updateErr) return socket.emit('stat_distribution_error', 'Не удалось обновить БД.');
+      const { error: updateErr } = await sb.from('players').update(updatePayload).eq('id', nUserId);
+      if (updateErr) {
+        console.error("❌ Ошибка Supabase при апдейте статов:", updateErr);
+        return socket.emit('stat_distribution_error', `Ошибка БД: ${updateErr.message}`);
+      }
+
+      // Перезапрашиваем профиль, чтобы вернуть клиенту 100% чистый эталонный объект
+      const { data: finalPlayer } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
 
       const refreshedProfile = {
-        id: dbPlayer.id, name: dbPlayer.name, avatar: dbPlayer.avatar, level: Number(dbPlayer.level || 1),
-        gold: Number(dbPlayer.gold || 0), xp: Number(dbPlayer.xp || 0), hp: newHp, statPoints: currentPoints - totalSpent,
-        currentTownIndex: Number(dbPlayer.currenttownindex || 0), stats: updatedStats,
-        inventory: dbPlayer.inventory || { equipment: [], resources: [], consumables: [] },
-        equipped: dbPlayer.equipped || { rings: [null, null, null] }
+        id: finalPlayer.id, name: finalPlayer.name, avatar: finalPlayer.avatar, level: Number(finalPlayer.level || 1),
+        gold: Number(finalPlayer.gold || 0), xp: Number(finalPlayer.xp || 0), 
+        hp: Number(finalPlayer.hp ?? finalPlayer.HP ?? 10), 
+        statPoints: Number(finalPlayer.statpoints ?? finalPlayer.statPoints ?? 0),
+        currentTownIndex: Number(finalPlayer.currenttownindex ?? finalPlayer.currentTownIndex ?? 0),
+        stats: {
+          strength: Number(finalPlayer.strength ?? finalPlayer.Strength ?? 1),
+          agility: Number(finalPlayer.agility ?? finalPlayer.Agility ?? 1),
+          endurance: Number(finalPlayer.endurance ?? finalPlayer.Endurance ?? 1),
+          intellect: Number(finalPlayer.intellect ?? finalPlayer.Intellect ?? 1),
+          luck: Number(finalPlayer.luck ?? finalPlayer.Luck ?? 1)
+        },
+        inventory: finalPlayer.inventory || { equipment: [], resources: [], consumables: [] },
+        equipped: finalPlayer.equipped || { rings: [null, null, null] }
       };
 
       socket.emit('load_game_success', { player: refreshedProfile });
     } catch (err) {
-      console.error(err);
+      console.error("❌ Критическая ошибка метода статов:", err);
       socket.emit('stat_distribution_error', 'Внутренняя ошибка сервера.');
     }
   });
