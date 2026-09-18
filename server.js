@@ -515,7 +515,8 @@ async function finalizePveBattle(room, result, logs, finalRound) {
     if (currentLevel > startingLevel) {
       const levelsGained = currentLevel - startingLevel;
       player.statpoints += (levelsGained * 5); 
-      player.currentHp = currentLevel * 10;
+      const pMaxHp = Number(player.endurance || 1) * 10;
+      player.currentHp = pMaxHp;
       logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Достигнут ${currentLevel} уровень! Получено +${levelsGained * 5} очков.`);
     }
     player.level = currentLevel;
