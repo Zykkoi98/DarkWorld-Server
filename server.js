@@ -16,7 +16,7 @@ const io = new Server(server, {
   cors: { 
     // Разрешаем запросы со всех твоих адресов разработки и продакшена
     origin: [
-      "https://Zykkoi98.github.io", 
+      "https://zykkoi98.github.io", 
       "https://github.io", // Вариант с закрывающим слэшем
       "http://localhost:3000",
       "http://127.0.0.1:5500" // Локальный сервер VS Code Live Server на случай тестов
