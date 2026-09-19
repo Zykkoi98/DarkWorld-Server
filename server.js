@@ -48,6 +48,16 @@ const SERVER_XP_TABLE = [
   5570,   // Чтобы получить 9 лвл, нужно ВСЕГО набрать 5570 XP
   9570,   // Чтобы получить 10 лвл, нужно ВСЕГО набрать 9570 XP
 ];
+// Серверный расчет правильного уровня на основе текущего опыта
+function getServerCorrectLevelByXp(xp) {
+  // Идем с конца таблицы опыта к началу
+  for (let lvl = SERVER_XP_TABLE.length - 1; lvl >= 1; lvl--) {
+    if (xp >= SERVER_XP_TABLE[lvl]) {
+      return lvl; 
+    }
+  }
+  return 1;
+}
 const ZONE_NAMES = { head: "Голову", breast: "Грудь", torso: "Торс", belt: "Пояс", legs: "Ноги" };
 const CONSUMABLE_DATABASE = {
   'hp_potion_small': { name: 'Малое зелье HP', heal: 25 },
@@ -248,8 +258,8 @@ socket.on('save_game_secure', async ({ player }) => {
     console.error("❌ Сбой безопасного сохранения на сервере:", e);
   }
 });
- // 🔥 Безопасное сохранение статов из буфера за один раз
- socket.on('confirm_stat_distribution_secure', async ({ userId, distribution }) => {
+   // 🔥 Безопасное сохранение статов из буфера с автоматической корректировкой уровня по опыту
+  socket.on('confirm_stat_distribution_secure', async ({ userId, distribution }) => {
     console.log(`📥 Запрос статов от игрока ${userId}:`, distribution);
     try {
       const nUserId = Number(userId);
@@ -258,8 +268,15 @@ socket.on('save_game_secure', async ({ player }) => {
       const { data: dbPlayer, error: fetchErr } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
       if (fetchErr || !dbPlayer) return socket.emit('stat_distribution_error', 'Игрок не найден.');
 
-      // 🔍 СТРАХОВКА НАЗВАНИЙ КЛОНОК: Проверяем оба регистра (маленькие и большие буквы из Supabase)
+      // 🔍 СТРАХОВКА НАЗВАНИЙ КОЛОНОК: Проверяем оба регистра
       const getDBStat = (key) => Number(dbPlayer[key] ?? dbPlayer[key.toLowerCase()] ?? dbPlayer[key.charAt(0).toUpperCase() + key.slice(1)] ?? 1);
+      
+      // 📊 ФИКС УРОВНЯ: Вычисляем правильный уровень на основе опыта прямо из БД
+      const currentXp = Number(dbPlayer.xp ?? dbPlayer.XP ?? 0);
+      const correctLevel = getServerCorrectLevelByXp(currentXp);
+      const dbLevel = Number(dbPlayer.level ?? dbPlayer.Level ?? 1);
+
+      // Текущие свободные очки игрока в памяти базы
       const currentPoints = Number(dbPlayer.statpoints ?? dbPlayer.statPoints ?? 0);
 
       let totalSpent = 0;
@@ -273,12 +290,20 @@ socket.on('save_game_secure', async ({ player }) => {
       if (totalSpent > currentPoints) return socket.emit('stat_distribution_error', `Превышен лимит! Доступно: ${currentPoints}, пришло: ${totalSpent}`);
       if (totalSpent === 0) return socket.emit('stat_distribution_error', 'Вы ничего не вложили.');
 
-      // Формируем объект для обновления с учетом регистра колонок в твоей таблице
+      // Формируем объект для обновления с учетом регистра колонок в вашей таблице
       const updatePayload = {
         statpoints: currentPoints - totalSpent
       };
 
-      // Динамически смотрим, какое имя колонки используется в твоей базе данных
+      // 🔄 Если уровень в базе данных отстал от реального уровня по опыту (например, при ручной правке БД),
+      // мы принудительно обновляем его прямо сейчас вместе со статами!
+      if (dbLevel !== correctLevel) {
+        let levelKey = dbPlayer.level !== undefined ? 'level' : (dbPlayer.Level !== undefined ? 'Level' : 'level');
+        updatePayload[levelKey] = correctLevel;
+        console.log(`🔄 [СИНХРОНИЗАЦИЯ ЛВЛ] Уровень игрока ${nUserId} в БД обновлен до актуального: ${correctLevel}`);
+      }
+
+      // Динамически смотрим, какое имя колонки используется в вашей базе данных для характеристик
       statsKeys.forEach(key => {
         let finalKey = key;
         if (dbPlayer[key] !== undefined) finalKey = key;
@@ -288,7 +313,7 @@ socket.on('save_game_secure', async ({ player }) => {
         updatePayload[finalKey] = getDBStat(key) + (Number(distribution[key]) || 0);
       });
 
-      // Расчет ХП
+      // Расчет ХП при прокачке выносливости
       let newHp = Number(dbPlayer.hp ?? dbPlayer.HP ?? 10);
       const addedEnd = Number(distribution.endurance) || 0;
       if (addedEnd > 0) {
@@ -308,8 +333,12 @@ socket.on('save_game_secure', async ({ player }) => {
       const { data: finalPlayer } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
 
       const refreshedProfile = {
-        id: finalPlayer.id, name: finalPlayer.name, avatar: finalPlayer.avatar, level: Number(finalPlayer.level || 1),
-        gold: Number(finalPlayer.gold || 0), xp: Number(finalPlayer.xp || 0), 
+        id: finalPlayer.id, 
+        name: finalPlayer.name, 
+        avatar: finalPlayer.avatar, 
+        level: Number(finalPlayer.level ?? finalPlayer.Level ?? 1),
+        gold: Number(finalPlayer.gold || 0), 
+        xp: Number(finalPlayer.xp || 0), 
         hp: Number(finalPlayer.hp ?? finalPlayer.HP ?? 10), 
         statPoints: Number(finalPlayer.statpoints ?? finalPlayer.statPoints ?? 0),
         currentTownIndex: Number(finalPlayer.currenttownindex ?? finalPlayer.currentTownIndex ?? 0),
@@ -691,6 +720,22 @@ async function finalizePveBattle(room, result, logs, finalRound) {
     player.gold += gainedGold;
     player.xp += gainedXp;
     
+    // 🔥 ФИКС: Пересчитываем уровень игрока на сервере после получения нового опыта!
+    const oldLevel = Number(player.level || 1);
+    const correctLevel = getServerCorrectLevelByXp(player.xp);
+    
+    if (correctLevel > oldLevel) {
+      const levelsGained = correctLevel - oldLevel;
+      // Честно начисляем по +5 очков за каждый новый уровень
+      player.statpoints = (player.statpoints || 0) + (levelsGained * 5);
+      player.level = correctLevel;
+      
+      // Полностью восстанавливаем здоровье при повышении уровня
+      player.currentHp = getServerMaxHp(player); 
+      
+      logs.push(`🎉 <strong>ПОВЫШЕНИЕ УРОВНЯ!</strong> Теперь вы ${correctLevel} уровня! Получено +${levelsGained * 5} очков характеристик.`);
+    }
+
     logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
   } else {
     logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе.`);
@@ -702,7 +747,15 @@ async function finalizePveBattle(room, result, logs, finalRound) {
   }
 
   try {
-    await sb.from('players').update({ gold: player.gold, xp: player.xp, hp: player.currentHp, level: player.level, statpoints: player.statpoints, inventory: player.inventory }).eq('id', Number(player.id));
+    // Теперь в базу данных уйдет 100% обновленный и правильный level и statpoints
+    await sb.from('players').update({ 
+      gold: player.gold, 
+      xp: player.xp, 
+      hp: player.currentHp, 
+      level: player.level, // Уровень запишется корректно!
+      statpoints: player.statpoints, 
+      inventory: player.inventory 
+    }).eq('id', Number(player.id));
   } catch (err) { console.error(err); }
   
   delete activeRooms[room.id];
