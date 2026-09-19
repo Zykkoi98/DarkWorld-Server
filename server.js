@@ -162,7 +162,7 @@ function sanitizeTeam(team) {
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет: ${socket.id}`);
 
-  // 🛡️ УЛЬТИМАТИВНАЯ ЗАГРУЗКА ПРОФИЛЯ С ПРИНУДИТЕЛЬНЫМ СБРОСОМ ХАРАКТЕРИСТИК ПРИ УМЕНЬШЕНИИ УРОВНЯ
+  // 🛡️ УЛЬТИМАТИВНАЯ ЗАГРУЗКА ПРОФИЛЯ С ПРИНУДИТЕЛЬНЫМ СБРОСОМ ХАРАКТЕРИСТИК ПРИ УМЕНЬШЕНИИ УРОВНЯ (ФИКС МАССИВА)
   socket.on('load_game_secure', async ({ userId, username }) => {
     try {
       const nUserId = Number(userId);
@@ -172,7 +172,8 @@ io.on('connection', (socket) => {
       if (error) return socket.emit('load_game_failed', { message: error.message });
 
       if (data && data.length > 0) {
-        let cloudPlayer = data[0]; // Исправлено: считываем именно первый объект массива
+        // 🔥 ФИКС: Достаем именно объект игрока (первый элемент массива), а не сам массив!
+        let cloudPlayer = data[0]; 
         
         // 📊 РАСЧЕТ РЕАЛЬНОГО УРОВНЯ ПО ОПЫТУ ИЗ БАЗЫ
         const currentXp = Number(cloudPlayer.xp ?? cloudPlayer.XP ?? 0);
@@ -197,7 +198,7 @@ io.on('connection', (socket) => {
             return key.charAt(0).toUpperCase() + key.slice(1);
           };
 
-          // 🔄 ЖЕСТКИЙ СБРОС: Если уровень изменился (особенно вниз), сбрасываем все характеристики на базовую 1!
+          // 🔄 ЖЕСТКИЙ СБРОС: Раз уровень изменился, сбрасываем все базовые характеристики на 1!
           const statsKeys = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
           statsKeys.forEach(key => {
             const dbKey = getRealKey(key);
@@ -205,7 +206,7 @@ io.on('connection', (socket) => {
             updatePayload[dbKey] = 1;
           });
 
-          // Начисляем строго легальный максимум свободных очков для этого уровня с чистого листа
+          // Начисляем строго легальный пул свободных очков для этого уровня с чистого листа
           // Формула: 5 стартовых очков + по 5 очков за каждый уровень выше 1-го
           const totalLegalPoints = 5 + ((correctLevel - 1) * 5);
           
@@ -215,7 +216,7 @@ io.on('connection', (socket) => {
           updatePayload[levelKey] = correctLevel;
           updatePayload[pointsKey] = totalLegalPoints;
           
-          // Полностью пересчитываем и восстанавливаем здоровье персонажа до нормы 1-го уровня
+          // Полностью пересчитываем здоровье персонажа до нормы нового уровня
           let hpKey = cloudPlayer.hp !== undefined ? 'hp' : (cloudPlayer.HP !== undefined ? 'HP' : 'hp');
           const maxHp = getServerMaxHp({
             strength: 1, agility: 1, endurance: 1, intellect: 1, luck: 1,
