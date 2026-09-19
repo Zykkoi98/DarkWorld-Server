@@ -162,7 +162,7 @@ function sanitizeTeam(team) {
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет: ${socket.id}`);
 
-  // 🛡️ ОБНОВЛЕННАЯ БЕЗОПАСНАЯ ЗАГРУЗКА ПРОФИЛЯ С АВТО-КОРРЕКЦИЕЙ БД ПРИ ТЕСТАХ
+  // 🛡️ УЛЬТИМАТИВНАЯ ЗАГРУЗКА ПРОФИЛЯ С ПРИНУДИТЕЛЬНЫМ СБРОСОМ ХАРАКТЕРИСТИК ПРИ УМЕНЬШЕНИИ УРОВНЯ
   socket.on('load_game_secure', async ({ userId, username }) => {
     try {
       const nUserId = Number(userId);
@@ -172,57 +172,53 @@ io.on('connection', (socket) => {
       if (error) return socket.emit('load_game_failed', { message: error.message });
 
       if (data && data.length > 0) {
-        let cloudPlayer = data[0];
+        let cloudPlayer = data[0]; // Исправлено: считываем именно первый объект массива
         
         // 📊 РАСЧЕТ РЕАЛЬНОГО УРОВНЯ ПО ОПЫТУ ИЗ БАЗЫ
         const currentXp = Number(cloudPlayer.xp ?? cloudPlayer.XP ?? 0);
         const correctLevel = getServerCorrectLevelByXp(currentXp);
         const dbLevel = Number(cloudPlayer.level ?? cloudPlayer.Level ?? 1);
 
-        // Переменная для фиксации изменений в БД
         let needsDbSync = false;
         let updatePayload = {};
 
-        // 🔥 СИТУАЦИЯ: Уровень в базе данных не совпадает с реальным по опыту (например, ручная правка)
+        // 🔥 СИТУАЦИЯ: Уровень в базе данных не совпадает с реальным по опыту (ручная правка БД)
         if (dbLevel !== correctLevel) {
-          console.log(`🚨 [РАСХОЖДЕНИЕ ТЕСТОВ] Уровень в БД: ${dbLevel}, Реальный по опыту: ${correctLevel}. Корректируем...`);
+          console.log(`🚨 [КОРРЕКЦИЯ ТЕСТОВ] Уровень в БД: ${dbLevel}, Реальный: ${correctLevel}. Выполняем жесткую синхронизацию...`);
           
           let levelKey = cloudPlayer.level !== undefined ? 'level' : (cloudPlayer.Level !== undefined ? 'Level' : 'level');
           let pointsKey = cloudPlayer.statpoints !== undefined ? 'statpoints' : (cloudPlayer.statPoints !== undefined ? 'statPoints' : 'statpoints');
           
-          // Вычисляем, сколько ВСЕГО очков легально должно быть у персонажа на этом уровне
-          // Формула: 5 стартовых очков + по 5 за каждый уровень выше 1-го
+          // Вычисляем, какое имя колонки используется в вашей БД для характеристик
+          const getRealKey = (key) => {
+            if (cloudPlayer[key] !== undefined) return key;
+            if (cloudPlayer[key.toLowerCase()] !== undefined) return key.toLowerCase();
+            if (cloudPlayer[key.toUpperCase()] !== undefined) return key.toUpperCase();
+            return key.charAt(0).toUpperCase() + key.slice(1);
+          };
+
+          // 🔄 ЖЕСТКИЙ СБРОС: Если уровень изменился (особенно вниз), сбрасываем все характеристики на базовую 1!
+          const statsKeys = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
+          statsKeys.forEach(key => {
+            const dbKey = getRealKey(key);
+            cloudPlayer[dbKey] = 1;
+            updatePayload[dbKey] = 1;
+          });
+
+          // Начисляем строго легальный максимум свободных очков для этого уровня с чистого листа
+          // Формула: 5 стартовых очков + по 5 очков за каждый уровень выше 1-го
           const totalLegalPoints = 5 + ((correctLevel - 1) * 5);
           
-          // Считаем сумму уже вложенных игроком статов (сверх базовой единицы)
-          const getDBStat = (key) => Number(cloudPlayer[key] ?? cloudPlayer[key.toLowerCase()] ?? 1);
-          const spentStrength = Math.max(0, getDBStat('strength') - 1);
-          const spentAgility = Math.max(0, getDBStat('agility') - 1);
-          const spentEndurance = Math.max(0, getDBStat('endurance') - 1);
-          const spentIntellect = Math.max(0, getDBStat('intellect') - 1);
-          const spentLuck = Math.max(0, getDBStat('luck') - 1);
-          
-          const totalSpent = spentStrength + spentAgility + spentEndurance + spentIntellect + spentLuck;
-          
-          // Новые свободные очки = легальный максимум минус то, что уже потрачено
-          // (Если ушли в минус из-за сброса уровня вниз, ставим 0, чтобы не забаговать)
-          const newStatPoints = Math.max(0, totalLegalPoints - totalSpent);
-
-          // Записываем новые значения в объект и готовим payload для отправки в Supabase
           cloudPlayer[levelKey] = correctLevel;
-          cloudPlayer[pointsKey] = newStatPoints;
+          cloudPlayer[pointsKey] = totalLegalPoints;
           
           updatePayload[levelKey] = correctLevel;
-          updatePayload[pointsKey] = newStatPoints;
+          updatePayload[pointsKey] = totalLegalPoints;
           
-          // Если уровень упал до 1, сбрасываем и текущее здоровье до нормы выносливости
+          // Полностью пересчитываем и восстанавливаем здоровье персонажа до нормы 1-го уровня
           let hpKey = cloudPlayer.hp !== undefined ? 'hp' : (cloudPlayer.HP !== undefined ? 'HP' : 'hp');
           const maxHp = getServerMaxHp({
-            strength: getDBStat('strength'),
-            agility: getDBStat('agility'),
-            endurance: getDBStat('endurance'),
-            intellect: getDBStat('intellect'),
-            luck: getDBStat('luck'),
+            strength: 1, agility: 1, endurance: 1, intellect: 1, luck: 1,
             equipped: cloudPlayer.equipped || {}
           });
           cloudPlayer[hpKey] = maxHp;
@@ -231,9 +227,9 @@ io.on('connection', (socket) => {
           needsDbSync = true;
         }
 
-        // 🔥 Если были изменения, принудительно делаем UPDATE в Supabase прямо при входе по F5
+        // 🔥 Если были изменения, принудительно делаем UPDATE в Supabase прямо в процессе загрузки F5
         if (needsDbSync) {
-          console.log(`📤 [СИНХРОНИЗАЦИЯ F5] Записываем правильный уровень и очки в БД:`, updatePayload);
+          console.log(`📤 [СИНХРОНИЗАЦИЯ F5] Записываем обнуленные статы и верные очки в БД:`, updatePayload);
           await sb.from('players').update(updatePayload).eq('id', nUserId);
         }
 
@@ -249,11 +245,11 @@ io.on('connection', (socket) => {
           statPoints: Number(cloudPlayer.statpoints ?? cloudPlayer.statPoints ?? cloudPlayer.StatPoints ?? 0),
           currentTownIndex: Number(cloudPlayer.currenttownindex ?? cloudPlayer.currentTownIndex ?? 0),
           stats: {
-            strength: Number(cloudPlayer.strength ?? 1),
-            agility: Number(cloudPlayer.agility ?? 1),
-            endurance: Number(cloudPlayer.endurance ?? 1),
-            intellect: Number(cloudPlayer.intellect ?? 1),
-            luck: Number(cloudPlayer.luck ?? 1)
+            strength: Number(cloudPlayer.strength ?? cloudPlayer.Strength ?? 1),
+            agility: Number(cloudPlayer.agility ?? cloudPlayer.Agility ?? 1),
+            endurance: Number(cloudPlayer.endurance ?? cloudPlayer.Endurance ?? 1),
+            intellect: Number(cloudPlayer.intellect ?? cloudPlayer.Intellect ?? 1),
+            luck: Number(cloudPlayer.luck ?? cloudPlayer.Luck ?? 1)
           },
           inventory: cloudPlayer.inventory || { equipment: [], resources: [], consumables: [] },
           equipped: cloudPlayer.equipped || { rings: [null, null, null] }
@@ -264,6 +260,7 @@ io.on('connection', (socket) => {
         socket.emit('player_not_found', { userId, username });
       }
     } catch (err) {
+      console.error("❌ Критическая ошибка при загрузке профиля:", err);
       socket.emit('load_game_failed', { message: err.message });
     }
   });
