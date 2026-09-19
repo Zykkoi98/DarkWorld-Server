@@ -260,103 +260,123 @@ socket.on('save_game_secure', async ({ player }) => {
 });
    // 🔥 Безопасное сохранение статов из буфера с автоматической корректировкой уровня по опыту
   socket.on('confirm_stat_distribution_secure', async ({ userId, distribution }) => {
-    console.log(`📥 Запрос статов от игрока ${userId}:`, distribution);
+    console.log(`📥 [СТАРТ РАСПРЕДЕЛЕНИЯ] Игрок: ${userId}, Буфер:`, distribution);
     try {
       const nUserId = Number(userId);
-      if (!distribution) return socket.emit('stat_distribution_error', 'Данные пусты.');
+      if (!distribution) return socket.emit('stat_distribution_error', 'Данные распределения пусты.');
 
+      // Запрашиваем игрока из базы
       const { data: dbPlayer, error: fetchErr } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
-      if (fetchErr || !dbPlayer) return socket.emit('stat_distribution_error', 'Игрок не найден.');
+      if (fetchErr || !dbPlayer) return socket.emit('stat_distribution_error', 'Персонаж не найден в БД.');
 
-      // 🔍 СТРАХОВКА НАЗВАНИЙ КОЛОНОК: Проверяем оба регистра
-      const getDBStat = (key) => Number(dbPlayer[key] ?? dbPlayer[key.toLowerCase()] ?? dbPlayer[key.charAt(0).toUpperCase() + key.slice(1)] ?? 1);
-      
-      // 📊 ФИКС УРОВНЯ: Вычисляем правильный уровень на основе опыта прямо из БД
-      const currentXp = Number(dbPlayer.xp ?? dbPlayer.XP ?? 0);
-      const correctLevel = getServerCorrectLevelByXp(currentXp);
-      const dbLevel = Number(dbPlayer.level ?? dbPlayer.Level ?? 1);
+      // 🔥 ВЫВОД В КОНСОЛЬ RENDER: Вы увидите точные имена ваших колонок в логах!
+      console.log("🔍 [БД ПОЛЯ] Текущая сырая строка игрока из Supabase:", dbPlayer);
 
-      // Текущие свободные очки игрока в памяти базы
-      const currentPoints = Number(dbPlayer.statpoints ?? dbPlayer.statPoints ?? 0);
+      // 📊 Умный поиск свободных очков (statpoints) с перебором всех возможных регистров букв
+      const currentPoints = Number(
+        dbPlayer.statpoints ?? 
+        dbPlayer.statPoints ?? 
+        dbPlayer.StatPoints ?? 
+        dbPlayer.stat_points ?? 0
+      );
 
+      // Вычисляем сумму очков, которую прислал клиент
       let totalSpent = 0;
       const statsKeys = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
       for (const key of statsKeys) {
         const spent = Number(distribution[key] || 0);
-        if (spent < 0) return socket.emit('stat_distribution_error', '🚨 Отрицательное вложение!');
+        if (spent < 0) return socket.emit('stat_distribution_error', '🚨 Обнаружено отрицательное значение стата!');
         totalSpent += spent;
       }
 
-      if (totalSpent > currentPoints) return socket.emit('stat_distribution_error', `Превышен лимит! Доступно: ${currentPoints}, пришло: ${totalSpent}`);
-      if (totalSpent === 0) return socket.emit('stat_distribution_error', 'Вы ничего не вложили.');
+      console.log(`📊 Проверка античета: Сервер видит в БД свободных очков: ${currentPoints}. Клиент прислал: ${totalSpent}`);
 
-      // Формируем объект для обновления с учетом регистра колонок в вашей таблице
+      // 🚨 Если сервер видит 0 очков, а пришел 1 — проверяем, не зависли ли очки
+      if (totalSpent > currentPoints) {
+        return socket.emit('stat_distribution_error', `Превышен лимит очков! В базе данных доступно: ${currentPoints}, а вы пытаетесь распределить: ${totalSpent}. Пожалуйста, перезайдите в игру для синхронизации.`);
+      }
+      if (totalSpent === 0) return socket.emit('stat_distribution_error', 'Вы не выбрали ни одной характеристики для прокачки.');
+
+      // Ищем правильное имя колонки для свободных очков, чтобы обновить именно его
+      let finalPointsKey = 'statpoints';
+      if (dbPlayer.statpoints !== undefined) finalPointsKey = 'statpoints';
+      else if (dbPlayer.statPoints !== undefined) finalPointsKey = 'statPoints';
+      else if (dbPlayer.StatPoints !== undefined) finalPointsKey = 'StatPoints';
+      else if (dbPlayer.stat_points !== undefined) finalPointsKey = 'stat_points';
+
       const updatePayload = {
-        statpoints: currentPoints - totalSpent
+        [finalPointsKey]: currentPoints - totalSpent
       };
 
-      // 🔄 Если уровень в базе данных отстал от реального уровня по опыту (например, при ручной правке БД),
-      // мы принудительно обновляем его прямо сейчас вместе со статами!
-      if (dbLevel !== correctLevel) {
-        let levelKey = dbPlayer.level !== undefined ? 'level' : (dbPlayer.Level !== undefined ? 'Level' : 'level');
-        updatePayload[levelKey] = correctLevel;
-        console.log(`🔄 [СИНХРОНИЗАЦИЯ ЛВЛ] Уровень игрока ${nUserId} в БД обновлен до актуального: ${correctLevel}`);
-      }
+      // Функция безопасного чтения старых характеристик из БД с учетом регистра
+      const getDBStat = (key) => {
+        return Number(
+          dbPlayer[key] ?? 
+          dbPlayer[key.toLowerCase()] ?? 
+          dbPlayer[key.toUpperCase()] ?? 
+          dbPlayer[key.charAt(0).toUpperCase() + key.slice(1)] ?? 1
+        );
+      };
 
-      // Динамически смотрим, какое имя колонки используется в вашей базе данных для характеристик
+      // Накатываем прокачку на характеристики
       statsKeys.forEach(key => {
         let finalKey = key;
         if (dbPlayer[key] !== undefined) finalKey = key;
         else if (dbPlayer[key.toLowerCase()] !== undefined) finalKey = key.toLowerCase();
+        else if (dbPlayer[key.toUpperCase()] !== undefined) finalKey = key.toUpperCase();
         else if (dbPlayer[key.charAt(0).toUpperCase() + key.slice(1)] !== undefined) finalKey = key.charAt(0).toUpperCase() + key.slice(1);
         
         updatePayload[finalKey] = getDBStat(key) + (Number(distribution[key]) || 0);
       });
 
-      // Расчет ХП при прокачке выносливости
-      let newHp = Number(dbPlayer.hp ?? dbPlayer.HP ?? 10);
+      // Корректируем максимальное ХП, если качается Выносливость (endurance)
       const addedEnd = Number(distribution.endurance) || 0;
       if (addedEnd > 0) {
         let hpKey = dbPlayer.hp !== undefined ? 'hp' : (dbPlayer.HP !== undefined ? 'HP' : 'hp');
-        updatePayload[hpKey] = newHp + (addedEnd * 10);
+        let currentHp = Number(dbPlayer[hpKey] ?? 10);
+        updatePayload[hpKey] = currentHp + (addedEnd * 10);
       }
 
-      console.log(`📤 Отправка апдейта в Supabase для ${nUserId}:`, updatePayload);
+      console.log(`📤 [ОТПРАВКА В Supabase] Отправляем Payload:`, updatePayload);
 
       const { error: updateErr } = await sb.from('players').update(updatePayload).eq('id', nUserId);
       if (updateErr) {
-        console.error("❌ Ошибка Supabase при апдейте статов:", updateErr);
-        return socket.emit('stat_distribution_error', `Ошибка БД: ${updateErr.message}`);
+        console.error("❌ Ошибка Supabase при сохранении характеристик:", updateErr);
+        return socket.emit('stat_distribution_error', `Ошибка Supabase: ${updateErr.message}`);
       }
 
-      // Перезапрашиваем профиль, чтобы вернуть клиенту 100% чистый эталонный объект
+      // Возвращаем клиенту чистый эталонный профиль искателя приключений
       const { data: finalPlayer } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+      
+      // Функция сборки профиля (используем безопасное чтение)
+      const getFinalStat = (k) => Number(finalPlayer[k] ?? finalPlayer[k.toLowerCase()] ?? finalPlayer[k.charAt(0).toUpperCase() + k.slice(1)] ?? 1);
 
       const refreshedProfile = {
-        id: finalPlayer.id, 
-        name: finalPlayer.name, 
-        avatar: finalPlayer.avatar, 
+        id: finalPlayer.id,
+        name: finalPlayer.name,
+        avatar: finalPlayer.avatar,
         level: Number(finalPlayer.level ?? finalPlayer.Level ?? 1),
-        gold: Number(finalPlayer.gold || 0), 
-        xp: Number(finalPlayer.xp || 0), 
-        hp: Number(finalPlayer.hp ?? finalPlayer.HP ?? 10), 
-        statPoints: Number(finalPlayer.statpoints ?? finalPlayer.statPoints ?? 0),
+        gold: Number(finalPlayer.gold ?? finalPlayer.Gold ?? 0),
+        xp: Number(finalPlayer.xp ?? finalPlayer.XP ?? 0),
+        hp: Number(finalPlayer.hp ?? finalPlayer.HP ?? 10),
+        statPoints: Number(finalPlayer.statpoints ?? finalPlayer.statPoints ?? finalPlayer.StatPoints ?? 0),
         currentTownIndex: Number(finalPlayer.currenttownindex ?? finalPlayer.currentTownIndex ?? 0),
         stats: {
-          strength: Number(finalPlayer.strength ?? finalPlayer.Strength ?? 1),
-          agility: Number(finalPlayer.agility ?? finalPlayer.Agility ?? 1),
-          endurance: Number(finalPlayer.endurance ?? finalPlayer.Endurance ?? 1),
-          intellect: Number(finalPlayer.intellect ?? finalPlayer.Intellect ?? 1),
-          luck: Number(finalPlayer.luck ?? finalPlayer.Luck ?? 1)
+          strength: getFinalStat('strength'),
+          agility: getFinalStat('agility'),
+          endurance: getFinalStat('endurance'),
+          intellect: getFinalStat('intellect'),
+          luck: getFinalStat('luck')
         },
         inventory: finalPlayer.inventory || { equipment: [], resources: [], consumables: [] },
         equipped: finalPlayer.equipped || { rings: [null, null, null] }
       };
 
+      console.log("✅ [УСПЕХ] Характеристики сохранены. Отправляем новый профиль на клиент.");
       socket.emit('load_game_success', { player: refreshedProfile });
     } catch (err) {
-      console.error("❌ Критическая ошибка метода статов:", err);
-      socket.emit('stat_distribution_error', 'Внутренняя ошибка сервера.');
+      console.error("❌ Критический сбой в методе распределения статов:", err);
+      socket.emit('stat_distribution_error', 'Внутренняя критическая ошибка боевого сервера.');
     }
   });
 
