@@ -162,7 +162,7 @@ function sanitizeTeam(team) {
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет: ${socket.id}`);
 
-  // 🛡️ УЛЬТИМАТИВНАЯ ЗАГРУЗКА ПРОФИЛЯ С ПРИНУДИТЕЛЬНЫМ СБРОСОМ ХАРАКТЕРИСТИК ПРИ УМЕНЬШЕНИИ УРОВНЯ (ФИКС МАССИВА)
+  // 🛡️ ЗАЩИЩЕННАЯ ЗАГРУЗКА ПРОФИЛЯ С ПЕРЕЗАПРОСОМ ДАННЫХ ДЛЯ ГАРАНТИРОВАННОГО СБРОСА СТАТОВ
   socket.on('load_game_secure', async ({ userId, username }) => {
     try {
       const nUserId = Number(userId);
@@ -172,10 +172,10 @@ io.on('connection', (socket) => {
       if (error) return socket.emit('load_game_failed', { message: error.message });
 
       if (data && data.length > 0) {
-        // 🔥 ФИКС: Достаем именно объект игрока (первый элемент массива), а не сам массив!
+        // Достаем объект первого игрока из массива
         let cloudPlayer = data[0]; 
         
-        // 📊 РАСЧЕТ РЕАЛЬНОГО УРОВНЯ ПО ОПЫТУ ИЗ БАЗЫ
+        // РАСЧЕТ РЕАЛЬНОГО УРОВНЯ ПО ОПЫТУ ИЗ БАЗЫ
         const currentXp = Number(cloudPlayer.xp ?? cloudPlayer.XP ?? 0);
         const correctLevel = getServerCorrectLevelByXp(currentXp);
         const dbLevel = Number(cloudPlayer.level ?? cloudPlayer.Level ?? 1);
@@ -185,12 +185,12 @@ io.on('connection', (socket) => {
 
         // 🔥 СИТУАЦИЯ: Уровень в базе данных не совпадает с реальным по опыту (ручная правка БД)
         if (dbLevel !== correctLevel) {
-          console.log(`🚨 [КОРРЕКЦИЯ ТЕСТОВ] Уровень в БД: ${dbLevel}, Реальный: ${correctLevel}. Выполняем жесткую синхронизацию...`);
+          console.log(`🚨 [СИНХРОНИЗАЦИЯ F5] Уровень в БД: ${dbLevel}, Реальный: ${correctLevel}. Выполняем сброс статов...`);
           
           let levelKey = cloudPlayer.level !== undefined ? 'level' : (cloudPlayer.Level !== undefined ? 'Level' : 'level');
           let pointsKey = cloudPlayer.statpoints !== undefined ? 'statpoints' : (cloudPlayer.statPoints !== undefined ? 'statPoints' : 'statpoints');
           
-          // Вычисляем, какое имя колонки используется в вашей БД для характеристик
+          // Вычисляем правильные имена колонок для характеристик в вашей БД
           const getRealKey = (key) => {
             if (cloudPlayer[key] !== undefined) return key;
             if (cloudPlayer[key.toLowerCase()] !== undefined) return key.toLowerCase();
@@ -198,40 +198,43 @@ io.on('connection', (socket) => {
             return key.charAt(0).toUpperCase() + key.slice(1);
           };
 
-          // 🔄 ЖЕСТКИЙ СБРОС: Раз уровень изменился, сбрасываем все базовые характеристики на 1!
+          // 🔄 ЖЕСТКИЙ СБРОС: Каждую базовую характеристику принудительно обнуляем в 1
           const statsKeys = ['strength', 'agility', 'endurance', 'intellect', 'luck'];
           statsKeys.forEach(key => {
             const dbKey = getRealKey(key);
-            cloudPlayer[dbKey] = 1;
             updatePayload[dbKey] = 1;
           });
 
-          // Начисляем строго легальный пул свободных очков для этого уровня с чистого листа
-          // Формула: 5 стартовых очков + по 5 очков за каждый уровень выше 1-го
+          // Рассчитываем чистый легальный максимум свободных очков для этого уровня
           const totalLegalPoints = 5 + ((correctLevel - 1) * 5);
-          
-          cloudPlayer[levelKey] = correctLevel;
-          cloudPlayer[pointsKey] = totalLegalPoints;
           
           updatePayload[levelKey] = correctLevel;
           updatePayload[pointsKey] = totalLegalPoints;
           
-          // Полностью пересчитываем здоровье персонажа до нормы нового уровня
+          // Полностью пересчитываем здоровье персонажа до нормы выносливости = 1 уровня
           let hpKey = cloudPlayer.hp !== undefined ? 'hp' : (cloudPlayer.HP !== undefined ? 'HP' : 'hp');
           const maxHp = getServerMaxHp({
             strength: 1, agility: 1, endurance: 1, intellect: 1, luck: 1,
             equipped: cloudPlayer.equipped || {}
           });
-          cloudPlayer[hpKey] = maxHp;
           updatePayload[hpKey] = maxHp;
 
           needsDbSync = true;
         }
 
-        // 🔥 Если были изменения, принудительно делаем UPDATE в Supabase прямо в процессе загрузки F5
+        // 🔥 Если были изменения, делаем UPDATE и ПЕРЕЗАПРАШИВАЕМ строку игрока заново!
         if (needsDbSync) {
-          console.log(`📤 [СИНХРОНИЗАЦИЯ F5] Записываем обнуленные статы и верные очки в БД:`, updatePayload);
-          await sb.from('players').update(updatePayload).eq('id', nUserId);
+          console.log(`📤 Записываем сброшенные характеристики в Supabase:`, updatePayload);
+          const { error: syncErr } = await sb.from('players').update(updatePayload).eq('id', nUserId);
+          
+          if (!syncErr) {
+            // Перечитываем базу чистым запросом, чтобы перезаписать устаревший cloudPlayer!
+            const { data: freshData } = await sb.from('players').select('*').eq('id', nUserId);
+            if (freshData && freshData.length > 0) {
+              cloudPlayer = freshData[0];
+              console.log("🎯 [УСПЕХ] Объект игрока в памяти сервера успешно обновлен из БД:", cloudPlayer);
+            }
+          }
         }
 
         // Собираем чистый объект для отправки на клиент
@@ -265,7 +268,6 @@ io.on('connection', (socket) => {
       socket.emit('load_game_failed', { message: err.message });
     }
   });
-
 // ============================================================================
 // 🛡️ ИСПРАВЛЕННОЕ БЕЗОПАСНОЕ СОХРАНЕНИЕ МИРНЫХ ДАННЫХ
 // ============================================================================
