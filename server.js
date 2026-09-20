@@ -1130,53 +1130,46 @@ async function finalizePveBattle(room, result, logs, finalRound) {
 // 🏆 ФИЛЬТР ЗАВЕРШЕНИЯ PvP МАТЧА: СХРАНЕНИЕ ХП И НАЧИСЛЕНИЕ НАГРАД
 // ============================================================================
 async function finalizePvpBattle(room, result, logs, finalRound) {
-  const playerA = room.teamA[0];
-  const playerB = room.teamB[0];
+  const playerA = room.teamA[0]; // Организатор (Ян)
+  const playerB = room.teamB[0]; // Соперник (Evil)
   
   if (!playerA || !playerB) return delete activeRooms[room.id];
 
   console.log(`🏁 [PvP ФИНАЛ] Матч окончен в комнате ${room.id}. Результат команды А: ${result}`);
 
-  let goldReward = 25; // Базовая ставка золота за победу на Арене
+  let goldReward = 25; // Награда за победу на Арене
   
-  // Создаем переменные для сохранения в базу данных Supabase
   let dbHpA = playerA.currentHp;
   let dbHpB = playerB.currentHp;
 
   if (result === 'win') {
     logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerA.name}</strong> поверг соперника и получает 💰 ${goldReward} монет!`);
-    playerA.gold = (playerA.gold || 0) + goldReward;
+    playerA.gold = (Number(playerA.gold) || 0) + goldReward;
     
-    // 🔥 НА ЭКРАНЕ: оставляем проигравшему честный 0 ХП, пока открыто окно боя!
-    playerB.currentHp = 0; 
+    playerB.currentHp = 0; // Честный 0 ХП на экране для Evil
     
-    // ☁️ ДЛЯ БАЗЫ ДАННЫХ: тихо накручиваем 20% ХП, чтобы игрок мог очнуться в городе живым
     dbHpA = playerA.currentHp;
-    dbHpB = Math.max(1, Math.floor(playerB.maxHp * 0.2));
+    dbHpB = Math.max(1, Math.floor(playerB.maxHp * 0.2)); // Тихое восстановление в БД
   } 
   else if (result === 'lose') {
     logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerB.name}</strong> одержал верх и получает 💰 ${goldReward} монет!`);
-    playerB.gold = (playerB.gold || 0) + goldReward;
+    playerB.gold = (Number(playerB.gold) || 0) + goldReward;
     
-    // 🔥 НА ЭКРАНЕ: у лидера команды А теперь красивый 0 ХП
-    playerA.currentHp = 0;
+    playerA.currentHp = 0; // Честный 0 ХП на экране для Яна
     
-    // ☁️ ДЛЯ БАЗЫ ДАННЫХ: реанимируем проигравшего А до 20% ХП
-    dbHpA = Math.max(1, Math.floor(playerA.maxHp * 0.2));
+    dbHpA = Math.max(1, Math.floor(playerA.maxHp * 0.2)); // Тихое восстановление в БД
     dbHpB = playerB.currentHp;
   } 
   else {
     logs.push(`🏁 <strong>НИЧЬЯ!</strong> Оба бойца обессилены. Боги Арены не выбрали победителя.`);
-    // При ничьей оба упали в 0 на экране
     playerA.currentHp = 0;
     playerB.currentHp = 0;
     
-    // Но в базе оба очнутся с 20% здоровья
     dbHpA = Math.max(1, Math.floor(playerA.maxHp * 0.2));
     dbHpB = Math.max(1, Math.floor(playerB.maxHp * 0.2));
   }
 
-  // 1. Отправляем финальный пакет данных. Игроки увидят в карточках честный 0 ХП проигравшего!
+  // 1. Отправляем пакеты раунда на клиенты ОБОИХ игроков
   [playerA, playerB].forEach(p => {
     if (p.socketId) {
       io.to(p.socketId).emit('round_result', { 
@@ -1190,16 +1183,22 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
     }
   });
 
-  // 2. Синхронизируем данные в Supabase. Записываем dbHpA и dbHpB (где уже начислено восстановление)
+  // 2. 🔥 ГЛАВНЫЙ ФИКС: Жесткая параллельная запись в Supabase через Promise.all
+  // Сервер Node.js не пойдет дальше, пока ОБА запроса не запишутся на диск!
   try {
-    await sb.from('players').update({ gold: playerA.gold, hp: dbHpA }).eq('id', Number(playerA.id));
-    await sb.from('players').update({ gold: playerB.gold, hp: dbHpB }).eq('id', Number(playerB.id));
-    console.log(`☁️ [БД PvP ЗАПИСЬ] Профили успешно обновлены. В базу ушло восстановленное ХП (Игрок А: ${dbHpA}, Игрок Б: ${dbHpB}).`);
+    console.log(`📤 [БД PvP ЗАПИСЬ] Фиксируем баланс. Ян золото: ${playerA.gold}, Evil золото: ${playerB.gold}`);
+    
+    await Promise.all([
+      sb.from('players').update({ gold: Number(playerA.gold), hp: Number(dbHpA) }).eq('id', Number(playerA.id)),
+      sb.from('players').update({ gold: Number(playerB.gold), hp: Number(dbHpB) }).eq('id', Number(playerB.id))
+    ]);
+
+    console.log(`☁️ [БД PvP ЗАВЕРШЕНО] Золото и ХП успешно сохранены для Яна и Evil.`);
   } catch (err) {
-    console.error("❌ Ошибка записи итогов PvP в Supabase:", err);
+    console.error("❌ Фатальная ошибка транзакции PvP наград в Supabase:", err);
   }
 
-  // 3. Вычищаем комнату из оперативной памяти сервера
+  // 3. Вычищаем комнату из ОЗУ бэкенда
   delete activeRooms[room.id];
 }
 const PORT = process.env.PORT || 3000;
