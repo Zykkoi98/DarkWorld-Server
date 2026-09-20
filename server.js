@@ -721,6 +721,7 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
   const p1MaxHp = getServerMaxHp(p1Data);
   const p2MaxHp = getServerMaxHp(p2Data);
 
+  // Игрок 1 (Организатор) — идет в команду A
   const teamA = [{
     uuid: `player_${p1Data.id}`, 
     id: String(p1Data.id), 
@@ -735,25 +736,26 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
     luck: Number(p1Data.stats?.luck ?? p1Data.luck ?? 1),
     currentHp: Math.min(Number(p1Hp), p1MaxHp), 
     maxHp: p1MaxHp, 
-    socketId: null, // Привяжется, как только клиент сделает реконнект в комнату
+    socketId: null, 
     turn: null,
     equipped: p1Data.equipped || {}, 
     inventory: p1Data.inventory || {}
   }];
 
+  // Игрок 2 (Принявший вызов) — идет в команду B
   const teamB = [{
-    uuid: `player_${p2Data.id}`, 
+    uuid: `player_${p2Data.id}`, // 🔥 Исправлено: теперь клиент видит префикс player_, а не bot_
     id: String(p2Data.id), 
     name: p2Data.name, 
     icon: '👤', 
-    isBot: false,
+    isBot: false, // 🔥 Критично: false, чтобы сервер не управлял им как монстром!
     level: Number(p2Data.level), 
     strength: Number(p2Data.strength ?? p2Data.stats?.strength ?? 1), 
     agility: Number(p2Data.agility ?? p2Data.stats?.agility ?? 1),
     endurance: Number(p2Data.endurance ?? p2Data.stats?.endurance ?? 1), 
     intellect: Number(p2Data.intellect ?? p2Data.stats?.intellect ?? 1), 
     luck: Number(p2Data.luck ?? p2Data.stats?.luck ?? 1),
-    currentHp: Number(p2Data.hp), 
+    currentHp: Number(p2Data.hp || p2MaxHp), 
     maxHp: p2MaxHp, 
     socketId: null, 
     turn: null,
@@ -761,26 +763,14 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
     inventory: p2Data.inventory || {}
   }];
 
-  // 1. Записываем комнату в оперативную память сервера
-  activeRooms[roomId] = { 
-    id: roomId, 
-    type: 'pvp', 
-    teamA, 
-    teamB, 
-    turnCount: 1, 
-    timeoutRef: null 
-  };
-
-  console.log(`⚔️ [PvP СТАРТ] Создана комната ${roomId}: ${p1Data.name} vs ${p2Data.name}`);
-
-  // 2. 🔥 ГЛАВНЫЙ ФИКС: Вещаем глобальный сигнал перенаправления на боевой экран!
-  // Родные сокеты игроков поймают эту команду в лобби арены и вызовут редирект в battle.html
-  io.emit('arena_lobby_updated'); 
+  activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, timeoutRef: null };
   
-  // Отправляем персональные сигналы участникам по их ID, если они онлайн в системе
+  console.log(`⚔️ [PvP МОСТ] Создана комната: ${roomId}`);
+  
+  // Отправляем команду редиректа на боевой экран для обоих игроков
+  io.emit('arena_lobby_updated');
   io.emit('arena_redirect_to_battle', { roomId: roomId });
 
-  // 3. Запускаем серверный таймер на 30 секунд для защиты от АФК
   startServerTurnTimer(roomId);
 }
 
@@ -802,7 +792,7 @@ function startServerTurnTimer(roomId) {
 }
 
 // ============================================================================
-// 📊 СЕРВЕРНЫЙ КАЛЬКУЛЯТОР БОЕВЫХ РАУНДОВ ПО СКОРОСТИ
+// 📊 ИСПРАВЛЕННЫЙ СЕРВЕРНЫЙ КАЛЬКУЛЯТОР БОЕВЫХ РАУНДОВ
 // ============================================================================
 function executeRoundCalculations(roomId) {
   const room = activeRooms[roomId];
@@ -811,30 +801,37 @@ function executeRoundCalculations(roomId) {
   const logs = [];
   const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-  // ИИ для монстров
-  room.teamB.forEach(bot => {
-    if (bot.currentHp <= 0 || !bot.isBot) return;
-    const aliveTargets = room.teamA.filter(a => a.currentHp > 0);
-    if (aliveTargets.length === 0) return;
+  // ============================================================================
+  // 🔥 ФИКС 1: Автоматический ИИ роботов ходит ТОЛЬКО в PvE! В PvP он полностью спит
+  // ============================================================================
+  if (room.type === 'pve') {
+    room.teamB.forEach(bot => {
+      if (bot.currentHp <= 0 || !bot.isBot) return;
+      const aliveTargets = room.teamA.filter(a => a.currentHp > 0);
+      if (aliveTargets.length === 0) return;
 
-    const target = aliveTargets[rand(0, aliveTargets.length - 1)];
-    const zones = ["head", "breast", "torso", "belt", "legs"];
-    const mDefend = [];
-    while (mDefend.length < 2) {
-      const rz = zones[rand(0, 4)];
-      if (!mDefend.includes(rz)) mDefend.push(rz);
-    }
-    bot.turn = { targetUuid: target.uuid, attack: zones[rand(0, 4)], defends: mDefend };
-  });
+      const target = aliveTargets[rand(0, aliveTargets.length - 1)];
+      const zones = ["head", "breast", "torso", "belt", "legs"];
+      const mDefend = [];
+      while (mDefend.length < 2) {
+        const rz = zones[rand(0, 4)];
+        if (!mDefend.includes(rz)) mDefend.push(rz);
+      }
+      bot.turn = { targetUuid: target.uuid, attack: zones[rand(0, 4)], defends: mDefend };
+    });
+  }
 
-  // Очередь ходов по динамической ловкости персонажей
+  // Сортируем общую очередь ходов по динамической ловкости персонажей
   let queue = [...room.teamA, ...room.teamB];
   queue.sort((a, b) => getServerAgility(b) - getServerAgility(a));
 
+  // Перебираем удары участников в раунде
   queue.forEach(attacker => {
     if (attacker.currentHp <= 0 || !attacker.turn || !attacker.turn.targetUuid) return;
 
     let target = [...room.teamA, ...room.teamB].find(f => f.uuid === attacker.turn.targetUuid);
+    
+    // Если изначальная цель погибла раньше времени, ищем любого живого врага напротив
     if (!target || target.currentHp <= 0) {
       const opposingTeam = room.teamA.includes(attacker) ? room.teamB : room.teamA;
       const newAlive = opposingTeam.filter(t => t.currentHp > 0);
@@ -842,14 +839,23 @@ function executeRoundCalculations(roomId) {
       target = newAlive[0];
     }
 
-    if (attacker.turn.attack === null) {
-      logs.push(`❌ <strong>${attacker.name}</strong> пропустил атаку.`);
+    // 🔥 ФИКС 2: ТОТАЛЬНАЯ ЗАЩИТА ОТ САМОУДАРОВ (СВЕРКА UUID)
+    if (attacker.uuid === target.uuid) {
+      console.error(`🚨 [АНТИ-БАГ БЛОК] Боец ${attacker.name} попытался ударить сам себя! Ход отменен.`);
       return;
     }
 
+    // Если игрок AFK или не выбрал зону атаки
+    if (attacker.turn.attack === null) {
+      logs.push(`❌ <strong>${attacker.name}</strong> замешкался и пропустил свою атаку.`);
+      return;
+    }
+
+    // Проверяем, попал ли удар в одну из зон защиты соперника
     if (target.turn && target.turn.defends.includes(attacker.turn.attack)) {
       logs.push(`🛡️ <strong>${target.name}</strong> заблокировал удар от <strong>${attacker.name}</strong> в ${ZONE_NAMES[attacker.turn.attack]}.`);
     } else {
+      // Расчет критического удара на основе Удачи (Luck)
       const attLuck = getServerLuck(attacker);
       const critChance = Math.min(50, 5 + (attLuck * 0.5));
       const isCrit = rand(1, 100) <= critChance;
@@ -857,14 +863,16 @@ function executeRoundCalculations(roomId) {
       let baseDmg = getServerAtk(attacker);
       if (isCrit) baseDmg = Math.floor(baseDmg * 1.5);
 
+      // Вычитаем защиту цели из атаки нападающего
       const targetDef = getServerDef(target);
       const dmg = Math.max(1, baseDmg - targetDef);
 
       target.currentHp = Math.max(0, target.currentHp - dmg);
-      logs.push(`⚔️ <strong>${attacker.name}</strong> ударил <strong>${target.name}</strong> на <strong>${dmg}</strong> урона в ${ZONE_NAMES[attacker.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
+      logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[attacker.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
     }
   });
 
+  // Обнуляем буферы ходов участников для следующего раунда
   room.teamA.forEach(f => f.turn = null);
   room.teamB.forEach(f => f.turn = null);
 
@@ -873,22 +881,21 @@ function executeRoundCalculations(roomId) {
   const currentRound = room.turnCount;
   room.turnCount++;
 
-// --- КОНЕЦ РАУНДА: ПРОВЕРКА ЗАВЕРШЕНИЯ ПОЕДИНКА ---
+  // Проверяем условия официального финала
   if (isTeamADead || isTeamBDead || room.turnCount > 40) {
     let result = 'draw';
-    if (!isTeamADead && isTeamBDead) result = 'win'; // Победила команда А
+    if (!isTeamADead && isTeamBDead) result = 'win';  // Победила команда А
     if (isTeamADead && !isTeamBDead) result = 'lose'; // Победила команда B
 
-    // Если это стандартная битва с монстрами на природе
+    // Разделяем финал по типу игровых комнат
     if (room.type === 'pve') {
       finalizePveBattle(room, result, logs, currentRound);
     } 
-    // 🔥 🔥 ФИКС: Если это гладиаторская дуэль 1х1 на Арене!
     else if (room.type === 'pvp') {
       finalizePvpBattle(room, result, logs, currentRound);
     }
   } else {
-    // Бой продолжается — рассылаем новые пакеты данных всем живым сокетам комнаты
+    // Бой продолжается — рассылаем новые пакеты раунда всем активным сокетам
     [...room.teamA, ...room.teamB].forEach(p => {
       if (p.socketId) {
         io.to(p.socketId).emit('round_result', { 
@@ -900,6 +907,7 @@ function executeRoundCalculations(roomId) {
         });
       }
     });
+    // Перезапускаем серверный таймер защиты от АФК
     startServerTurnTimer(roomId);
   }
 }
