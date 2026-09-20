@@ -665,26 +665,42 @@ socket.on('save_game_secure', async ({ player }) => {
     }
   });
 
-  socket.on('instant_use_potion', ({ roomId }) => {
+  socket.on('instant_use_potion', async ({ roomId }) => {
     const room = activeRooms[roomId];
     if (!room) return;
 
     const fighter = room.teamA.find(p => p.socketId === socket.id);
     if (!fighter || fighter.currentHp <= 0) return;
 
-    const potionId = fighter.equipped?.potion;
-    const potionData = CONSUMABLE_DATABASE[potionId];
+    const potionSlot = fighter.equipped?.potion;
 
-    if (potionData) {
-      fighter.currentHp = Math.min(fighter.maxHp, fighter.currentHp + potionData.heal);
-      if (fighter.equipped) fighter.equipped.potion = null;
+    if (potionSlot && typeof potionSlot === 'object' && potionSlot.id && potionSlot.count > 0) {
+      const potionData = CONSUMABLE_DATABASE[potionSlot.id];
 
-      io.to(roomId).emit('battle_effect_potion', {
-        uuid: fighter.uuid, currentHp: fighter.currentHp,
-        logMsg: `🧪 <strong>${fighter.name}</strong> выпил ${potionData.name} и восстановил ${potionData.heal} HP!`
-      });
+      if (potionData) {
+        fighter.currentHp = Math.min(fighter.maxHp, fighter.currentHp + potionData.heal);
+        
+        // Уменьшаем количество банок в стаке на 1
+        potionSlot.count--;
+        let displayCountLog = potionSlot.count;
 
-      sb.from('players').update({ hp: fighter.currentHp, equipped: fighter.equipped }).eq('id', Number(fighter.id)).then();
+        // Если стак полностью израсходован, освобождаем слот
+        if (potionSlot.count <= 0) {
+          fighter.equipped.potion = null;
+        }
+
+        io.to(roomId).emit('battle_effect_potion', {
+          uuid: fighter.uuid, 
+          currentHp: fighter.currentHp,
+          equipped: fighter.equipped, 
+          logMsg: `🧪 <strong>${fighter.name}</strong> выпил ${potionData.name} (+${potionData.heal} HP)! Осталось в бою: ${displayCountLog} шт.`
+        });
+
+        await sb.from('players').update({ 
+          hp: fighter.currentHp, 
+          equipped: fighter.equipped 
+        }).eq('id', Number(fighter.id));
+      }
     }
   });
 
