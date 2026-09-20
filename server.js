@@ -789,9 +789,10 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
   
   console.log(`⚔️ [PvP МОСТ] Создана комната: ${roomId}`);
   
-  // Отправляем команду редиректа на боевой экран для обоих игроков
-  io.emit('arena_lobby_updated');
-  io.emit('arena_redirect_to_battle', { roomId: roomId });
+  setTimeout(() => {
+    io.emit('arena_lobby_updated');
+    io.emit('arena_redirect_to_battle', { roomId: roomId });
+  }, 150);
 
   startServerTurnTimer(roomId);
 }
