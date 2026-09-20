@@ -1025,6 +1025,77 @@ function executeRoundCalculations(roomId) {
   }
 }
 
+// ============================================================================
+// 🌲 СЕРВЕРНЫЙ ФИНАЛ PvE БОЯ: ЧЕСТНЫЙ 0 ХП НА ЭКРАНЕ И ТИХОЕ ВОССТАНОВЛЕНИЕ В БД
+// ============================================================================
+async function finalizePveBattle(room, result, logs, finalRound) {
+  const player = room.teamA[0];
+  if (!player) return delete activeRooms[room.id];
+
+  let gainedXp = 0; 
+  let gainedGold = 0;
+  let dbHpPayload = player.currentHp;
+
+  if (result === 'win') {
+    room.teamB.forEach(monster => {
+      gainedXp += monster.rewardXp || 0;
+      gainedGold += monster.rewardGold || 0;
+    });
+
+    player.gold += gainedGold;
+    player.xp += gainedXp;
+    
+    const oldLevel = Number(player.level || 1);
+    const correctLevel = getServerCorrectLevelByXp(player.xp);
+    
+    if (correctLevel > oldLevel) {
+      const levelsGained = correctLevel - oldLevel;
+      player.statpoints = (player.statpoints || 0) + (levelsGained * 5);
+      player.level = correctLevel;
+      player.currentHp = getServerMaxHp(player); 
+      dbHpPayload = player.currentHp;
+      
+      logs.push(`🎉 <strong>ПОВЫШЕНИЕ УРОВНЯ!</strong> Теперь вы ${correctLevel} уровня! Получено +${levelsGained * 5} очков характеристик.`);
+    } else {
+      dbHpPayload = player.currentHp;
+    }
+
+    logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
+  } 
+  else {
+    logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе.`);
+    player.currentHp = 0; 
+    dbHpPayload = Math.max(1, Math.floor(player.maxHp * 0.2));
+  }
+
+  if (player.socketId) {
+    io.to(player.socketId).emit('round_result', { 
+      turnCount: finalRound, 
+      logs, 
+      isOver: true, 
+      resultType: result, 
+      teamA: sanitizeTeam(room.teamA), 
+      teamB: sanitizeTeam(room.teamB) 
+    });
+  }
+
+  try {
+    await sb.from('players').update({ 
+      gold: player.gold, 
+      xp: player.xp, 
+      hp: dbHpPayload, 
+      level: player.level, 
+      statpoints: player.statpoints, 
+      inventory: player.inventory 
+    }).eq('id', Number(player.id));
+    
+    console.log(`☁️ [БД PvE ЗАПИСЬ] Итоги поединка сохранены. Здоровье в БД: ${dbHpPayload} ед.`);
+  } catch (err) { 
+    console.error("❌ Ошибка сохранения итогов PvE боя в Supabase:", err); 
+  }
+  
+  delete activeRooms[room.id];
+}
 
 async function finalizePvpBattle(room, result, logs, finalRound) {
   // Вытаскиваем одиночные объекты игроков из массивов комнат сервера
