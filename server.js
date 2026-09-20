@@ -1027,7 +1027,7 @@ function executeRoundCalculations(roomId) {
 
 
 async function finalizePvpBattle(room, result, logs, finalRound) {
-  // Четко достаем одиночные объекты игроков по их индексам из ОЗУ комнаты
+  // Вытаскиваем одиночные объекты игроков из массивов комнат сервера
   const playerA = room.teamA[0]; // Организатор (Ян)
   const playerB = room.teamB[0]; // Соперник (Evil)
   
@@ -1041,7 +1041,7 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
   const maxHpA = getServerMaxHp(playerA);
   const maxHpB = getServerMaxHp(playerB);
 
-  let dbHpA = maxHpA; // По умолчанию даем полный отхил в БД
+  let dbHpA = maxHpA; 
   let dbHpB = maxHpB;
 
   // Динамическая формула справедливого распределения опыта
@@ -1055,32 +1055,53 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
     return Math.floor(baseXp * multiplier);
   };
 
-  // --- ЭТАП 1: ГАРАНТИРОВАННЫЙ СВЕЖИЙ ПРЕД-ЗАПРОС БАЛАНСА ИЗ ТАБЛИЦ Supabase ---
+  // --- ЭТАП 1: ЗАЩИЩЕННЫЙ ПРЕД-ЗАПРОС БАЛАНСА С СУПЕР-ЗАЩИТОЙ ОТ РЕГИСТРА БУКВ ---
   let freshGoldA = 0, freshGoldB = 0;
   let freshXpA = 0, freshXpB = 0;
   let freshStatpointsA = 0, freshStatpointsB = 0;
 
   try {
     const [dbDataA, dbDataB] = await Promise.all([
-      sb.from('players').select('gold, xp, statpoints, statPoints').eq('id', Number(playerA.id)).maybeSingle(),
-      sb.from('players').select('gold, xp, statpoints, statPoints').eq('id', Number(playerB.id)).maybeSingle()
+      sb.from('players').select('*').eq('id', Number(playerA.id)).maybeSingle(), // Скачиваем всю строку целиком
+      sb.from('players').select('*').eq('id', Number(playerB.id)).maybeSingle()
     ]);
 
+    // Умный сканер: проверяет gold, Gold, GOLD, дабы исключить undefined из-за регистра колонок
+    const safeReadField = (dbRow, fieldName, defaultValue = 0) => {
+      if (!dbRow) return defaultValue;
+      const lowerName = fieldName.toLowerCase();
+      const upperName = fieldName.toUpperCase();
+      const capitalizedName = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
+
+      const value = dbRow[lowerName] ?? dbRow[upperName] ?? dbRow[capitalizedName] ?? dbRow[fieldName] ?? defaultValue;
+      return Number(value);
+    };
+
     if (dbDataA.data) {
-      freshGoldA = Number(dbDataA.data.gold ?? 0);
-      freshXpA = Number(dbDataA.data.xp ?? 0);
-      freshStatpointsA = Number(dbDataA.data.statpoints ?? dbDataA.data.statPoints ?? 0);
+      freshGoldA = safeReadField(dbDataA.data, 'gold', 0);
+      freshXpA = safeReadField(dbDataA.data, 'xp', 0);
+      freshStatpointsA = safeReadField(dbDataA.data, 'statpoints', 0) || safeReadField(dbDataA.data, 'statPoints', 0) || safeReadField(dbDataA.data, 'StatPoints', 0);
+      
+      console.log(`🛡️ [РЕГИСТР-АУДИТ ЯН] Прочитано из БД -> Золото: ${freshGoldA}, Опыт: ${freshXpA}, Очки: ${freshStatpointsA}`);
+    } else {
+      console.error(`🚨 [БД КРИТ] Не удалось прочитать строку Яна (ID: ${playerA.id}) перед выдачей наград!`);
     }
+
     if (dbDataB.data) {
-      freshGoldB = Number(dbDataB.data.gold ?? 0);
-      freshXpB = Number(dbDataB.data.xp ?? 0);
-      freshStatpointsB = Number(dbDataB.data.statpoints ?? dbDataB.data.statPoints ?? 0);
+      freshGoldB = safeReadField(dbDataB.data, 'gold', 0);
+      freshXpB = safeReadField(dbDataB.data, 'xp', 0);
+      freshStatpointsB = safeReadField(dbDataB.data, 'statpoints', 0) || safeReadField(dbDataB.data, 'statPoints', 0) || safeReadField(dbDataB.data, 'StatPoints', 0);
+      
+      console.log(`🛡️ [РЕГИСТР-АУДИТ EVIL] Прочитано из БД -> Золото: ${freshGoldB}, Опыт: ${freshXpB}, Очки: ${freshStatpointsB}`);
+    } else {
+      console.error(`🚨 [БД КРИТ] Не удалось прочитать строку Evil (ID: ${playerB.id}) перед выдачей наград!`);
     }
+
   } catch (err) {
-    console.error("❌ Сбой пред-запроса баланса перед PvP наградами:", err);
+    console.error("❌ Фатальный сбой пред-запроса баланса из Supabase:", err);
   }
 
-  // Обновляем параметры объектов в ОЗУ комнаты на основе честных данных из БД
+  // 🔥 СИНХРОНИЗАЦИЯ: Обновляем параметры объектов в ОЗУ комнаты на основе честных данных из БД
   playerA.gold = freshGoldA;
   playerA.xp = freshXpA;
   playerA.statpoints = freshStatpointsA;
@@ -1092,7 +1113,7 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
   // --- ЭТАП 2: НАЧИСЛЕНИЕ НАГРАД И ЛЕВЕЛ-АПЫ ---
   if (result === 'win') {
     const gainedXp = calculatePvpXp(playerA, playerB);
-    playerA.gold += goldReward; 
+    playerA.gold += goldReward; // Прибавляем 25 к честному балансу из БД
     playerA.xp += gainedXp;
     
     logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerA.name}</strong> поверг соперника! Награда: 💰 ${goldReward} монет, ✨ ${gainedXp} опыта.`);
@@ -1109,13 +1130,12 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
 
     playerB.currentHp = 0; // Честный ноль на экране для проигравшего Evil
     
-    // 🔥 ФИКС ЗДОРОВЬЯ ДЛЯ БД: Победителю пишем строго его МАКСИМУМ ХП (чтобы не триггерить античит на входе)
-    dbHpA = getServerMaxHp(playerA); 
+    dbHpA = getServerMaxHp(playerA); // Победителю пишем максимум ХП, чтобы не триггерить античит на входе
     dbHpB = Math.max(1, Math.floor(maxHpB * 0.2)); // Проигравшему пишем легальные 20%
   } 
   else if (result === 'lose') {
     const gainedXp = calculatePvpXp(playerB, playerA);
-    playerB.gold += goldReward; 
+    playerB.gold += goldReward; // Прибавляем 25 к честному балансу Evil из БД
     playerB.xp += gainedXp;
     
     logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerB.name}</strong> одержал верх! Награда: 💰 ${goldReward} монет, ✨ ${gainedXp} опыта.`);
@@ -1132,16 +1152,14 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
 
     playerA.currentHp = 0; // Честный ноль на экране для Яна
     
-    // 🔥 ФИКС ЗДОРОВЬЯ ДЛЯ БД: Победителю Evil пишем его максимум, проигравшему Яну — 20%
     dbHpA = Math.max(1, Math.floor(maxHpA * 0.2)); 
     dbHpB = getServerMaxHp(playerB);
   } 
   else {
-    logs.push(`🏁 <strong>НИЧЬЯ!</strong> Награды аннулированы. Оба бойца восстанавливают силы.`);
+    logs.push(`🏁 <strong>НИЧЬЯ!</strong> Награды аннулированы. Баланс монет сохранен.`);
     playerA.currentHp = 0;
     playerB.currentHp = 0;
     
-    // При ничьей обоим выдаем легальные мирные 20% ХП в базу данных
     dbHpA = Math.max(1, Math.floor(maxHpA * 0.2));
     dbHpB = Math.max(1, Math.floor(maxHpB * 0.2));
   }
@@ -1164,7 +1182,7 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
     }
   });
 
-  // 4. Записываем чистые легальные значения характеристик обратно в Supabase
+  // 4. Параллельная защищенная запись итогов дуэли в Supabase
   try {
     await Promise.all([
       sb.from('players').update({ 
@@ -1172,7 +1190,7 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
         xp: Number(playerA.xp), 
         level: Number(playerA.level), 
         statpoints: Number(playerA.statpoints), 
-        hp: Number(dbHpA) // Гарантированно легальное значение (Максимум или 20%)
+        hp: Number(dbHpA) 
       }).eq('id', Number(playerA.id)),
       
       sb.from('players').update({ 
@@ -1184,7 +1202,7 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
       }).eq('id', Number(playerB.id))
     ]);
 
-    console.log(`☁️ [БД PvP ФИНАЛ] Награды сохранены. Баланс Яна: ${playerA.gold}, Баланс Evil: ${playerB.gold}`);
+    console.log(`☁️ [БД PvP УСПЕХ] Награды и ХП зафиксированы. Баланс Яна: ${playerA.gold}, Баланс Evil: ${playerB.gold}`);
   } catch (err) {
     console.error("❌ Фатальная ошибка сохранения транзакции PvP наград в Supabase:", err);
   }
