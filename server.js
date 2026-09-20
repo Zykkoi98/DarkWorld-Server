@@ -658,12 +658,34 @@ socket.on('save_game_secure', async ({ player }) => {
 
     fighter.turn = { targetUuid, attack, defends: defends || [] };
 
-    const awaitingPlayers = room.teamA.filter(p => !p.isBot && p.currentHp > 0 && !p.turn);
-    if (awaitingPlayers.length === 0) {
+ // 🔥 🔥 🔥 PvP АНТИ-СПАМ ФИКС: Жесткая проверка готовности обоих игроков
+    let canExecuteRound = false;
+
+    if (room.type === 'pve') {
+      // В PvE режиме ждем ход только от живого игрока (команда А)
+      const awaitingPvE = room.teamA.filter(p => !p.isBot && p.currentHp > 0 && !p.turn);
+      if (awaitingPvE.length === 0) canExecuteRound = true;
+    } 
+    else if (room.type === 'pvp') {
+      // В PvP режиме раунд запускается СТРОГО когда и Игрок 1, и Игрок 2 прислали ходы!
+      const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
+      const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
+      
+      // Если количество присланных ходов равно количеству живых участников дуэли
+      if (submittedTurnsCount === alivePlayersCount) {
+        canExecuteRound = true;
+      } else {
+        console.log(`⏳ [PvP ОЖИДАНИЕ] Ход от ${fighter.name} принят. Ожидаем соперника... (Сделано ходов: ${submittedTurnsCount}/${alivePlayersCount})`);
+      }
+    }
+
+    // Если все живые участники сделали свой выбор — даем команду на расчет раунда!
+    if (canExecuteRound) {
+      console.log(`⚔️ [РАУНД ГОТОВ] Все ходы получены в комнате ${roomId}. Запускаем калькулятор...`);
       clearTimeout(room.timeoutRef);
       executeRoundCalculations(roomId);
     }
-  });
+  }); 
 
   socket.on('instant_use_potion', async ({ roomId }) => {
     const room = activeRooms[roomId];
@@ -781,14 +803,29 @@ function startServerTurnTimer(roomId) {
 
   room.timeoutRef = setTimeout(() => {
     if (!activeRooms[roomId]) return;
-    room.teamA.forEach(f => {
+    
+    console.log(`⏱️ [ТАЙМАУТ БОЯ] Время на ход истекло в комнате ${roomId}. Авто-пропуск для АФК.`);
+
+    // Собираем всех живых участников из обеих команд, кто не успел походить за 30 секунд
+    const allFighters = [...room.teamA, ...room.teamB];
+    
+    allFighters.forEach(f => {
       if (!f.isBot && !f.turn && f.currentHp > 0) {
-        const aliveEnemies = room.teamB.filter(e => e.currentHp > 0);
-        f.turn = { targetUuid: aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null, attack: null, defends: [] };
+        const opposingTeam = room.teamA.includes(f) ? room.teamB : room.teamA;
+        const aliveEnemies = opposingTeam.filter(e => e.currentHp > 0);
+        
+        // Принудительно ставим пропуск хода
+        f.turn = { 
+          targetUuid: aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null, 
+          attack: null, 
+          defends: [] 
+        };
       }
     });
+    
+    // Запускаем принудительный расчет раунда по таймауту
     executeRoundCalculations(roomId);
-  }, 30000);
+  }, 30000); // Полные 30 секунд на размышление
 }
 
 // ============================================================================
