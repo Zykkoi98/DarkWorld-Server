@@ -650,42 +650,37 @@ socket.on('save_game_secure', async ({ player }) => {
   });
 
   socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
-    const room = activeRooms[roomId];
-    if (!room) return;
+  const room = activeRooms[roomId];
+  if (!room) return;
 
-    const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
-    if (!fighter || fighter.currentHp <= 0 || fighter.turn) return;
+  const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
+  if (!fighter || fighter.currentHp <= 0 || fighter.turn) return;
 
-    fighter.turn = { targetUuid, attack, defends: defends || [] };
+  fighter.turn = { targetUuid, attack, defends: defends || [] };
 
- // 🔥 🔥 🔥 PvP АНТИ-СПАМ ФИКС: Жесткая проверка готовности обоих игроков
-    let canExecuteRound = false;
+  let canExecuteRound = false;
 
-    if (room.type === 'pve') {
-      // В PvE режиме ждем ход только от живого игрока (команда А)
-      const awaitingPvE = room.teamA.filter(p => !p.isBot && p.currentHp > 0 && !p.turn);
-      if (awaitingPvE.length === 0) canExecuteRound = true;
-    } 
-    else if (room.type === 'pvp') {
-      // В PvP режиме раунд запускается СТРОГО когда и Игрок 1, и Игрок 2 прислали ходы!
-      const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
-      const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
-      
-      // Если количество присланных ходов равно количеству живых участников дуэли
-      if (submittedTurnsCount === alivePlayersCount) {
-        canExecuteRound = true;
-      } else {
-        console.log(`⏳ [PvP ОЖИДАНИЕ] Ход от ${fighter.name} принят. Ожидаем соперника... (Сделано ходов: ${submittedTurnsCount}/${alivePlayersCount})`);
-      }
+  if (room.type === 'pve') {
+    const awaitingPvE = room.teamA.filter(p => !p.isBot && p.currentHp > 0 && !p.turn);
+    if (awaitingPvE.length === 0) canExecuteRound = true;
+  } 
+  else if (room.type === 'pvp') {
+    // 🔥 Жесткое ожидание: раунд считается ТОЛЬКО когда сделано столько ходов, сколько на арене живых людей!
+    const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
+    const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
+    
+    if (submittedTurnsCount === alivePlayersCount) {
+      canExecuteRound = true;
+    } else {
+      console.log(`⏳ [PvP ОЖИДАНИЕ] Ход принят. Ждем соперника... (${submittedTurnsCount}/${alivePlayersCount})`);
     }
+  }
 
-    // Если все живые участники сделали свой выбор — даем команду на расчет раунда!
-    if (canExecuteRound) {
-      console.log(`⚔️ [РАУНД ГОТОВ] Все ходы получены в комнате ${roomId}. Запускаем калькулятор...`);
-      clearTimeout(room.timeoutRef);
-      executeRoundCalculations(roomId);
-    }
-  }); 
+  if (canExecuteRound) {
+    clearTimeout(room.timeoutRef);
+    executeRoundCalculations(roomId);
+  }
+}); 
 
   socket.on('instant_use_potion', async ({ roomId }) => {
     const room = activeRooms[roomId];
@@ -738,12 +733,14 @@ socket.on('save_game_secure', async ({ player }) => {
 // ===== ⚔️ ЧАСТЬ 3.2: ДВИЖОК РАУНДОВ, PvP И СОХРАНЕНИЕ НАГРАД =====
 // ============================================================================
 
-// Инициализатор защищенной PvP-комнаты между двумя игроками
+// ============================================================================
+// 🏆 СЕРВЕРНАЯ ИНИЦИАЛИЗАЦИЯ PvP С КОНКРЕТНЫМИ СТАТИЧНЫМИ UUID
+// ============================================================================
 function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
   const p1MaxHp = getServerMaxHp(p1Data);
   const p2MaxHp = getServerMaxHp(p2Data);
 
-  // Игрок 1 (Организатор) — идет в команду A
+  // Игрок 1 — жесткий UUID без привязки к дате
   const teamA = [{
     uuid: `player_${p1Data.id}`, 
     id: String(p1Data.id), 
@@ -764,13 +761,13 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
     inventory: p1Data.inventory || {}
   }];
 
-  // Игрок 2 (Принявший вызов) — идет в команду B
+  // Игрок 2 — жесткий UUID без привязки к дате
   const teamB = [{
-    uuid: `player_${p2Data.id}`, // 🔥 Исправлено: теперь клиент видит префикс player_, а не bot_
+    uuid: `player_${p2Data.id}`, 
     id: String(p2Data.id), 
     name: p2Data.name, 
     icon: '👤', 
-    isBot: false, // 🔥 Критично: false, чтобы сервер не управлял им как монстром!
+    isBot: false, 
     level: Number(p2Data.level), 
     strength: Number(p2Data.strength ?? p2Data.stats?.strength ?? 1), 
     agility: Number(p2Data.agility ?? p2Data.stats?.agility ?? 1),
@@ -787,8 +784,9 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
 
   activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, timeoutRef: null };
   
-  console.log(`⚔️ [PvP МОСТ] Создана комната: ${roomId}`);
+  console.log(`⚔️ [PvP МОСТ ВЫСТРОЕН] Комната: ${roomId}. Запуск таймера...`);
   
+  // 🔥 Даем сокетам 150мс фонового времени, чтобы завершить удаление лобби и надежно принять редирект
   setTimeout(() => {
     io.emit('arena_lobby_updated');
     io.emit('arena_redirect_to_battle', { roomId: roomId });
