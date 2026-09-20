@@ -734,26 +734,48 @@ socket.on('save_game_secure', async ({ player }) => {
 // ============================================================================
 
 // ============================================================================
-// 🏆 СЕРВЕРНАЯ ИНИЦИАЛИЗАЦИЯ PvP С КОНКРЕТНЫМИ СТАТИЧНЫМИ UUID
+// 🏆 ИСПРАВЛЕННАЯ PvP ИНИЦИАЛИЗАЦИЯ: ЧЕСТНЫЙ ПЕРЕСЧЕТ ХП ОТ СТАТОВ ИЗ БД
 // ============================================================================
 function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
-  const p1MaxHp = getServerMaxHp(p1Data);
-  const p2MaxHp = getServerMaxHp(p2Data);
+  // Вытаскиваем характеристики Игрока 1 (Организатора) с учетом плоской структуры БД
+  const p1Stats = {
+    strength: Number(p1Data.strength ?? p1Data.stats?.strength ?? 1),
+    agility: Number(p1Data.agility ?? p1Data.stats?.agility ?? 1),
+    endurance: Number(p1Data.endurance ?? p1Data.stats?.endurance ?? 1),
+    intellect: Number(p1Data.intellect ?? p1Data.stats?.intellect ?? 1),
+    luck: Number(p1Data.luck ?? p1Data.stats?.luck ?? 1),
+    equipped: p1Data.equipped || {}
+  };
 
-  // Игрок 1 — жесткий UUID без привязки к дате
+  // Вытаскиваем характеристики Игрока 2 (Принявшего вызов)
+  const p2Stats = {
+    strength: Number(p2Data.strength ?? p2Data.stats?.strength ?? 1),
+    agility: Number(p2Data.agility ?? p2Data.stats?.agility ?? 1),
+    endurance: Number(p2Data.endurance ?? p2Data.stats?.endurance ?? 1),
+    intellect: Number(p2Data.intellect ?? p2Data.stats?.intellect ?? 1),
+    luck: Number(p2Data.luck ?? p2Data.stats?.luck ?? 1),
+    equipped: p2Data.equipped || {}
+  };
+
+  // Рассчитываем честный легальный максимум здоровья на основе выносливости и вещей
+  const p1MaxHp = getServerMaxHp(p1Stats);
+  const p2MaxHp = getServerMaxHp(p2Stats);
+
+  // Игрок 1 (Организатор)
   const teamA = [{
     uuid: `player_${p1Data.id}`, 
     id: String(p1Data.id), 
     name: p1Data.name, 
     icon: '👤', 
     isBot: false,
-    level: Number(p1Data.level), 
-    strength: Number(p1Data.stats?.strength ?? p1Data.strength ?? 1), 
-    agility: Number(p1Data.stats?.agility ?? p1Data.agility ?? 1),
-    endurance: Number(p1Data.stats?.endurance ?? p1Data.endurance ?? 1), 
-    intellect: Number(p1Data.stats?.intellect ?? p1Data.intellect ?? 1), 
-    luck: Number(p1Data.stats?.luck ?? p1Data.luck ?? 1),
-    currentHp: Math.min(Number(p1Hp), p1MaxHp), 
+    level: Number(p1Data.level ?? 1), 
+    strength: p1Stats.strength, 
+    agility: p1Stats.agility,
+    endurance: p1Stats.endurance, 
+    intellect: p1Stats.intellect, 
+    luck: p1Stats.luck,
+    // Если игрок был ранен в городе, берем его текущее ХП, но не больше честного боевого максимума!
+    currentHp: Math.min(Number(p1Hp || p1MaxHp), p1MaxHp), 
     maxHp: p1MaxHp, 
     socketId: null, 
     turn: null,
@@ -761,20 +783,20 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
     inventory: p1Data.inventory || {}
   }];
 
-  // Игрок 2 — жесткий UUID без привязки к дате
+  // Игрок 2 (Принявший вызов)
   const teamB = [{
     uuid: `player_${p2Data.id}`, 
     id: String(p2Data.id), 
     name: p2Data.name, 
     icon: '👤', 
     isBot: false, 
-    level: Number(p2Data.level), 
-    strength: Number(p2Data.strength ?? p2Data.stats?.strength ?? 1), 
-    agility: Number(p2Data.agility ?? p2Data.stats?.agility ?? 1),
-    endurance: Number(p2Data.endurance ?? p2Data.stats?.endurance ?? 1), 
-    intellect: Number(p2Data.intellect ?? p2Data.stats?.intellect ?? 1), 
-    luck: Number(p2Data.luck ?? p2Data.stats?.luck ?? 1),
-    currentHp: Number(p2Data.hp || p2MaxHp), 
+    level: Number(p2Data.level ?? 1), 
+    strength: p2Stats.strength, 
+    agility: p2Stats.agility,
+    endurance: p2Stats.endurance, 
+    intellect: p2Stats.intellect, 
+    luck: p2Stats.luck,
+    currentHp: Math.min(Number(p2Data.hp || p2MaxHp), p2MaxHp), 
     maxHp: p2MaxHp, 
     socketId: null, 
     turn: null,
@@ -784,9 +806,10 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
 
   activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, timeoutRef: null };
   
-  console.log(`⚔️ [PvP МОСТ ВЫСТРОЕН] Комната: ${roomId}. Запуск таймера...`);
+  console.log(`\n⚔️ [PvP СТАРТ С БАЛАНСОМ ХП] Комната: ${roomId}`);
+  console.log(`📊 Игрок 1 (${p1Data.name}): Выносливость ${p1Stats.endurance} -> Боевое ХП: ${p1MaxHp}`);
+  console.log(`📊 Игрок 2 (${p2Data.name}): Выносливость ${p2Stats.endurance} -> Боевое ХП: ${p2MaxHp}\n`);
   
-  // 🔥 Даем сокетам 150мс фонового времени, чтобы завершить удаление лобби и надежно принять редирект
   setTimeout(() => {
     io.emit('arena_lobby_updated');
     io.emit('arena_redirect_to_battle', { roomId: roomId });
