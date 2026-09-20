@@ -518,25 +518,42 @@ socket.on('save_game_secure', async ({ player }) => {
     } catch (e) { console.error(e); }
   });
 
-  socket.on('arena_accept_challenge_request', async ({ myId, opponentId, playerData, currentHp }) => {
+ socket.on('arena_accept_challenge_request', async ({ myId, opponentId, playerData, currentHp }) => {
     try {
-      // Атомарный перехват: кто первый удалил из базы, тот и забрал вызов
-      const { data, error } = await sb.from('arena_lobby').delete().eq('id', Number(opponentId)).select();
+      const nMyId = Number(myId);
+      const nOpponentId = Number(opponentId);
+
+      console.log(`🎯 Игрок [ID: ${nMyId}] пытается принять вызов от [ID: ${nOpponentId}]`);
+
+      // 1. Атомарный перехват: кто первый удалил из базы, тот и забрал вызов
+      const { data, error } = await sb.from('arena_lobby').delete().eq('id', nOpponentId).select();
       
       if (error || !data || data.length === 0) {
+        console.warn(`⚠️ [PvP ОТКЛОНЕНО] Вызов игрока ${nOpponentId} уже занят или удален.`);
         return socket.emit('error', 'Вызов уже принят другим гладиатором!');
       }
 
-      // Создаем уникальную PvP комнату
+      // 🔥 🔥 🔥 АВТО-ОТМЕНА СВОЕЙ ЗАЯВКИ: Если МЫ сами опубликовали вызов в лобби, 
+      // но решили принять чужую карточку — удаляем НАШУ строку из очереди Арены!
+      await sb.from('arena_lobby').delete().eq('id', nMyId);
+
+      console.log(`🗑️ [ЛОББИ ОЧИЩЕНО] Заявки игроков ${nOpponentId} и ${nMyId} успешно убраны с доски объявлений.`);
+
+      // 2. Создаем уникальную PvP комнату для поединка
       const roomId = `room_pvp_${opponentId}_vs_${myId}_${Date.now()}`;
       
-      // Запрашиваем из базы профиль оппонента для сборки комнаты
-      const { data: oppData } = await sb.from('players').select('*').eq('id', Number(opponentId)).single();
-      if (!oppData) return socket.emit('error', 'Ошибка загрузки профиля оппонента.');
+      // Запрашиваем из базы Supabase эталонный профиль оппонента для сборки комнаты
+      const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq('id', nOpponentId).maybeSingle();
+      if (oppErr || !oppData) {
+        console.error(`❌ Ошибка загрузки профиля оппонента ${nOpponentId}:`, oppErr);
+        return socket.emit('error', 'Не удалось загрузить профиль соперника для старта поединка.');
+      }
 
-      // Логика инициализации PvP будет вызвана в Части 3
+      // Запускаем инициализацию PvP-комнаты, распределение ХП и автоматический редирект
       initiatePvpMatch(roomId, playerData, currentHp, oppData);
-    } catch (e) { console.error(e); }
+    } catch (e) { 
+      console.error("❌ Критический сбой при обработке arena_accept_challenge_request:", e); 
+    }
   });
 
   // ============================================================================
@@ -584,6 +601,12 @@ socket.on('save_game_secure', async ({ player }) => {
   socket.on('search_pve_match', async ({ playerData, monsterKey, count }) => {
     try {
       const sPlayerId = String(playerData.id);
+      const nPlayerId = Number(playerData.id);
+
+      // 🔥 🔥 🔥 АВТО-ОТМЕНА ЛОББИ: Если у игрока висела заявка на Арене, удаляем её!
+      // Так как он ушел в PvE (Лес), его очередь на PvP должна аннулироваться
+      await sb.from('arena_lobby').delete().eq('id', nPlayerId);
+      io.emit('arena_lobby_updated'); // Обновляем списки Арены у всех, кто в городе
 
       // Проверка на дубликат боя в ОЗУ сервера
       const existingRoomId = Object.keys(activeRooms).find(rId => 
