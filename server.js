@@ -311,50 +311,33 @@ socket.on('save_game_secure', async ({ player }) => {
   const nUserId = Number(player.id);
 
   try {
-    // 🔥 Защита: Сначала запрашиваем актуальные критические данные из БД, которым мы верим
-    const { data: dbPlayer, error: fetchErr } = await sb
+    console.log(`📦 [МИРНОЕ СОХРАНЕНИЕ] Игрок ${nUserId} сохраняет рюкзак и куклу...`);
+
+    // 🔥 ГЛАВНЫЙ АНТИЧИТ-ФИЛЬТР: Используем .update() вместо .upsert()!
+    // Мы передаем в Supabase ТОЛЬКО те поля, которые клиенту РАЗРЕШЕНО менять в городе.
+    // Золото, Опыт, Уровень и ХП полностью ИГНОРИРУЮТСЯ и никогда не сотрутся!
+    const { error: updateErr } = await sb
       .from('players')
-      .select('gold, xp, level, hp, strength, agility, endurance, intellect, luck, statpoints')
-      .eq('id', nUserId)
-      .maybeSingle();
+      .update({
+        name: player.name,
+        avatar: player.avatar || "assets/avatars/hero1.png",
+        currenttownindex: Number(player.currentTownIndex ?? 0),
+        inventory: player.inventory || { equipment: [], resources: [], consumables: [] },
+        equipped: player.equipped || { rings: [null, null, null] }
+      })
+      .eq('id', nUserId);
 
-    if (fetchErr || !dbPlayer) {
-      console.error(`[SAVE ANOMALY] Игрок ${nUserId} не найден при попытке сохранения.`);
-      return;
-    }
-
-    // Собираем пакет для записи: критические статы берем ИЗ БАЗЫ, а рюкзак/куклу — от клиента
-    const payload = {
-      id: nUserId,
-      name: player.name,
-      avatar: player.avatar || "assets/avatars/hero1.png",
-      currenttownindex: Number(player.currentTownIndex ?? 0),
-      
-      // Данные инвентаря клиент отправлять может (сортировка, перекладывание)
-      inventory: player.inventory,
-      equipped: player.equipped,
-
-      // 🛑 ЖЕСТКИЙ ИГНОР КЛИЕНТСКИХ НАКРУТОК: берем строго серверные значения из БД
-      gold: Number(dbPlayer.gold),
-      xp: Number(dbPlayer.xp),
-      level: Number(dbPlayer.level),
-      hp: Number(dbPlayer.hp),
-      strength: Number(dbPlayer.strength),
-      agility: Number(dbPlayer.agility),
-      endurance: Number(dbPlayer.endurance),
-      intellect: Number(dbPlayer.intellect),
-      luck: Number(dbPlayer.luck),
-      statpoints: Number(dbPlayer.statpoints)
-    };
-
-    const { error: upsertErr } = await sb.from('players').upsert(payload);
-    if (!upsertErr) {
+    if (!updateErr) {
       socket.emit('save_game_success_confirmed');
+      console.log(`✅ [МИРНОЕ СОХРАНЕНИЕ] Рюкзак игрока ${nUserId} успешно синхронизирован.`);
+    } else {
+      console.error(`❌ Ошибка Supabase при мирном сохранении игрока ${nUserId}:`, updateErr);
     }
   } catch (e) {
     console.error("❌ Сбой безопасного сохранения на сервере:", e);
   }
 });
+
 // ============================================================================
   // 🛡️ АНТИЧИТ-ОБРАБОТЧИК: БЕЗОПАСНОЕ РАСПРЕДЕЛЕНИЕ ХАРАКТЕРИСТИК ИЗ БУФЕРА
   // ============================================================================
