@@ -971,14 +971,18 @@ function executeRoundCalculations(roomId) {
   }
 }
 
-// Расчет наград за победу и сохранение прогресса в Supabase
 async function finalizePveBattle(room, result, logs, finalRound) {
   const player = room.teamA[0];
   if (!player) return delete activeRooms[room.id];
 
-  let gainedXp = 0; let gainedGold = 0;
+  let gainedXp = 0; 
+  let gainedGold = 0;
+  
+  // Переменная для записи здоровья в базу данных Supabase
+  let dbHpPayload = player.currentHp;
 
   if (result === 'win') {
+    // Подсчитываем суммарную награду со всех убитых монстров в комнате
     room.teamB.forEach(monster => {
       gainedXp += monster.rewardXp || 0;
       gainedGold += monster.rewardGold || 0;
@@ -987,44 +991,68 @@ async function finalizePveBattle(room, result, logs, finalRound) {
     player.gold += gainedGold;
     player.xp += gainedXp;
     
-    // 🔥 ФИКС: Пересчитываем уровень игрока на сервере после получения нового опыта!
+    // 🔥 СЕРВЕРНЫЙ АНТИЧИТ УРОВНЕЙ: Пересчитываем уровень игрока после получения опыта
     const oldLevel = Number(player.level || 1);
     const correctLevel = getServerCorrectLevelByXp(player.xp);
     
     if (correctLevel > oldLevel) {
       const levelsGained = correctLevel - oldLevel;
-      // Честно начисляем по +5 очков за каждый новый уровень
+      // Честно начисляем по +5 свободных очков за каждый левел-ап
       player.statpoints = (player.statpoints || 0) + (levelsGained * 5);
       player.level = correctLevel;
       
-      // Полностью восстанавливаем здоровье при повышении уровня
+      // Полностью восстанавливаем здоровье при повышении уровня (и на экране, и в БД)
       player.currentHp = getServerMaxHp(player); 
+      dbHpPayload = player.currentHp;
       
       logs.push(`🎉 <strong>ПОВЫШЕНИЕ УРОВНЯ!</strong> Теперь вы ${correctLevel} уровня! Получено +${levelsGained * 5} очков характеристик.`);
+    } else {
+      // Если уровень не вырос, в базу уйдет тот остаток ХП, с которым игрок закончил бой
+      dbHpPayload = player.currentHp;
     }
 
     logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
-  } else {
+  } 
+  // 🔥 ЕСЛИ ИГРОКА УБИЛИ МОНСТРЫ
+  else {
     logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе.`);
-    player.currentHp = Math.max(1, Math.floor(player.maxHp * 0.2));
+    
+    // 1. НА ЭКРАНЕ БОЯ: Оставляем честный 0 ХП, пока открыта вкладка логов!
+    player.currentHp = 0; 
+    
+    // 2. ДЛЯ БАЗЫ ДАННЫХ: Тихо рассчитываем 20% ХП от боевого максимума для реанимации
+    dbHpPayload = Math.max(1, Math.floor(player.maxHp * 0.2));
   }
 
+  // 3. Отправляем финальный пакет раунда на клиент (Ян увидит 0 ХП при поражении)
   if (player.socketId) {
-    io.to(player.socketId).emit('round_result', { turnCount: finalRound, logs, isOver: true, resultType: result, teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) });
+    io.to(player.socketId).emit('round_result', { 
+      turnCount: finalRound, 
+      logs, 
+      isOver: true, 
+      resultType: result, 
+      teamA: sanitizeTeam(room.teamA), 
+      teamB: sanitizeTeam(room.teamB) 
+    });
   }
 
+  // 4. Синхронизируем чистые и проверенные данные с базой Supabase
   try {
-    // Теперь в базу данных уйдет 100% обновленный и правильный level и statpoints
     await sb.from('players').update({ 
       gold: player.gold, 
       xp: player.xp, 
-      hp: player.currentHp, 
-      level: player.level, // Уровень запишется корректно!
+      hp: dbHpPayload, // 👈 В базу уходит тихое восстановление (20%), а не ноль!
+      level: player.level, 
       statpoints: player.statpoints, 
       inventory: player.inventory 
     }).eq('id', Number(player.id));
-  } catch (err) { console.error(err); }
+    
+    console.log(`☁️ [БД PvE ЗАПИСЬ] Итоги поединка сохранены. Здоровье в БД синхронизировано: ${dbHpPayload} ед.`);
+  } catch (err) { 
+    console.error("❌ Ошибка сохранения итогов PvE боя в Supabase:", err); 
+  }
   
+  // 5. Вычищаем комнату из оперативной памяти боевого сервера
   delete activeRooms[room.id];
 }
 // ============================================================================
