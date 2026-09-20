@@ -722,23 +722,66 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
   const p2MaxHp = getServerMaxHp(p2Data);
 
   const teamA = [{
-    uuid: `player_${p1Data.id}`, id: String(p1Data.id), name: p1Data.name, icon: '👤', isBot: false,
-    level: Number(p1Data.level), strength: Number(p1Data.stats.strength), agility: Number(p1Data.stats.agility),
-    endurance: Number(p1Data.stats.endurance), intellect: Number(p1Data.stats.intellect), luck: Number(p1Data.stats.luck),
-    currentHp: Math.min(Number(p1Hp), p1MaxHp), maxHp: p1MaxHp, socketId: null, turn: null,
-    equipped: p1Data.equipped, inventory: p1Data.inventory
+    uuid: `player_${p1Data.id}`, 
+    id: String(p1Data.id), 
+    name: p1Data.name, 
+    icon: '👤', 
+    isBot: false,
+    level: Number(p1Data.level), 
+    strength: Number(p1Data.stats?.strength ?? p1Data.strength ?? 1), 
+    agility: Number(p1Data.stats?.agility ?? p1Data.agility ?? 1),
+    endurance: Number(p1Data.stats?.endurance ?? p1Data.endurance ?? 1), 
+    intellect: Number(p1Data.stats?.intellect ?? p1Data.intellect ?? 1), 
+    luck: Number(p1Data.stats?.luck ?? p1Data.luck ?? 1),
+    currentHp: Math.min(Number(p1Hp), p1MaxHp), 
+    maxHp: p1MaxHp, 
+    socketId: null, // Привяжется, как только клиент сделает реконнект в комнату
+    turn: null,
+    equipped: p1Data.equipped || {}, 
+    inventory: p1Data.inventory || {}
   }];
 
   const teamB = [{
-    uuid: `player_${p2Data.id}`, id: String(p2Data.id), name: p2Data.name, icon: '👤', isBot: false,
-    level: Number(p2Data.level), strength: Number(p2Data.strength), agility: Number(p2Data.agility),
-    endurance: Number(p2Data.endurance), intellect: Number(p2Data.intellect), luck: Number(p2Data.luck),
-    currentHp: Number(p2Data.hp), maxHp: p2MaxHp, socketId: null, turn: null,
-    equipped: p2Data.equipped, inventory: p2Data.inventory
+    uuid: `player_${p2Data.id}`, 
+    id: String(p2Data.id), 
+    name: p2Data.name, 
+    icon: '👤', 
+    isBot: false,
+    level: Number(p2Data.level), 
+    strength: Number(p2Data.strength ?? p2Data.stats?.strength ?? 1), 
+    agility: Number(p2Data.agility ?? p2Data.stats?.agility ?? 1),
+    endurance: Number(p2Data.endurance ?? p2Data.stats?.endurance ?? 1), 
+    intellect: Number(p2Data.intellect ?? p2Data.stats?.intellect ?? 1), 
+    luck: Number(p2Data.luck ?? p2Data.stats?.luck ?? 1),
+    currentHp: Number(p2Data.hp), 
+    maxHp: p2MaxHp, 
+    socketId: null, 
+    turn: null,
+    equipped: p2Data.equipped || {}, 
+    inventory: p2Data.inventory || {}
   }];
 
-  activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, timeoutRef: null };
-  io.emit('arena_lobby_updated');
+  // 1. Записываем комнату в оперативную память сервера
+  activeRooms[roomId] = { 
+    id: roomId, 
+    type: 'pvp', 
+    teamA, 
+    teamB, 
+    turnCount: 1, 
+    timeoutRef: null 
+  };
+
+  console.log(`⚔️ [PvP СТАРТ] Создана комната ${roomId}: ${p1Data.name} vs ${p2Data.name}`);
+
+  // 2. 🔥 ГЛАВНЫЙ ФИКС: Вещаем глобальный сигнал перенаправления на боевой экран!
+  // Родные сокеты игроков поймают эту команду в лобби арены и вызовут редирект в battle.html
+  io.emit('arena_lobby_updated'); 
+  
+  // Отправляем персональные сигналы участникам по их ID, если они онлайн в системе
+  io.emit('arena_redirect_to_battle', { roomId: roomId });
+
+  // 3. Запускаем серверный таймер на 30 секунд для защиты от АФК
+  startServerTurnTimer(roomId);
 }
 
 function startServerTurnTimer(roomId) {
@@ -830,15 +873,32 @@ function executeRoundCalculations(roomId) {
   const currentRound = room.turnCount;
   room.turnCount++;
 
+// --- КОНЕЦ РАУНДА: ПРОВЕРКА ЗАВЕРШЕНИЯ ПОЕДИНКА ---
   if (isTeamADead || isTeamBDead || room.turnCount > 40) {
     let result = 'draw';
-    if (!isTeamADead && isTeamBDead) result = 'win';
-    if (isTeamADead && !isTeamBDead) result = 'lose';
+    if (!isTeamADead && isTeamBDead) result = 'win'; // Победила команда А
+    if (isTeamADead && !isTeamBDead) result = 'lose'; // Победила команда B
 
-    if (room.type === 'pve') finalizePveBattle(room, result, logs, currentRound);
+    // Если это стандартная битва с монстрами на природе
+    if (room.type === 'pve') {
+      finalizePveBattle(room, result, logs, currentRound);
+    } 
+    // 🔥 🔥 ФИКС: Если это гладиаторская дуэль 1х1 на Арене!
+    else if (room.type === 'pvp') {
+      finalizePvpBattle(room, result, logs, currentRound);
+    }
   } else {
-    room.teamA.forEach(p => {
-      if (p.socketId) io.to(p.socketId).emit('round_result', { turnCount: currentRound, logs, isOver: false, teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) });
+    // Бой продолжается — рассылаем новые пакеты данных всем живым сокетам комнаты
+    [...room.teamA, ...room.teamB].forEach(p => {
+      if (p.socketId) {
+        io.to(p.socketId).emit('round_result', { 
+          turnCount: currentRound, 
+          logs, 
+          isOver: false, 
+          teamA: sanitizeTeam(room.teamA), 
+          teamB: sanitizeTeam(room.teamB) 
+        });
+      }
     });
     startServerTurnTimer(roomId);
   }
@@ -900,6 +960,64 @@ async function finalizePveBattle(room, result, logs, finalRound) {
   
   delete activeRooms[room.id];
 }
+// ============================================================================
+// 🏆 ФИЛЬТР ЗАВЕРШЕНИЯ PvP МАТЧА: СХРАНЕНИЕ ХП И НАЧИСЛЕНИЕ НАГРАД
+// ============================================================================
+async function finalizePvpBattle(room, result, logs, finalRound) {
+  const playerA = room.teamA[0];
+  const playerB = room.teamB[0];
+  
+  if (!playerA || !playerB) return delete activeRooms[room.id];
 
+  console.log(`🏁 [PvP ФИНАЛ] Матч окончен в комнате ${room.id}. Результат команды А: ${result}`);
+
+  let goldReward = 25; // Базовая ставка золота за победу на Арене
+
+  if (result === 'win') {
+    logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerA.name}</strong> поверг соперника и получает 💰 ${goldReward} монет!`);
+    playerA.gold = (playerA.gold || 0) + goldReward;
+    
+    // Проигравший выживает, но отправляется в город с 20% ХП
+    playerB.currentHp = Math.max(1, Math.floor(playerB.maxHp * 0.2));
+  } 
+  else if (result === 'lose') {
+    logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerB.name}</strong> одержал верх и получает 💰 ${goldReward} монет!`);
+    playerB.gold = (playerB.gold || 0) + goldReward;
+    
+    // Игрок А отправляется в город с 20% ХП
+    playerA.currentHp = Math.max(1, Math.floor(playerA.maxHp * 0.2));
+  } 
+  else {
+    logs.push(`🏁 <strong>НИЧЬЯ!</strong> Оба бойца обессилены. Боги Арены не выбрали победителя.`);
+    playerA.currentHp = Math.max(1, Math.floor(playerA.maxHp * 0.2));
+    playerB.currentHp = Math.max(1, Math.floor(playerB.maxHp * 0.2));
+  }
+
+  // 1. Отправляем финальные пакеты логов обоим участникам соревнований
+  [playerA, playerB].forEach(p => {
+    if (p.socketId) {
+      io.to(p.socketId).emit('round_result', { 
+        turnCount: finalRound, 
+        logs, 
+        isOver: true, 
+        resultType: (p === playerA) ? result : (result === 'win' ? 'lose' : (result === 'lose' ? 'win' : 'draw')),
+        teamA: sanitizeTeam(room.teamA), 
+        teamB: sanitizeTeam(room.teamB) 
+      });
+    }
+  });
+
+  // 2. Мгновенно синхронизируем новые показатели золота и ХП обоих игроков в Supabase
+  try {
+    await sb.from('players').update({ gold: playerA.gold, hp: playerA.currentHp }).eq('id', Number(playerA.id));
+    await sb.from('players').update({ gold: playerB.gold, hp: playerB.currentHp }).eq('id', Number(playerB.id));
+    console.log(`☁️ [БД PvP ЗАПИСЬ] Профили участников дуэли успешно обновлены в Supabase.`);
+  } catch (err) {
+    console.error("❌ Ошибка записи итогов PvP в Supabase:", err);
+  }
+
+  // 3. Вычищаем комнату из оперативной памяти сервера
+  delete activeRooms[room.id];
+}
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`🚀 Боевой сервер успешно запущен на порту ${PORT}`));
