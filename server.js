@@ -618,7 +618,7 @@ socket.on('save_game_secure', async ({ player }) => {
         endurance: Number(dbPlayer.endurance), intellect: Number(dbPlayer.intellect), luck: Number(dbPlayer.luck),
         currentHp: Math.min(Number(dbPlayer.hp), pMaxHp), maxHp: pMaxHp, socketId: socket.id, turn: null,
         gold: Number(dbPlayer.gold), xp: Number(dbPlayer.xp), statpoints: Number(dbPlayer.statpoints),
-        equipped: dbPlayer.equipped || {}, inventory: dbPlayer.inventory || {}
+        equipped: dbPlayer.equipped || {}, inventory: dbPlayer.inventory || {}, afkTurns: 0 
       }];
 
       const teamB = [];
@@ -649,38 +649,51 @@ socket.on('save_game_secure', async ({ player }) => {
     }
   });
 
-  socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
-  const room = activeRooms[roomId];
-  if (!room) return;
+ socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
+    const room = activeRooms[roomId];
+    if (!room) return;
 
-  const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
-  if (!fighter || fighter.currentHp <= 0 || fighter.turn) return;
-
-  fighter.turn = { targetUuid, attack, defends: defends || [] };
-
-  let canExecuteRound = false;
-
-  if (room.type === 'pve') {
-    const awaitingPvE = room.teamA.filter(p => !p.isBot && p.currentHp > 0 && !p.turn);
-    if (awaitingPvE.length === 0) canExecuteRound = true;
-  } 
-  else if (room.type === 'pvp') {
-    // 🔥 Жесткое ожидание: раунд считается ТОЛЬКО когда сделано столько ходов, сколько на арене живых людей!
-    const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
-    const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
+    // Ищем бойца, который отправил ход с клиента по его socket.id
+    const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
     
-    if (submittedTurnsCount === alivePlayersCount) {
-      canExecuteRound = true;
-    } else {
-      console.log(`⏳ [PvP ОЖИДАНИЕ] Ход принят. Ждем соперника... (${submittedTurnsCount}/${alivePlayersCount})`);
-    }
-  }
+    // Защита: если боец не найден, мертв или уже походил в этом раунде — игнорируем запрос
+    if (!fighter || fighter.currentHp <= 0 || fighter.turn) return;
 
-  if (canExecuteRound) {
-    clearTimeout(room.timeoutRef);
-    executeRoundCalculations(roomId);
-  }
-}); 
+    // Записываем тактический выбор игрока в оперативную память сервера
+    fighter.turn = { targetUuid, attack, defends: defends || [] };
+
+    // 🔥 ФИКС АНТИ-АФК: Если игрок сходил сам вовремя через кнопку — 
+    // его счётчик пропусков раундов полностью обнуляется!
+    fighter.afkTurns = 0; 
+    console.log(`🎯 [ХОД ПРИНЯТ] Игрок ${fighter.name} сделал выбор. Счётчик АФК сброшен в 0.`);
+
+    let canExecuteRound = false;
+
+    // Проверяем условия готовности раунда в зависимости от типа комнаты
+    if (room.type === 'pve') {
+      // В PvE режиме ждем ход только от живого игрока (команда А)
+      const awaitingPvE = room.teamA.filter(p => !p.isBot && p.currentHp > 0 && !p.turn);
+      if (awaitingPvE.length === 0) canExecuteRound = true;
+    } 
+    else if (room.type === 'pvp') {
+      // В PvP режиме раунд запускается СТРОГО когда и Игрок 1, и Игрок 2 прислали ходы!
+      const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
+      const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
+      
+      if (submittedTurnsCount === alivePlayersCount) {
+        canExecuteRound = true;
+      } else {
+        console.log(`⏳ [PvP ОЖИДАНИЕ] Ход от ${fighter.name} записан. Ожидаем соперника... (Сделано ходов: ${submittedTurnsCount}/${alivePlayersCount})`);
+      }
+    }
+
+    // Если все живые участники сделали свой выбор — даем команду на расчет раунда!
+    if (canExecuteRound) {
+      console.log(`⚔️ [РАУНД ГОТОВ] Все ходы получены в комнате ${roomId}. Запускаем калькулятор...`);
+      clearTimeout(room.timeoutRef); // Сбрасываем 30-секундный таймер ожидания ходов
+      executeRoundCalculations(roomId); // Переходим к обмену ударами
+    }
+  });
 
   socket.on('instant_use_potion', async ({ roomId }) => {
     const room = activeRooms[roomId];
@@ -780,7 +793,8 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
     socketId: null, 
     turn: null,
     equipped: p1Data.equipped || {}, 
-    inventory: p1Data.inventory || {}
+    inventory: p1Data.inventory || {},
+    afkTurns: 0
   }];
 
   // Игрок 2 (Принявший вызов)
@@ -801,7 +815,8 @@ function initiatePvpMatch(roomId, p1Data, p1Hp, p2Data) {
     socketId: null, 
     turn: null,
     equipped: p2Data.equipped || {}, 
-    inventory: p2Data.inventory || {}
+    inventory: p2Data.inventory || {},
+    afkTurns: 0
   }];
 
   activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, timeoutRef: null };
@@ -826,28 +841,35 @@ function startServerTurnTimer(roomId) {
   room.timeoutRef = setTimeout(() => {
     if (!activeRooms[roomId]) return;
     
-    console.log(`⏱️ [ТАЙМАУТ БОЯ] Время на ход истекло в комнате ${roomId}. Авто-пропуск для АФК.`);
+    console.log(`⏱️ [ТАЙМАУТ БОЯ] Время на ход истекло в комнате ${roomId}. Проверка АФК.`);
 
-    // Собираем всех живых участников из обеих команд, кто не успел походить за 30 секунд
     const allFighters = [...room.teamA, ...room.teamB];
     
     allFighters.forEach(f => {
-      if (!f.isBot && !f.turn && f.currentHp > 0) {
-        const opposingTeam = room.teamA.includes(f) ? room.teamB : room.teamA;
-        const aliveEnemies = opposingTeam.filter(e => e.currentHp > 0);
-        
-        // Принудительно ставим пропуск хода
-        f.turn = { 
-          targetUuid: aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null, 
-          attack: null, 
-          defends: [] 
-        };
+      if (!f.isBot && f.currentHp > 0) {
+        if (!f.turn) {
+          // 🔥 ИГРОК ПРОПУСТИЛ ХОД: Увеличиваем счетчик АФК раундов!
+          f.afkTurns = (f.afkTurns || 0) + 1;
+          console.log(`🚨 [АФК СЧЕТЧИК] Игрок ${f.name} пропустил ход. Всего пропусков: ${f.afkTurns}/3`);
+
+          const opposingTeam = room.teamA.includes(f) ? room.teamB : room.teamA;
+          const aliveEnemies = opposingTeam.filter(e => e.currentHp > 0);
+          
+          f.turn = { 
+            targetUuid: aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null, 
+            attack: null, 
+            defends: [] 
+          };
+        } else {
+          // 🔥 ИГРОК СХОДИЛ СУМЕШИЛ: Полностью сбрасываем его АФК-грехи в ноль
+          f.afkTurns = 0;
+        }
       }
     });
     
-    // Запускаем принудительный расчет раунда по таймауту
+    // Запускаем расчет раунда
     executeRoundCalculations(roomId);
-  }, 30000); // Полные 30 секунд на размышление
+  }, 30000); 
 }
 
 // ============================================================================
@@ -859,6 +881,32 @@ function executeRoundCalculations(roomId) {
 
   const logs = [];
   const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  // ============================================================================
+  // 🛡️ АНТИ-АФК МОНИТОР: ДИСКВАЛИФИКАЦИЯ ЗА 3 ПРОПУСКА ХОДА ПОДРЯД
+  // ============================================================================
+  const allHumanFighters = [...room.teamA, ...room.teamB].filter(f => !f.isBot && f.currentHp > 0);
+  let afkDisqualifiedFighter = allHumanFighters.find(f => (f.afkTurns || 0) >= 3);
+
+  if (afkDisqualifiedFighter) {
+    console.log(`🚨 [АФК ДИСКВАЛИФИКАЦИЯ] Игрок ${afkDisqualifiedFighter.name} изгнан из боя за 3 пропуска!`);
+    logs.push(`🛑 Гладиатор <strong>${afkDisqualifiedFighter.name}</strong> застыл на месте слишком долго. Боги разгневаны! Техническое поражение.`);
+    
+    // Намертво убиваем ХП проигравшему АФК-игроку
+    afkDisqualifiedFighter.currentHp = 0;
+
+    const isTeamADead = room.teamA.every(f => f.currentHp <= 0);
+    const isTeamBDead = room.teamB.every(f => f.currentHp <= 0);
+    const currentRound = room.turnCount;
+
+    let result = 'draw';
+    if (!isTeamADead && isTeamBDead) result = 'win';
+    if (isTeamADead && !isTeamBDead) result = 'lose';
+
+    // Сразу же принудительно аварийно закрываем матч!
+    if (room.type === 'pve') finalizePveBattle(room, result, logs, currentRound);
+    else if (room.type === 'pvp') finalizePvpBattle(room, result, logs, currentRound);
+    return; // 👈 ВАЖНО: Прерываем выполнение функции, обычный расчет раунда не начнется!
+  }
 
   // ============================================================================
   // 🔥 ФИКС 1: Автоматический ИИ роботов ходит ТОЛЬКО в PvE! В PvP он полностью спит
