@@ -1109,14 +1109,8 @@ async function finalizePveBattle(room, result, logs, finalRound) {
   // 5. Вычищаем комнату из оперативной памяти боевого сервера
   delete activeRooms[room.id];
 }
-// ============================================================================
-// 🏆 ФИЛЬТР ЗАВЕРШЕНИЯ PvP МАТЧА: СХРАНЕНИЕ ХП И НАЧИСЛЕНИЕ НАГРАД
-// ============================================================================
-// ============================================================================
-// 🏆 ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ PvP ФИНАЛ: ЗАЩИТА ОТ ЧИТОВ И СТИРАНИЯ ДАННЫХ
-// ============================================================================
 async function finalizePvpBattle(room, result, logs, finalRound) {
-  // Вытаскиваем одиночные объекты игроков из массивов комнат сервера
+  // Четко достаем одиночные объекты игроков по их индексам из ОЗУ комнаты
   const playerA = room.teamA[0]; // Организатор (Ян)
   const playerB = room.teamB[0]; // Соперник (Evil)
   
@@ -1126,8 +1120,12 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
 
   let goldReward = 25; // Фиксированная награда золота за победу
   
-  let dbHpA = playerA.currentHp;
-  let dbHpB = playerB.currentHp;
+  // Рассчитываем легальные лимиты здоровья на основе выносливости из БД
+  const maxHpA = getServerMaxHp(playerA);
+  const maxHpB = getServerMaxHp(playerB);
+
+  let dbHpA = maxHpA; // По умолчанию даем полный отхил в БД
+  let dbHpB = maxHpB;
 
   // Динамическая формула справедливого распределения опыта
   const calculatePvpXp = (winner, loser) => {
@@ -1165,7 +1163,7 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
     console.error("❌ Сбой пред-запроса баланса перед PvP наградами:", err);
   }
 
-  // Обновляем параметры в ОЗУ комнаты на основе честных данных из БД
+  // Обновляем параметры объектов в ОЗУ комнаты на основе честных данных из БД
   playerA.gold = freshGoldA;
   playerA.xp = freshXpA;
   playerA.statpoints = freshStatpointsA;
@@ -1189,14 +1187,14 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
       const levelsGained = correctLevel - oldLevel;
       playerA.statpoints += (levelsGained * 5);
       playerA.level = correctLevel;
-      playerA.currentHp = getServerMaxHp(playerA);
-      dbHpA = playerA.currentHp;
       logs.push(`🎉 <strong>ПОВЫШЕНИЕ УРОВНЯ!</strong> Гладиатор <strong>${playerA.name}</strong> достиг ${correctLevel} уровня! Получено +${levelsGained * 5} очков статов.`);
     }
 
-    playerB.currentHp = 0; 
-    dbHpA = playerA.currentHp;
-    dbHpB = Math.max(1, Math.floor(playerB.maxHp * 0.2)); 
+    playerB.currentHp = 0; // Честный ноль на экране для проигравшего Evil
+    
+    // 🔥 ФИКС ЗДОРОВЬЯ ДЛЯ БД: Победителю пишем строго его МАКСИМУМ ХП (чтобы не триггерить античит на входе)
+    dbHpA = getServerMaxHp(playerA); 
+    dbHpB = Math.max(1, Math.floor(maxHpB * 0.2)); // Проигравшему пишем легальные 20%
   } 
   else if (result === 'lose') {
     const gainedXp = calculatePvpXp(playerB, playerA);
@@ -1212,28 +1210,30 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
       const levelsGained = correctLevel - oldLevel;
       playerB.statpoints += (levelsGained * 5);
       playerB.level = correctLevel;
-      playerB.currentHp = getServerMaxHp(playerB);
-      dbHpB = playerB.currentHp;
       logs.push(`🎉 <strong>ПОВЫШЕНИЕ УРОВНЯ!</strong> Гладиатор <strong>${playerB.name}</strong> достиг ${correctLevel} уровня! Получено +${levelsGained * 5} очков статов.`);
     }
 
-    playerA.currentHp = 0; 
-    dbHpA = Math.max(1, Math.floor(playerA.maxHp * 0.2)); 
-    dbHpB = playerB.currentHp;
+    playerA.currentHp = 0; // Честный ноль на экране для Яна
+    
+    // 🔥 ФИКС ЗДОРОВЬЯ ДЛЯ БД: Победителю Evil пишем его максимум, проигравшему Яну — 20%
+    dbHpA = Math.max(1, Math.floor(maxHpA * 0.2)); 
+    dbHpB = getServerMaxHp(playerB);
   } 
   else {
-    logs.push(`🏁 <strong>НИЧЬЯ!</strong> Награды аннулированы. Баланс монет сохранен.`);
+    logs.push(`🏁 <strong>НИЧЬЯ!</strong> Награды аннулированы. Оба бойца восстанавливают силы.`);
     playerA.currentHp = 0;
     playerB.currentHp = 0;
-    dbHpA = Math.max(1, Math.floor(playerA.maxHp * 0.2));
-    dbHpB = Math.max(1, Math.floor(playerB.maxHp * 0.2));
+    
+    // При ничьей обоим выдаем легальные мирные 20% ХП в базу данных
+    dbHpA = Math.max(1, Math.floor(maxHpA * 0.2));
+    dbHpB = Math.max(1, Math.floor(maxHpB * 0.2));
   }
 
-  // 🔥 СИНХРОНИЗАЦИЯ МАССИВА: Жестко обновляем ссылки внутри массивов перед запуском sanitizeTeam!
+  // Синхронизируем ссылки внутри массивов перед запуском sanitizeTeam
   room.teamA[0] = playerA;
   room.teamB[0] = playerB;
 
-  // 3. Отправляем финальный пакет раунда гладиаторам
+  // 3. Отправляем финальный пакет раунда гладиаторам (на экранах отобразится 0 ХП)
   [playerA, playerB].forEach(p => {
     if (p.socketId) {
       io.to(p.socketId).emit('round_result', { 
@@ -1247,7 +1247,7 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
     }
   });
 
-  // 4. Параллельная защищенная запись итогов дуэли в Supabase
+  // 4. Записываем чистые легальные значения характеристик обратно в Supabase
   try {
     await Promise.all([
       sb.from('players').update({ 
@@ -1255,7 +1255,7 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
         xp: Number(playerA.xp), 
         level: Number(playerA.level), 
         statpoints: Number(playerA.statpoints), 
-        hp: Number(dbHpA) 
+        hp: Number(dbHpA) // Гарантированно легальное значение (Максимум или 20%)
       }).eq('id', Number(playerA.id)),
       
       sb.from('players').update({ 
@@ -1267,7 +1267,7 @@ async function finalizePvpBattle(room, result, logs, finalRound) {
       }).eq('id', Number(playerB.id))
     ]);
 
-    console.log(`☁️ [БД PvP УСПЕХ] Золото и опыт зафиксированы. Баланс Яна: ${playerA.gold}, Баланс Evil: ${playerB.gold}`);
+    console.log(`☁️ [БД PvP ФИНАЛ] Награды сохранены. Баланс Яна: ${playerA.gold}, Баланс Evil: ${playerB.gold}`);
   } catch (err) {
     console.error("❌ Фатальная ошибка сохранения транзакции PvP наград в Supabase:", err);
   }
