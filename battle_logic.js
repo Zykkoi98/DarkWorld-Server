@@ -510,47 +510,68 @@ function executeRoundCalculations(roomId, activeRooms, io) {
     if (!isTeamADead && isTeamBDead) result = 'win';
     if (isTeamADead && !isTeamBDead) result = 'lose';
 
-    console.log(`🏁 [СЕРВЕР] Финал PvE триггера. Результат матча: ${result}. Раунд: ${currentRound}`);
+    console.log(`🏁 [СЕРВЕР] Финал PvE триггера. Расчет наград для логов. Результат: ${result}`);
 
-    // 🔥 СТЕП 1: Принудительно рассылаем пакет финала ВСЕМ участникам комнаты (включая тебя)
-    // Это заставит телефон обнулить ХП голема в UI и превратить кнопку в "ВЕРНУТЬСЯ В ГОРОД"
+    // 🔥 ФИКС НАГРАД ДЛЯ ЛОГОВ: Если это PvE бой и игрок победил, считаем награды ДО отправки пакета!
+    if (room.type === 'pve' && result === 'win' && room.teamA[0]) {
+      const player = room.teamA[0];
+      let gainedXp = 0;
+      let gainedGold = 0;
+
+      // Суммируем награды со всех монстров в комнате
+      room.teamB.forEach(m => {
+        gainedXp += Number(m.rewardXp || 0);
+        gainedGold += Number(m.rewardGold || 0);
+      });
+
+      const dbHelper = require('./db_helper');
+      const oldLevel = Number(player.level || 1);
+      const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp + gainedXp);
+
+      // Проверяем левел-ап заранее строго для красивого вывода в лог
+      if (correctLevel > oldLevel) {
+        logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня! Получено +${(correctLevel - oldLevel) * 5} очков характеристик.`);
+      }
+
+      logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
+    } else if (room.type === 'pve' && result === 'lose') {
+      logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе.`);
+    }
+
+    // 📤 Отправляем пакет финала на телефон (теперь логи ГАРАНТИРОВАННО содержат награды!)
     [...room.teamA, ...room.teamB].forEach(p => {
       if (p.socketId) {
         io.to(p.socketId).emit('round_result', { 
           turnCount: currentRound, 
           logs: logs, 
-          isOver: true, // 🌟 Указываем клиенту, что это КОНЕЦ БОЯ!
-          resultType: (p.uuid === `player_${room.teamA[0].id}`) ? result : (result === 'win' ? 'lose' : 'win'),
+          isOver: true, 
+          resultType: (p.uuid === `player_${room.teamA[0]?.id}`) ? result : (result === 'win' ? 'lose' : 'win'),
           teamA: sanitizeTeam(room.teamA), 
           teamB: sanitizeTeam(room.teamB) 
         });
       }
     });
 
-    // 🔥 СТЕП 2: Вызываем мирную финализацию наград и запись в Supabase
+    // Вызываем мирное сохранение наград в Supabase
     if (room.type === 'pve') {
       finalizePveBattle(room, result, logs, currentRound, io);
     } else if (room.type === 'pvp') {
       finalizePvpBattle(room, result, logs, currentRound, io);
     }
     
-    // 🔥 СТЕП 3: Удаляем комнату из ОЗУ сервера ТОЛЬКО после того, как пакет улетел на телефон!
-    // Если удалить её раньше времени, io.to() не сможет отправить данные в закрытую комнату.
+    // Мягко выгружаем комнату из ОЗУ бэкенда через 1 секунду
     setTimeout(() => {
       delete activeRooms[room.id];
-      console.log(`🗑️ [ОЗУ] Комната ${room.id} полностью выгружена из памяти сервера.`);
-    }, 1000); // Небольшая задержка в 1 секунду для гарантированной отправки сети
+      console.log(`🗑️ [ОЗУ] Комната ${room.id} успешно очищена.`);
+    }, 1000);
     
   } else {
-    // Если бой продолжается (твой старый рабочий блок)
+    // Твой старый блок ELSE (если бой продолжается) — оставляем без изменений:
     [...room.teamA, ...room.teamB].forEach(p => {
       if (p.socketId) {
         io.to(p.socketId).emit('round_result', { 
-          turnCount: currentRound, 
-          logs: logs, 
-          isOver: false, 
-          teamA: sanitizeTeam(room.teamA), 
-          teamB: sanitizeTeam(room.teamB) 
+          turnCount: currentRound, logs, isOver: false, 
+          teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) 
         });
       }
     });
@@ -561,60 +582,40 @@ function executeRoundCalculations(roomId, activeRooms, io) {
 // --- 12. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvE И СИНХРОНИЗАЦИЯ НАГРАД ---
 async function finalizePveBattle(room, result, logs, finalRound, io) {
   const sb = require('@supabase/supabase-js').createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-  
-  // 🔥 ФИКС 1: Явно подключаем db_helper внутри функции, чтобы сервер видел расчет уровней и ХП
   const dbHelper = require('./db_helper');
-
   const player = room.teamA[0];
   if (!player) return;
 
-  let gainedXp = 0; 
-  let gainedGold = 0;
+  let gainedXp = 0; let gainedGold = 0;
   let dbHpPayload = player.currentHp;
 
   if (result === 'win') {
-    // Считаем награды со всех убитых монстров
     room.teamB.forEach(m => { 
       gainedXp += Number(m.rewardXp || 0); 
       gainedGold += Number(m.rewardGold || 0); 
     });
-    
-    player.gold += gainedGold; 
+    player.gold += gainedGold;
     player.xp += gainedXp;
     
     const oldLevel = Number(player.level || 1);
     const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp);
-    
     if (correctLevel > oldLevel) {
       player.statpoints = (player.statpoints || 0) + ((correctLevel - oldLevel) * 5);
       player.level = correctLevel;
-      player.currentHp = dbHelper.getServerMaxHp(player); 
-      dbHpPayload = player.currentHp;
-      logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня! Получено +${(correctLevel - oldLevel) * 5} очков.`);
-    } else {
-      dbHpPayload = player.currentHp;
+      player.currentHp = dbHelper.getServerMaxHp(player);
     }
-    logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
+    dbHpPayload = player.currentHp;
   } else {
-    logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе.`);
-    player.currentHp = 0; 
+    player.currentHp = 0;
     dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2));
   }
 
-
-  // Сохраняем честные итоги в Supabase
   try {
     await sb.from('players').update({ 
-      gold: Number(player.gold), 
-      xp: Number(player.xp), 
-      hp: Number(dbHpPayload), 
-      level: Number(player.level), 
-      statpoints: Number(player.statpoints) 
+      gold: Number(player.gold), xp: Number(player.xp), hp: Number(dbHpPayload), 
+      level: Number(player.level), statpoints: Number(player.statpoints) 
     }).eq('id', Number(player.id));
-    console.log(`☁️ [БД] Итоги PvE матча успешно зафиксированы для игрока ${player.id}`);
-  } catch (err) { 
-    console.error("❌ Ошибка сохранения PvE в Supabase:", err); 
-  }
+  } catch (err) { console.error(err); }
 }
 
 // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
