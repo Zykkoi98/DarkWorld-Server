@@ -507,66 +507,85 @@ function executeRoundCalculations(roomId, activeRooms, io) {
 
  if (isTeamADead || isTeamBDead || room.turnCount > 40) {
     let result = 'draw';
-    if (!isTeamADead && isTeamBDead) result = 'win';
-    if (isTeamADead && !isTeamBDead) result = 'lose';
+    if (!isTeamADead && isTeamBDead) result = 'win';  // Победила команда А
+    if (isTeamADead && !isTeamBDead) result = 'lose'; // Победила команда B
 
-    console.log(`🏁 [СЕРВЕР] Финал PvE триггера. Расчет наград для логов. Результат: ${result}`);
+    console.log(`🏁 [ФИНАЛ МАТЧА] Тип комнаты: ${room.type}. Результат для TeamA: ${result}`);
 
-    // 🔥 ФИКС НАГРАД ДЛЯ ЛОГОВ: Если это PvE бой и игрок победил, считаем награды ДО отправки пакета!
-    if (room.type === 'pve' && result === 'win' && room.teamA[0]) {
-      const player = room.teamA[0];
-      let gainedXp = 0;
-      let gainedGold = 0;
+    // ============================================================================
+    // 🌲 ВЕТВЬ А: РАСЧЕТ ЛОГОВ НАГРАД СТРОГО ДЛЯ PvE (БИТВА С МОНСТРАМИ)
+    // ============================================================================
+    if (room.type === 'pve') {
+      const player = room.teamA[0]; // Извлекаем конкретного игрока из массива
+      if (player && result === 'win') {
+        let gainedXp = 0;
+        let gainedGold = 0;
+        room.teamB.forEach(m => {
+          gainedXp += Number(m.rewardXp || 0);
+          gainedGold += Number(m.rewardGold || 0);
+        });
 
-      // Суммируем награды со всех монстров в комнате
-      room.teamB.forEach(m => {
-        gainedXp += Number(m.rewardXp || 0);
-        gainedGold += Number(m.rewardGold || 0);
-      });
+        const dbHelper = require('./db_helper');
+        const oldLevel = Number(player.level || 1);
+        const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp + gainedXp);
 
-      const dbHelper = require('./db_helper');
-      const oldLevel = Number(player.level || 1);
-      const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp + gainedXp);
-
-      // Проверяем левел-ап заранее строго для красивого вывода в лог
-      if (correctLevel > oldLevel) {
-        logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня! Получено +${(correctLevel - oldLevel) * 5} очков характеристик.`);
+        if (correctLevel > oldLevel) {
+          logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня!`);
+        }
+        logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
+      } else if (player && result === 'lose') {
+        logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе.`);
       }
-
-      logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
-    } else if (room.type === 'pve' && result === 'lose') {
-      logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе.`);
     }
 
-    // 📤 Отправляем пакет финала на телефон (теперь логи ГАРАНТИРОВАННО содержат награды!)
+    // ============================================================================
+    // 📤 ОТПРАВКА СЕТЕВОГО ПАКЕТА ФИНАЛА (ОБЩАЯ ДЛЯ PvE И PvP)
+    // ============================================================================
+    const myPlayerFighter = room.teamA[0];
     [...room.teamA, ...room.teamB].forEach(p => {
       if (p.socketId) {
+        // Вычисляем тип исхода для конкретного сокета гладиатора
+        let personalResult = result;
+        if (room.type === 'pvp') {
+          const isTargetInTeamA = room.teamA.some(f => f.uuid === p.uuid);
+          if (isTargetInTeamA) {
+            personalResult = result; // Если игрок в команде А (Ян), для него исход плоский
+          } else {
+            personalResult = (result === 'win') ? 'lose' : (result === 'lose' ? 'win' : 'draw'); // Для Evil инвертируем
+          }
+        }
+
         io.to(p.socketId).emit('round_result', { 
           turnCount: currentRound, 
           logs: logs, 
           isOver: true, 
-          resultType: (p.uuid === `player_${room.teamA[0]?.id}`) ? result : (result === 'win' ? 'lose' : 'win'),
+          resultType: personalResult,
           teamA: sanitizeTeam(room.teamA), 
           teamB: sanitizeTeam(room.teamB) 
         });
       }
     });
 
-    // Вызываем мирное сохранение наград в Supabase
+    // ============================================================================
+    // ☁️ СОХРАНЕНИЕ ДАННЫХ В СУПЕРБЕЙЗ (ЖЕСТКОЕ РАЗДЕЛЕНИЕ ПО ТИПАМ КОМНАТ)
+    // ============================================================================
     if (room.type === 'pve') {
       finalizePveBattle(room, result, logs, currentRound, io);
-    } else if (room.type === 'pvp') {
+    } 
+    else if (room.type === 'pvp') {
+      // 🔥 ФИКС: Вызываем правильную PvP-финализацию (Часть 3, Фрагмент 2.2), 
+      // передавая io, чтобы данные Яна и Evil записались корректно
       finalizePvpBattle(room, result, logs, currentRound, io);
     }
     
-    // Мягко выгружаем комнату из ОЗУ бэкенда через 1 секунду
+    // Мягко стираем комнату из оперативной памяти сервера, чтобы никто не зависал
     setTimeout(() => {
       delete activeRooms[room.id];
-      console.log(`🗑️ [ОЗУ] Комната ${room.id} успешно очищена.`);
-    }, 1000);
+      console.log(`🗑️ [ОЗУ] Комната ${room.id} полностью выгружена.`);
+    }, 1200);
     
   } else {
-    // Твой старый блок ELSE (если бой продолжается) — оставляем без изменений:
+    // Блок ELSE (если бой продолжается) — оставляем без изменений:
     [...room.teamA, ...room.teamB].forEach(p => {
       if (p.socketId) {
         io.to(p.socketId).emit('round_result', { 
