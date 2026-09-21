@@ -77,35 +77,46 @@ const safeReadField = (dbRow, fieldName, defaultValue = 0) => {
 
 // Функция-сборщик легального профиля для отправки на игровой клиент
 async function triggerLoadGameSuccess(nUserId, socket, sb) {
-  const { data } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
-  if (!data) return;
+  try {
+    const { data, error } = await sb.from('players').select('*').eq('id', nUserId);
+    if (error || !data || data.length === 0) {
+      console.error("❌ Игрок не найден в БД при триггере успеха:", error);
+      return;
+    }
 
-  const currentXp = safeReadField(data, 'xp', 0);
-  const cloudLevel = getServerCorrectLevelByXp(currentXp);
-  let pointsKey = data.statpoints !== undefined ? 'statpoints' : 'statPoints';
+    // 🔥 ФИКС: Читаем строго первый элемент полученного массива!
+    const row = data[0];
 
-  const playerProfile = {
-    id: data.id,
-    name: data.name,
-    avatar: data.avatar || "assets/avatars/hero1.png",
-    level: cloudLevel,
-    gold: safeReadField(data, 'gold', 0),
-    xp: currentXp,
-    hp: safeReadField(data, 'hp', 10),
-    statPoints: safeReadField(data, pointsKey, 0),
-    currentTownIndex: safeReadField(data, 'currenttownindex', 0),
-    stats: {
-      strength: safeReadField(data, 'strength', 1),
-      agility: safeReadField(data, 'agility', 1),
-      endurance: safeReadField(data, 'endurance', 1),
-      intellect: safeReadField(data, 'intellect', 1),
-      luck: safeReadField(data, 'luck', 1)
-    },
-    inventory: data.inventory || { equipment: [], resources: [], consumables: [] },
-    equipped: data.equipped || { rings: [null, null, null] }
-  };
+    const currentXp = safeReadField(row, 'xp', 0);
+    const cloudLevel = getServerCorrectLevelByXp(currentXp);
+    let pointsKey = row.statpoints !== undefined ? 'statpoints' : 'statPoints';
 
-  socket.emit('load_game_success', { player: playerProfile });
+    const playerProfile = {
+      id: row.id,
+      name: row.name,
+      avatar: row.avatar || "assets/avatars/hero1.png",
+      level: cloudLevel,
+      gold: safeReadField(row, 'gold', 0),
+      xp: currentXp,
+      hp: safeReadField(row, 'hp', 10),
+      statPoints: safeReadField(row, pointsKey, 0),
+      currentTownIndex: safeReadField(row, 'currenttownindex', 0),
+      stats: {
+        strength: safeReadField(row, 'strength', 1),
+        agility: safeReadField(row, 'agility', 1),
+        endurance: safeReadField(row, 'endurance', 1),
+        intellect: safeReadField(row, 'intellect', 1),
+        luck: safeReadField(row, 'luck', 1)
+      },
+      inventory: row.inventory || { equipment: [], resources: [], consumables: [] },
+      equipped: row.equipped || { rings: [null, null, null] }
+    };
+
+    console.log(`📤 [УСПЕХ] Профиль отправлен клиенту: ${playerProfile.name} (Ур. ${playerProfile.level})`);
+    socket.emit('load_game_success', { player: playerProfile });
+  } catch (err) {
+    console.error("❌ Критический сбой внутри триггера load_game_success:", err);
+  }
 }
 // ============================================================================
 // ===== 🛡️ МОДУЛЬ СЕРВЕРНОГО АУДИТА, БАЗЫ ДАННЫХ И АНТИЧИТА (DB_HELPER.JS) =====
