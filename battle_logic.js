@@ -1,8 +1,3 @@
-// ============================================================================
-// ===== ⚔️ МОДУЛЬ СЕРВЕРНОГО БОЕВОГО ДВИЖКА И АРЕНЫ (BATTLE_LOGIC.JS) =====
-// ===== ЧАСТЬ 1 ИЗ 5: БОЕВЫЕ ХАРАКТЕРИСТИКИ И ЭКСПОРТ МОДУЛЯ СЕРВЕРА =====
-// ============================================================================
-
 const dbHelper = require('./db_helper');
 
 const ZONE_NAMES = { head: "Голову", breast: "Грудь", torso: "Торс", belt: "Пояс", legs: "Ноги" };
@@ -89,10 +84,6 @@ module.exports = function(io, socket, sb, activeRooms) {
   const triggerLoadGameSuccess = dbHelper.triggerLoadGameSuccess;
   const getServerMaxHp = dbHelper.getServerMaxHp;
   const getServerCorrectLevelByXp = dbHelper.getServerCorrectLevelByXp;
-   // ============================================================================
-  // ===== ⚔️ МОДУЛЬ СЕРВЕРНОГО БОЕВОГО ДВИЖКА И АРЕНЫ (BATTLE_LOGIC.JS) =====
-  // ===== ЧАСТЬ 2 ИЗ 5: ОБРАБОТЧИКИ ЛОББИ АРЕНЫ И РЕГИСТРАЦИЯ PvP ЗАЯВОК =====
-  // ============================================================================
 
   // --- 1. ОБРАБОТЧИК: ЗАПРОС СПИСКА ДУЭЛЕЙ НА АРЕНЕ ---
   socket.on('arena_get_lobby', async () => {
@@ -148,16 +139,11 @@ module.exports = function(io, socket, sb, activeRooms) {
         return socket.emit('error', 'Не удалось загрузить профиль соперника.');
       }
 
-      // Запуск PvP поединка (вызывается функция, находящаяся внутри скобок экспорта)
       initiatePvpMatch(roomId, playerData, currentHp, oppData, activeRooms, io);
     } catch (e) { 
       console.error(e); 
     }
   });
-  // ============================================================================
-  // ===== ⚔️ МОДУЛЬ СЕРВЕРНОГО БОЕВОГО ДВИЖКА И АРЕНЫ (BATTLE_LOGIC.JS) =====
-  // ===== ЧАСТЬ 3 ИЗ 5: ОБРАБОТЧИКИ СОКЕТОВ PvP/PvE И ИСПОЛЬЗОВАНИЯ ЗЕЛИЙ =====
-  // ============================================================================
 
   // --- 5. ОБРАБОТЧИКИ РЕКОННЕКТОВ И ПРОВЕРКИ СЕССИЙ (АНТИ-СБОЙ F5) ---
   socket.on('check_active_battle_directly', ({ userId }, callback) => {
@@ -326,10 +312,6 @@ module.exports = function(io, socket, sb, activeRooms) {
       }
     }
   });
-  // ============================================================================
-  // ===== ⚔️ МОДУЛЬ СЕРВЕРНОГО БОЕВОГО ДВИЖКА И АРЕНЫ (BATTLE_LOGIC.JS) =====
-  // ===== ЧАСТЬ 4 ИЗ 5: ВНУТРЕННИЕ ФУНКЦИИ ИНИЦИАЛИЗАЦИЯ И РАСЧЕТ РАУНДА =====
-  // ============================================================================
 
   // --- 9. ВНУТРЕННЯЯ ФУНКЦИЯ: СБОРКА PvP КОМНАТЫ С БАЛАНСОМ ХП ---
   function initiatePvpMatch(roomId, playerData, p1Hp, p2Data, activeRooms, io) {
@@ -500,6 +482,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[attacker.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
       }
     });
+
     room.teamA.forEach(f => f.turn = null);
     room.teamB.forEach(f => f.turn = null);
 
@@ -590,11 +573,9 @@ module.exports = function(io, socket, sb, activeRooms) {
         }
       });
 
-      // Вызываем функции финализации (будут в следующем блоке 5.2)
-      if (room.type === 'pve') finalizePveBattle(room, result, logs, currentRound, io);
-      else if (room.type === 'pvp') finalizePvpBattle(room, result, logs, currentRound, io);
+      finalizePveBattle(room, result, logs, currentRound, io);
+      finalizePvpBattle(room, result, logs, currentRound, io);
       
-      // Выгружаем комнату из памяти
       setTimeout(() => {
         delete activeRooms[room.id];
         console.log(`🗑️ [ОЗУ] Комната ${room.id} полностью выгружена.`);
@@ -612,7 +593,8 @@ module.exports = function(io, socket, sb, activeRooms) {
       startServerTurnTimer(roomId, activeRooms, io);
     }
   }
-   // --- 12. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvE И СИНХРОНИЗАЦИЯ НАГРАД ---
+
+  // --- 12. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvE И СИНХРОНИЗАЦИЯ НАГРАД ---
   async function finalizePveBattle(room, result, logs, finalRound, io) {
     const player = room.teamA[0];
     if (!player) return;
@@ -651,14 +633,15 @@ module.exports = function(io, socket, sb, activeRooms) {
 
   // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
   async function finalizePvpBattle(room, result, logs, finalRound, io) {
-    const playerA = room.teamA[0]; // Организатор дуэли (Ян)
-    const playerB = room.teamB[0]; // Принявший вызов (Evil)
+    const playerA = room.teamA[0]; 
+    const playerB = room.teamB[0]; 
     
     if (!playerA || !playerB) return;
 
-    console.log(`\n🏁 [PvP ФИНАЛИЗАЦИЯ] Начинаем защищенную транзакцию наград. Исход для TeamA: ${result}`);
+    console.log(`
+🏁 [PvP ФИНАЛИЗАЦИЯ] Начинаем защищенную транзакцию наград. Исход для TeamA: ${result}`);
 
-    const goldReward = 25; // Чистая награда золота победителю
+    const goldReward = 25; 
 
     const calculatePvpXp = (winnerLvl, loserLvl) => {
       let baseXp = Number(loserLvl || 1) * 15; 
@@ -727,7 +710,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         goldB += goldReward;
         xpB += pvpXp;
 
-        const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
+        const correctLevelB = dbHelper.getServerCorrectLevelByXp(xB);
         if (correctLevelB > levelB) {
           statpointsB += (correctLevelB - levelB) * 5;
           levelB = correctLevelB;
@@ -753,11 +736,11 @@ module.exports = function(io, socket, sb, activeRooms) {
         }).eq('id', Number(playerB.id))
       ]);
 
-      console.log(`☁️ [БД PvP УСПЕХ] Данные успешно сохранены.`);
+      console.log("☁️ [БД PvP УСПЕХ] Данные успешно сохранены.");
 
     } catch (err) {
       console.error("❌ Фатальная ошибка транзакции PvP наград:", err);
     }
   }
 
-}; // Жестко закрываем главную функцию экспорта всего боевого модуля (ИЗ ВСЕХ ЧАСТЕЙ)!
+};
