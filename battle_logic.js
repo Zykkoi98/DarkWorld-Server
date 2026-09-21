@@ -573,8 +573,11 @@ module.exports = function(io, socket, sb, activeRooms) {
         }
       });
 
-      finalizePveBattle(room, result, logs, currentRound, io);
-      finalizePvpBattle(room, result, logs, currentRound, io);
+    if (room.type === 'pve') {
+            finalizePveBattle(room, result, logs, currentRound, io);
+        } else if (room.type === 'pvp') {
+            finalizePvpBattle(room, result, logs, currentRound, io);
+        }
       
       setTimeout(() => {
         delete activeRooms[room.id];
