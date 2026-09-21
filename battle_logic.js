@@ -638,50 +638,142 @@ async function finalizePveBattle(room, result, logs, finalRound, io) {
 }
 
 // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
-async function finalizePvpBattle(room, result, logs, finalRound) {
-  const sb = require('@supabase/supabase-js').createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-  const playerA = room.teamA[0]; const playerB = room.teamB[0];
+async function finalizePvpBattle(room, result, logs, finalRound, io) {
+  const { createClient } = require('@supabase/supabase-js');
+  const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+  const dbHelper = require('./db_helper');
+
+  const playerA = room.teamA[0]; // Организатор дуэли (Ян)
+  const playerB = room.teamB[0]; // Принявший вызов (Evil)
+  
   if (!playerA || !playerB) return;
 
-  let goldReward = 25;
-  const maxHpA = dbHelper.getServerMaxHp(playerA);
-  const maxHpB = dbHelper.getServerMaxHp(playerB);
-  let dbHpA = maxHpA; let dbHpB = maxHpB;
+  console.log(`\n🏁 [PvP ФИНАЛИЗАЦИЯ] Начинаем защищенную транзакцию наград. Исход для TeamA: ${result}`);
 
-  const calculatePvpXp = (w, l) => {
-    let baseXp = Number(l.level || 1) * 15;
-    if (Number(l.level) > Number(w.level)) baseXp *= (1 + (Number(l.level) - Number(w.level)) * 0.25);
-    return Math.floor(baseXp);
+  const goldReward = 25; // Чистая награда золота победителю
+
+  // Формула справедливого расчета PvP опыта в зависимости от разницы уровней
+  const calculatePvpXp = (winnerLvl, loserLvl) => {
+    let baseXp = Number(loserLvl || 1) * 15; 
+    let multiplier = 1;
+    if (loserLvl > winnerLvl) multiplier = 1 + ((loserLvl - winnerLvl) * 0.25);
+    else if (loserLvl < winnerLvl) multiplier = Math.max(0.1, 1 - ((winnerLvl - loserLvl) * 0.20));
+    return Math.floor(baseXp * multiplier);
   };
 
-  if (result === 'win') {
-    const xpGained = calculatePvpXp(playerA, playerB);
-    playerA.gold += goldReward; playerA.xp += xpGained;
-    logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerA.name}</strong> поверг соперника!`);
-    
-    const correctLevel = dbHelper.getServerCorrectLevelByXp(playerA.xp);
-    if (correctLevel > Number(playerA.level)) {
-      playerA.statpoints += ((correctLevel - Number(playerA.level)) * 5);
-      playerA.level = correctLevel;
-    }
-    dbHpA = dbHelper.getServerMaxHp(playerA); dbHpB = Math.max(1, Math.floor(maxHpB * 0.2));
-  } else if (result === 'lose') {
-    const xpGained = calculatePvpXp(playerB, playerA);
-    playerB.gold += goldReward; playerB.xp += xpGained;
-    logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerB.name}</strong> одержал верх!`);
-    
-    const correctLevel = dbHelper.getServerCorrectLevelByXp(playerB.xp);
-    if (correctLevel > Number(playerB.level)) {
-      playerB.statpoints += ((correctLevel - Number(playerB.level)) * 5);
-      playerB.level = correctLevel;
-    }
-    dbHpA = Math.max(1, Math.floor(maxHpA * 0.2)); dbHpB = dbHelper.getServerMaxHp(playerB);
-  }
-
   try {
-    await Promise.all([
-      sb.from('players').update({ gold: playerA.gold, xp: playerA.xp, level: playerA.level, statpoints: playerA.statpoints, hp: dbHpA }).eq('id', Number(playerA.id)),
-      sb.from('players').update({ gold: playerB.gold, xp: playerB.xp, level: playerB.level, statpoints: playerB.statpoints, hp: dbHpB }).eq('id', Number(playerB.id))
+    // 🔥 ШАГ 1: Скачиваем СВЕЖИЕ, АКТУАЛЬНЫЕ строки Яна и Evil напрямую из Supabase!
+    // Полностью игнорируем то, что лежало в оперативной памяти сокетов.
+    const [dbDataA, dbDataB] = await Promise.all([
+      sb.from('players').select('*').eq('id', Number(playerA.id)).maybeSingle(),
+      sb.from('players').select('*').eq('id', Number(playerB.id)).maybeSingle()
     ]);
-  } catch (err) { console.error(err); }
+
+    if (!dbDataA.data || !dbDataB.data) {
+      console.error("🚨 [КРИТ] Не удалось прочитать профили из БД перед выдачей PvP наград!");
+      return;
+    }
+
+    const rowA = dbDataA.data;
+    const rowB = dbDataB.data;
+
+    // Безопасное чтение старых балансов из БД (с защитой от любого регистра букв)
+    const safeRead = (row, field, def = 0) => {
+      const low = field.toLowerCase();
+      const up = field.toUpperCase();
+      const cap = field.charAt(0).toUpperCase() + field.slice(1);
+      return Number(row[low] ?? row[up] ?? row[cap] ?? row[field] ?? def);
+    };
+
+    let pointsKeyA = rowA.statpoints !== undefined ? 'statpoints' : 'statPoints';
+    let pointsKeyB = rowB.statpoints !== undefined ? 'statpoints' : 'statPoints';
+
+    // Загружаем в калькулятор настоящие честные цифры из Supabase
+    let goldA = safeRead(rowA, 'gold', 0);
+    let xpA = safeRead(rowA, 'xp', 0);
+    let levelA = safeRead(rowA, 'level', 1);
+    let statpointsA = safeRead(rowA, pointsKeyA, 0);
+
+    let goldB = safeRead(rowB, 'gold', 0);
+    let xpB = safeRead(rowB, 'xp', 0);
+    let levelB = safeRead(rowB, 'level', 1);
+    let statpointsB = safeRead(rowB, pointsKeyB, 0);
+
+    // Рассчитываем честные боевые лимиты здоровья на основе Выносливости из БД
+    const maxHpA = dbHelper.getServerMaxHp({ endurance: safeRead(rowA, 'endurance', 1), equipped: rowA.equipped || {} });
+    const maxHpB = dbHelper.getServerMaxHp({ endurance: safeRead(rowB, 'endurance', 1), equipped: rowB.equipped || {} });
+
+    let endHpA = maxHpA;
+    let endHpB = maxHpB;
+
+    // ============================================================================
+    // 🔥 ШАГ 2: МАТЕМАТИКА НАЧИСЛЕНИЯ (БЕЗ ШАНСА ДЛЯ UNDEFINED И NaN)
+    // ============================================================================
+    if (result === 'win') {
+      // Победил Ян (TeamA)
+      const pvpXp = calculatePvpXp(levelA, levelB);
+      goldA += goldReward;
+      xpA += pvpXp;
+
+      // Проверяем левел-ап для Яна строго по серверной таблице
+      const correctLevelA = dbHelper.getServerCorrectLevelByXp(xpA);
+      if (correctLevelA > levelA) {
+        statpointsA += (correctLevelA - levelA) * 5;
+        levelA = correctLevelA;
+      }
+
+      endHpA = maxHpA; // Победителю восстанавливаем ХП до максимума
+      endHpB = Math.max(1, Math.floor(maxHpB * 0.2)); // Проигравшему Evil пишем легальные 20%
+      logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerA.name}</strong> поверг соперника! Награда: 💰 ${goldReward} монет, ✨ ${pvpXp} опыта.`);
+    } 
+    else if (result === 'lose') {
+      // Победил Evil (TeamB)
+      const pvpXp = calculatePvpXp(levelB, levelA);
+      goldB += goldReward;
+      xpB += pvpXp;
+
+      // Проверяем левел-ап для Evil
+      const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
+      if (correctLevelB > levelB) {
+        statpointsB += (correctLevelB - levelB) * 5;
+        levelB = correctLevelB;
+      }
+
+      endHpA = Math.max(1, Math.floor(maxHpA * 0.2)); // Проигравшему Яну пишем легальные 20%
+      endHpB = maxHpB;
+      logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerB.name}</strong> одержал верх! Награда: 💰 ${goldReward} монет, ✨ ${pvpXp} опыта.`);
+    } 
+    else {
+      // Ничья
+      endHpA = Math.max(1, Math.floor(maxHpA * 0.2));
+      endHpB = Math.max(1, Math.floor(maxHpB * 0.2));
+      logs.push(`🏁 <strong>НИЧЬЯ!</strong> Награды аннулированы. Боевой баланс сохранен.`);
+    }
+
+    // ============================================================================
+    // 🔥 ШАГ 3: ЗАПИСЬ ЧИСТЫХ ПРОВЕРЕННЫХ ДАННЫХ ОБРАТНО В SUPABASE
+    // ============================================================================
+    await Promise.all([
+      sb.from('players').update({
+        gold: Number(goldA),
+        xp: Number(xpA),
+        level: Number(levelA),
+        [pointsKeyA]: Number(statpointsA),
+        hp: Number(endHpA)
+      }).eq('id', Number(playerA.id)),
+
+      sb.from('players').update({
+        gold: Number(goldB),
+        xp: Number(xpB),
+        level: Number(levelB),
+        [pointsKeyB]: Number(statpointsB),
+        hp: Number(endHpB)
+      }).eq('id', Number(playerB.id))
+    ]);
+
+    console.log(`☁️ [БД PvP УСПЕХ] Данные успешно сохранены. Ян: золота=${goldA}, уровень=${levelA}. Evil: золота=${goldB}, уровень=${levelB}`);
+
+  } catch (err) {
+    console.error("❌ Фатальная ошибка транзакции PvP наград в модуле финала:", err);
+  }
 }
