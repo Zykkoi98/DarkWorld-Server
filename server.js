@@ -37,17 +37,25 @@ let activeRooms = {};
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
 
-  // 1. ПОДКЛЮЧАЕМ МОДУЛЬ БАЗЫ ДАННЫХ И АНТИЧИТА (Вход, сохранение, прокачка статов)
-  dbHelper(io, socket, sb);
+  // 1. Инициализируем модуль базы данных и античита (Передаем io, socket, sb)
+  if (dbHelper && typeof dbHelper.init === 'function') {
+    dbHelper.init(io, socket, sb);
+  } else if (typeof dbHelper === 'function') {
+    dbHelper(io, socket, sb);
+  }
 
-  // 2. ПОДКЛЮЧАЕМ ВЫНЕСЕННЫЙ МОДУЛЬ ИНВЕНТАРЯ (Безопасная смена вещей)
-  inventoryLogic(io, socket, sb);
+  // 2. Инициализируем защищенный модуль инвентаря (Перенос вещей куклы)
+  if (typeof inventoryLogic === 'function') {
+    inventoryLogic(io, socket, sb);
+  }
 
-  // 3. ПОДКЛЮЧАЕМ БОЕВОЙ МОДУЛЬ И АРЕНУ (PvE, PvP лобби, пошаговые удары)
-  battleLogic(io, socket, sb, activeRooms);
+  // 3. Инициализируем боевой движок (PvE монстры, PvP Арена лобби и комнаты)
+  if (typeof battleLogic === 'function') {
+    battleLogic(io, socket, sb, activeRooms);
+  }
 
+  // Безопасное отключение: чистим socketId оффлайн-игроков в активных битвах
   socket.on('disconnect', () => {
-    // Чистим socketId оффлайн игроков в активных битвах
     Object.keys(activeRooms).forEach(roomId => {
       const room = activeRooms[roomId];
       const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
@@ -57,5 +65,8 @@ io.on('connection', (socket) => {
   });
 });
 
+// Запуск сервера на порту Render или локальном 3000
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Сервер запущен строго по правилам на порту ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`🚀 Сервер Dark World запущен по правилам Стойкости на порту ${PORT}`);
+});
