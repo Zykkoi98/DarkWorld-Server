@@ -614,111 +614,130 @@ function executeRoundCalculations(roomId, activeRooms, io) {
 
 // --- 12. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvE И СИНХРОНИЗАЦИЯ НАГРАД ---
 
+// НА СЕРВЕРЕ в battle_logic.js полностью замени функцию finalizePveBattle на эту:
+
 async function finalizePveBattle(room, result, logs, finalRound, io) {
   const { createClient } = require('@supabase/supabase-js');
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
   const dbHelper = require('./db_helper');
 
-  const player = room.teamA; // Наш живой игрок Ян
+  // 🔥 Справочник-заглушка на сервере: если в JSON Supabase нет имени/иконки, берем отсюда!
+  const ITEM_DICTIONARY = {
+    'iron_ore': { name: 'Железная руда', icon: '🪨', type: 'resources' },
+    'wood':     { name: 'Древесина',    icon: '🪵', type: 'resources' },
+    'coal':     { name: 'Уголь',         icon: '⚫', type: 'resources' }
+  };
+
+  const player = room.teamA;
   if (!player) return;
+
+  const isTeamADead = room.teamA.every(f => f.currentHp <= 0);
+  const isTeamBDead = room.teamB.every(f => f.currentHp <= 0);
+  
+  let finalOutcome = result;
+  if (!finalOutcome || finalOutcome === 'draw') {
+    if (!isTeamADead && isTeamBDead) finalOutcome = 'win';
+    else if (isTeamADead && !isTeamBDead) finalOutcome = 'lose';
+    else finalOutcome = 'draw';
+  }
+
+  console.log(`\n🏁 [PvE ФИНАЛ] Результат: ${finalOutcome}. Остаток ХП игрока в ОЗУ: ${player.currentHp}`);
 
   let gainedXp = 0;
   let gainedGold = 0;
-  let dbHpPayload = player.currentHp;
-  let rolledLootItems = []; // Буфер для выбитых из монстров трофеев
+  let dbHpPayload = Math.max(0, Number(player.currentHp)); 
+  let rolledLootItems = [];
 
-  if (result === 'win') {
-    // 1. Собираем базовое золото и опыт со всей пачки убитых монстров
+  if (finalOutcome === 'win') {
+    // 1. Собираем золото и опыт из колонок reward_xp и reward_gold
     room.teamB.forEach(m => {
-      gainedXp += Number(m.rewardXp || 0);
-      gainedGold += Number(m.rewardGold || 0);
+      gainedXp += Number(m.rewardXp || m.reward_xp || 0);
+      gainedGold += Number(m.rewardGold || m.reward_gold || 0);
 
-      // 🎲 2. КУБИК ЛУТА: Сканируем лут-таблицу монстра, которая прилетела из Supabase при старте боя
-      if (m.lootTable && Array.isArray(m.lootTable)) {
-        m.lootTable.forEach(drop => {
-          const dice = Math.random(); // Генерирует число от 0.0 до 1.0
-          const chance = Number(drop.chance); // Например, 0.50 (50% шанс)
+      // 🎲 2. ВСЕЯДНЫЙ СБОР ТРОФЕЕВ: Читаем твой JSON из базы Supabase
+      let rawTable = m.lootTable || m.loot_table || m.loot;
+      if (rawTable && Array.isArray(rawTable)) {
+        rawTable.forEach(drop => {
+          const itemId = drop.itemId || drop.item_id || drop.itemid || drop.id;
+          if (!itemId) return;
+
+          const chance = Number(drop.chance || drop.Chance || 0);
+          const dice = Math.random();
 
           if (dice <= chance) {
+            // 🔥 АВТОДОБОР ПАРАМЕТРОВ: Ищем вещь в справочнике по ID
+            const meta = ITEM_DICTIONARY[itemId] || { name: 'Трофей', icon: '📦', type: 'resources' };
+            
             rolledLootItems.push({
-              id: drop.itemId,
-              name: drop.itemName || 'Трофей',
-              icon: drop.itemIcon || '📦',
-              type: drop.itemType || 'resources' // equipment, resources, consumables
+              id: itemId,
+              name: drop.itemName || drop.item_name || meta.name,
+              icon: drop.itemIcon || drop.item_icon || meta.icon,
+              type: drop.itemType || drop.item_type || meta.type
             });
           }
         });
       }
     });
 
-    // Прибавляем награды к текущему балансу Яна в ОЗУ
     player.gold = Number(player.gold || 0) + gainedGold;
     player.xp = Number(player.xp || 0) + gainedXp;
 
-    // 🎒 3. РАСПРЕДЕЛЕНИЕ ТРОФЕЕВ ПО СУМКАМ ИГРОКА
+    // 🎒 3. БЕЗОПАСНАЯ РАСКЛАДКА ПО СУМКАМ ИГРОКА
     if (rolledLootItems.length > 0) {
       if (!player.inventory) player.inventory = { equipment: [], resources: [], consumables: [] };
 
       rolledLootItems.forEach(loot => {
-        const tab = loot.type;
+        const tab = loot.type === 'equipment' ? 'equipment' : (loot.type === 'consumables' ? 'consumables' : 'resources');
         if (!player.inventory[tab]) player.inventory[tab] = [];
 
-        // Если это ресурс или банка — увеличиваем count, если шмотка — кладем штучно
         const isStackable = tab === 'resources' || tab === 'consumables';
         const existingItem = isStackable ? player.inventory[tab].find(i => i.id === loot.id) : null;
 
         if (existingItem) {
           existingItem.count = Number(existingItem.count || 1) + 1;
         } else {
-          player.inventory[tab].push({
-            id: loot.id,
-            name: loot.name,
-            icon: loot.icon,
-            count: 1
-          });
+          player.inventory[tab].push({ id: loot.id, name: loot.name, icon: loot.icon, count: 1 });
         }
-
-        // Выводим красивое сообщение о выбитом луте на экран смартфона
-        logs.push(`💎 <strong>ТРОФЕЙ:</strong> Найдено <span>${loot.icon}</span> ${loot.name}!`);
+        logs.push(`💎 <strong>ТРОФЕЙ:</strong> Получено ${loot.icon} ${loot.name}!`);
       });
     }
 
-    // Проверяем повышение уровня гладиатора строго по серверной таблице
+    // Проверяем левел-ап
     const oldLevel = Number(player.level || 1);
     const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp);
 
     if (correctLevel > oldLevel) {
       player.statpoints = Number(player.statpoints || 0) + ((correctLevel - oldLevel) * 5);
       player.level = correctLevel;
-      player.currentHp = dbHelper.getServerMaxHp(player); // При левел-апе полностью лечим
+      player.currentHp = dbHelper.getServerMaxHp(player); 
+      dbHpPayload = player.currentHp;
+      logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня!`);
     }
-    dbHpPayload = player.currentHp;
 
   } else {
-    // Игрок проиграл PvE бой — обнуляем ХП и легально воскрешаем на 20% здоровья в городе
     player.currentHp = 0;
     dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2));
   }
 
-  // ☁️ 4. СОХРАНЯЕМ И СИНХРОНИЗИРУЕМ ВСЁ В SUPABASE (ОДНИМ БРОНИРОВАННЫМ ЗАПРОСОМ)
+  // ☁️ 4. ПУШ В БАЗУ ДАННЫХ SUPABASE
   try {
     let pointsKey = player.statpoints !== undefined ? 'statpoints' : 'statPoints';
     
+    // Форсируем сохранение реального остатка ХП и наград
     await sb.from('players').update({
       gold: Number(player.gold),
       xp: Number(player.xp),
-      hp: Number(dbHpPayload),
+      hp: Number(dbHpPayload), 
       level: Number(player.level),
       [pointsKey]: Number(player.statpoints),
-      inventory: player.inventory // Загружаем обновленный JSON инвентаря с рудой и трофеями
+      inventory: player.inventory 
     }).eq('id', Number(player.id));
 
-    console.log(`☁️ [БД PvE УСПЕХ] Награды и лут Яна успешно сохранены в Supabase.`);
+    console.log(`☁️ [БД PvE УСПЕХ] Урон зафиксирован (ХП: ${dbHpPayload}), золото: ${player.gold}, опыт: ${player.xp}`);
   } catch (err) {
-    console.error("❌ Ошибка записи PvE наград в Supabase:", err);
+    console.error("❌ Фатальный сбой записи PvE наград:", err);
   }
 }
-
 // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
 async function finalizePvpBattle(room, result, logs, finalRound, io) {
   const { createClient } = require('@supabase/supabase-js');
