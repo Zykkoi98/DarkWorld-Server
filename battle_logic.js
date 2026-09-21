@@ -738,7 +738,6 @@ async function finalizePvpBattle(room, result, logs, finalRound, io) {
 
       endHpA = maxHpA; // Победителю восстанавливаем ХП до максимума
       endHpB = Math.max(1, Math.floor(maxHpB * 0.2)); // Проигравшему Evil пишем легальные 20%
-      logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerA.name}</strong> поверг соперника! Награда: 💰 ${goldReward} монет, ✨ ${pvpXp} опыта.`);
     } 
     else if (result === 'lose') {
       // Победил Evil (TeamB)
@@ -755,13 +754,11 @@ async function finalizePvpBattle(room, result, logs, finalRound, io) {
 
       endHpA = Math.max(1, Math.floor(maxHpA * 0.2)); // Проигравшему Яну пишем легальные 20%
       endHpB = maxHpB;
-      logs.push(`🏁 <strong>ПОБЕДА!</strong> Гладиатор <strong>${playerB.name}</strong> одержал верх! Награда: 💰 ${goldReward} монет, ✨ ${pvpXp} опыта.`);
     } 
     else {
       // Ничья
       endHpA = Math.max(1, Math.floor(maxHpA * 0.2));
       endHpB = Math.max(1, Math.floor(maxHpB * 0.2));
-      logs.push(`🏁 <strong>НИЧЬЯ!</strong> Награды аннулированы. Боевой баланс сохранен.`);
     }
 
     // ============================================================================
