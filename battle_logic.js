@@ -713,7 +713,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         goldB += goldReward;
         xpB += pvpXp;
 
-        const correctLevelB = dbHelper.getServerCorrectLevelByXp(xрB);
+        const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
         if (correctLevelB > levelB) {
           statpointsB += (correctLevelB - levelB) * 5;
           levelB = correctLevelB;
