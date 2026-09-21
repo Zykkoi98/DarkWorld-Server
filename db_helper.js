@@ -121,7 +121,7 @@ module.exports = function(io, socket, sb) {
   module.exports.getServerCorrectLevelByXp = getServerCorrectLevelByXp;
   module.exports.safeReadField = safeReadField;
 
-  // --- 1. ЗАЩИЩЕННАЯ ЗАГРУЗКА И АНТИЧИТ-АУДИТ ПРИ ВХОДЕ ---
+   // --- 1. ЗАЩИЩЕННАЯ ЗАГРУЗКА И АНТИЧИТ-АУДИТ ПРИ ВХОДЕ ---
   socket.on('load_game_secure', async ({ userId, username }) => {
     try {
       const nUserId = Number(userId);
@@ -131,6 +131,7 @@ module.exports = function(io, socket, sb) {
       if (error) return socket.emit('load_game_failed', { message: error.message });
 
       if (data && data.length > 0) {
+        // 🔥 ФИКС: Вытаскиваем конкретный объект игрока из массива данных Supabase!
         let cloudPlayer = data[0]; 
         
         const currentXp = safeReadField(cloudPlayer, 'xp', 0);
@@ -147,7 +148,7 @@ module.exports = function(io, socket, sb) {
         const freePoints = safeReadField(cloudPlayer, pointsKey, 0);
 
         const totalFighterPoints = str + agi + end + int + lck + freePoints;
-        const maxLegalPoints = 5 + 5 + ((correctLevel - 1) * 5); // 5 базовых + 5 стартовых + 5 за каждый левел-ап
+        const maxLegalPoints = 5 + 5 + ((correctLevel - 1) * 5); 
 
         let needsDbSync = false;
         let updatePayload = {};
@@ -166,8 +167,9 @@ module.exports = function(io, socket, sb) {
           });
 
           updatePayload[levelKey] = correctLevel;
-          updatePayload[pointsKey] = maxLegalPoints - 5; // Все свободные очки возвращаются искателю
+          updatePayload[pointsKey] = maxLegalPoints - 5; 
           
+          // Передаем объект в функцию
           const freshMaxHp = getServerMaxHp({ endurance: 1, equipped: cloudPlayer.equipped || {} });
           updatePayload[hpKey] = freshMaxHp;
 
@@ -178,12 +180,13 @@ module.exports = function(io, socket, sb) {
           await sb.from('players').update(updatePayload).eq('id', nUserId);
         }
 
+        // Вызываем сборщик профиля
         await triggerLoadGameSuccess(nUserId, socket, sb);
       } else {
         socket.emit('player_not_found', { userId, username });
       }
     } catch (err) {
-      console.error(err);
+      console.error("❌ Критическая ошибка при загрузке игры на сервере:", err);
       socket.emit('load_game_failed', { message: err.message });
     }
   });
