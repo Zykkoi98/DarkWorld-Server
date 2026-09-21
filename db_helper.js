@@ -67,11 +67,11 @@ function getServerMaxHp(fighter) {
 
 // 🔥 ВНЕДРЕНИЕ СТОЙКОСТИ: Базовая броня (def) теперь зависит строго от Toughness (или интеллекта как кэша)
 function getServerDef(fighter) {
-  const baseToughness = Number(fighter.toughness ?? fighter.intellect ?? 1);
-  const gearToughness = getEquipmentBonus(fighter.equipped, 'toughness') + getEquipmentBonus(fighter.equipped, 'intellect');
+  const baseToughness = Number(fighter.toughness || 1);
+  const gearToughness = getEquipmentBonus(fighter.equipped, 'toughness');
   const totalToughness = baseToughness + gearToughness;
 
-  // Каждая единица Стойкости увеличивает защиту на 1.0 (можно настроить баланс)
+  // Каждая единица Стойкости увеличивает защиту на 1.0 ед.
   const baseDef = Math.floor(totalToughness * 1.0); 
   const armorDef = getEquipmentBonus(fighter.equipped, 'def');
   return baseDef + armorDef;
@@ -94,7 +94,7 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
       return;
     }
 
-    const row = data[0];
+    const row = data[0]; // Исправлено: читаем первый элемент массива
     const currentXp = safeReadField(row, 'xp', 0);
     const cloudLevel = getServerCorrectLevelByXp(currentXp);
     let pointsKey = row.statpoints !== undefined ? 'statpoints' : 'statPoints';
@@ -113,7 +113,7 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
         strength: safeReadField(row, 'strength', 1),
         agility: safeReadField(row, 'agility', 1),
         endurance: safeReadField(row, 'endurance', 1),
-        toughness: safeReadField(row, 'toughness', 1) || safeReadField(row, 'intellect', 1), // Резервное чтение
+        toughness: safeReadField(row, 'toughness', 1), // Чистая стойкость
         luck: safeReadField(row, 'luck', 1)
       },
       inventory: row.inventory || { equipment: [], resources: [], consumables: [] },
@@ -148,7 +148,7 @@ module.exports = {
         if (error) return socket.emit('load_game_failed', { message: error.message });
 
         if (data && data.length > 0) {
-          let cloudPlayer = data[0]; 
+          let cloudPlayer = data[0]; // Читаем объект из массива
           
           const currentXp = safeReadField(cloudPlayer, 'xp', 0);
           const correctLevel = getServerCorrectLevelByXp(currentXp);
@@ -157,21 +157,20 @@ module.exports = {
           const str = safeReadField(cloudPlayer, 'strength', 1);
           const agi = safeReadField(cloudPlayer, 'agility', 1);
           const end = safeReadField(cloudPlayer, 'endurance', 1);
-          const tgh = safeReadField(cloudPlayer, 'toughness', 1) || safeReadField(cloudPlayer, 'intellect', 1);
+          const tgh = safeReadField(cloudPlayer, 'toughness', 1); // Только стойкость
           const lck = safeReadField(cloudPlayer, 'luck', 1);
           
           let pointsKey = cloudPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
           const freePoints = safeReadField(cloudPlayer, pointsKey, 0);
 
           const totalFighterPoints = str + agi + end + tgh + lck + freePoints;
-          const maxLegalPoints = 5 + 5 + ((correctLevel - 1) * 5); // 5 базовых + 5 стартовых + 5 за уровень
+          const maxLegalPoints = 5 + 5 + ((correctLevel - 1) * 5); 
 
           let needsDbSync = false;
           let updatePayload = {};
 
-          // Проверка накрутки очков характеристик или несоответствия уровня
           if (dbLevel !== correctLevel || totalFighterPoints > maxLegalPoints) {
-            console.warn(`🚨 [АНТИЧИТ ЗАРЕГИСТРИРОВАЛ ЧИТ/СБОЙ] Сброс на легальную норму уровня ${correctLevel}`);
+            console.warn(`🚨 [АНТИЧИТ] Сброс на легальную норму уровня ${correctLevel}`);
             
             let levelKey = cloudPlayer.level !== undefined ? 'level' : 'Level';
             let hpKey = cloudPlayer.hp !== undefined ? 'hp' : 'hp';
@@ -179,17 +178,13 @@ module.exports = {
             
             statsKeys.forEach(key => {
               let finalKey = cloudPlayer[key] !== undefined ? key : key.toLowerCase();
-              // Если в БД до сих пор колонка intellect, пишем в неё
-              if (key === 'toughness' && cloudPlayer.intellect !== undefined && cloudPlayer.toughness === undefined) {
-                finalKey = 'intellect';
-              }
               updatePayload[finalKey] = 1;
             });
 
             updatePayload[levelKey] = correctLevel;
             updatePayload[pointsKey] = maxLegalPoints - 5; 
             
-            const freshMaxHp = getServerMaxHp({ endurance: 1, equipped: cloudPlayer.equipped || {} });
+            const freshMaxHp = getServerMaxHp({ endurance: 1, toughness: 1, equipped: cloudPlayer.equipped || {} });
             updatePayload[hpKey] = freshMaxHp;
 
             needsDbSync = true;
@@ -231,9 +226,8 @@ module.exports = {
 
         if (totalSpentNow === 0) return socket.emit('stat_distribution_error', 'Вы не выбрали статы.');
 
-        const tghVal = safeReadField(dbPlayer, 'toughness', 1) || safeReadField(dbPlayer, 'intellect', 1);
         const totalDbStatsSum = safeReadField(dbPlayer, 'strength', 1) + safeReadField(dbPlayer, 'agility', 1) + 
-                               safeReadField(dbPlayer, 'endurance', 1) + tghVal + safeReadField(dbPlayer, 'luck', 1);
+                               safeReadField(dbPlayer, 'endurance', 1) + safeReadField(dbPlayer, 'toughness', 1) + safeReadField(dbPlayer, 'luck', 1);
         
         let finalPointsKey = dbPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
         const currentDbFreePoints = safeReadField(dbPlayer, finalPointsKey, 0);
@@ -249,16 +243,11 @@ module.exports = {
         statsKeys.forEach(key => {
           let finalKey = dbPlayer[key] !== undefined ? key : key.toLowerCase();
           let spent = Number(distribution[key]) || 0;
-
-          if (key === 'toughness' && dbPlayer.intellect !== undefined && dbPlayer.toughness === undefined) {
-            finalKey = 'intellect';
-          }
           
-          const currentVal = (key === 'toughness') ? tghVal : safeReadField(dbPlayer, key, 1);
+          const currentVal = safeReadField(dbPlayer, key, 1);
           updatePayload[finalKey] = currentVal + spent;
         });
 
-        // Если качнули выносливость, увеличиваем текущее ХП
         const addedEnd = Number(distribution.endurance) || 0;
         if (addedEnd > 0) {
           let hpKey = dbPlayer.hp !== undefined ? 'hp' : 'hp';
