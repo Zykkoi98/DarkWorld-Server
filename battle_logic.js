@@ -705,9 +705,25 @@ module.exports = function(io, socket, sb, activeRooms) {
           levelA = correctLevelA;
         }
 
-        endHpA = maxHpA;
-        endHpB = Math.max(1, Math.floor(maxHpB * 0.2));
+        // 🔥 ИСПРАВЛЕНО: Победитель сохраняет остаток своего ХП из боя (но не меньше 1)
+        endHpA = Math.max(1, Number(playerA.currentHp));
+        endHpB = Math.max(1, Math.floor(maxHpB * 0.2)); // Проигравшему Evil пишем легальные 20%
       } 
+      else if (result === 'lose') {
+        const pvpXp = calculatePvpXp(levelB, levelA);
+        goldB += goldReward;
+        xpB += pvpXp;
+
+        const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
+        if (correctLevelB > levelB) {
+          statpointsB += (correctLevelB - levelB) * 5;
+          levelB = correctLevelB;
+        }
+
+        endHpA = Math.max(1, Math.floor(maxHpA * 0.2)); // Проигравшему Яну пишем легальные 20%
+        // 🔥 ИСПРАВЛЕНО: Победитель сохраняет остаток своего ХП из боя (но не меньше 1)
+        endHpB = Math.max(1, Number(playerB.currentHp));
+      }
       else if (result === 'lose') {
         const pvpXp = calculatePvpXp(levelB, levelA);
         goldB += goldReward;
