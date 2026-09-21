@@ -491,7 +491,8 @@ function executeRoundCalculations(roomId, activeRooms, io) {
       const targetDef = getServerDef(target);
       const dmg = Math.max(1, baseDmg - targetDef);
 
-      target.currentHp = Math.max(0, target.currentHp - dmg);
+      let oldHp = Number(target.currentHp || 0);
+      target.currentHp = Math.max(0, oldHp - dmg);
       logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[attacker.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
     }
   });
@@ -504,19 +505,52 @@ function executeRoundCalculations(roomId, activeRooms, io) {
   const currentRound = room.turnCount;
   room.turnCount++;
 
-  if (isTeamADead || isTeamBDead || room.turnCount > 40) {
+ if (isTeamADead || isTeamBDead || room.turnCount > 40) {
     let result = 'draw';
     if (!isTeamADead && isTeamBDead) result = 'win';
     if (isTeamADead && !isTeamBDead) result = 'lose';
 
-    if (room.type === 'pve') finalizePveBattle(room, result, logs, currentRound);
-    else if (room.type === 'pvp') finalizePvpBattle(room, result, logs, currentRound);
-  } else {
+    console.log(`🏁 [СЕРВЕР] Финал PvE триггера. Результат матча: ${result}. Раунд: ${currentRound}`);
+
+    // 🔥 СТЕП 1: Принудительно рассылаем пакет финала ВСЕМ участникам комнаты (включая тебя)
+    // Это заставит телефон обнулить ХП голема в UI и превратить кнопку в "ВЕРНУТЬСЯ В ГОРОД"
     [...room.teamA, ...room.teamB].forEach(p => {
       if (p.socketId) {
         io.to(p.socketId).emit('round_result', { 
-          turnCount: currentRound, logs, isOver: false, 
-          teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) 
+          turnCount: currentRound, 
+          logs: logs, 
+          isOver: true, // 🌟 Указываем клиенту, что это КОНЕЦ БОЯ!
+          resultType: (p.uuid === `player_${room.teamA[0].id}`) ? result : (result === 'win' ? 'lose' : 'win'),
+          teamA: sanitizeTeam(room.teamA), 
+          teamB: sanitizeTeam(room.teamB) 
+        });
+      }
+    });
+
+    // 🔥 СТЕП 2: Вызываем мирную финализацию наград и запись в Supabase
+    if (room.type === 'pve') {
+      finalizePveBattle(room, result, logs, currentRound, io);
+    } else if (room.type === 'pvp') {
+      finalizePvpBattle(room, result, logs, currentRound, io);
+    }
+    
+    // 🔥 СТЕП 3: Удаляем комнату из ОЗУ сервера ТОЛЬКО после того, как пакет улетел на телефон!
+    // Если удалить её раньше времени, io.to() не сможет отправить данные в закрытую комнату.
+    setTimeout(() => {
+      delete activeRooms[room.id];
+      console.log(`🗑️ [ОЗУ] Комната ${room.id} полностью выгружена из памяти сервера.`);
+    }, 1000); // Небольшая задержка в 1 секунду для гарантированной отправки сети
+    
+  } else {
+    // Если бой продолжается (твой старый рабочий блок)
+    [...room.teamA, ...room.teamB].forEach(p => {
+      if (p.socketId) {
+        io.to(p.socketId).emit('round_result', { 
+          turnCount: currentRound, 
+          logs: logs, 
+          isOver: false, 
+          teamA: sanitizeTeam(room.teamA), 
+          teamB: sanitizeTeam(room.teamB) 
         });
       }
     });
@@ -567,26 +601,6 @@ async function finalizePveBattle(room, result, logs, finalRound, io) {
     dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2));
   }
 
-  // 🔥 ФИКС 2: Отправляем клиенту пакет финала боя ДО сохранения в БД.
-  // Это обновит ХП волка до нуля на экране телефона и покажет зеленую кнопку!
-  if (player.socketId && io) {
-    io.to(player.socketId).emit('round_result', { 
-      turnCount: finalRound, 
-      logs: logs, 
-      isOver: true, 
-      resultType: result, 
-      teamA: room.teamA.map(f => ({
-        uuid: f.uuid, name: f.name, icon: f.icon, level: f.level,
-        currentHp: f.currentHp, maxHp: f.maxHp, isBot: f.isBot,
-        hasSubmitted: !!f.turn, equipped: f.equipped || null 
-      })), 
-      teamB: room.teamB.map(f => ({
-        uuid: f.uuid, name: f.name, icon: f.icon, level: f.level,
-        currentHp: f.currentHp, maxHp: f.maxHp, isBot: f.isBot,
-        hasSubmitted: !!f.turn, equipped: f.equipped || null 
-      }))
-    });
-  }
 
   // Сохраняем честные итоги в Supabase
   try {
