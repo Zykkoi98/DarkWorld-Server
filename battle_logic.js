@@ -433,7 +433,7 @@ function executeRoundCalculations(roomId, activeRooms, io) {
     if (!isTeamADead && isTeamBDead) result = 'win';
     if (isTeamADead && !isTeamBDead) result = 'lose';
 
-    if (room.type === 'pve') finalizePveBattle(room, result, logs, room.turnCount);
+    if (room.type === 'pve') finalizePveBattle(room, result, logs, currentRound, io);
     else if (room.type === 'pvp') finalizePvpBattle(room, result, logs, room.turnCount);
     return;
   }
@@ -525,17 +525,28 @@ function executeRoundCalculations(roomId, activeRooms, io) {
 }
 
 // --- 12. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvE И СИНХРОНИЗАЦИЯ НАГРАД ---
-async function finalizePveBattle(room, result, logs, finalRound) {
+async function finalizePveBattle(room, result, logs, finalRound, io) {
   const sb = require('@supabase/supabase-js').createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+  
+  // 🔥 ФИКС 1: Явно подключаем db_helper внутри функции, чтобы сервер видел расчет уровней и ХП
+  const dbHelper = require('./db_helper');
+
   const player = room.teamA[0];
   if (!player) return;
 
-  let gainedXp = 0; let gainedGold = 0;
+  let gainedXp = 0; 
+  let gainedGold = 0;
   let dbHpPayload = player.currentHp;
 
   if (result === 'win') {
-    room.teamB.forEach(m => { gainedXp += m.rewardXp || 0; gainedGold += m.rewardGold || 0; });
-    player.gold += gainedGold; player.xp += gainedXp;
+    // Считаем награды со всех убитых монстров
+    room.teamB.forEach(m => { 
+      gainedXp += Number(m.rewardXp || 0); 
+      gainedGold += Number(m.rewardGold || 0); 
+    });
+    
+    player.gold += gainedGold; 
+    player.xp += gainedXp;
     
     const oldLevel = Number(player.level || 1);
     const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp);
@@ -545,22 +556,51 @@ async function finalizePveBattle(room, result, logs, finalRound) {
       player.level = correctLevel;
       player.currentHp = dbHelper.getServerMaxHp(player); 
       dbHpPayload = player.currentHp;
-      logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня!`);
+      logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня! Получено +${(correctLevel - oldLevel) * 5} очков.`);
     } else {
       dbHpPayload = player.currentHp;
     }
     logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
   } else {
     logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе.`);
-    player.currentHp = 0; dbHpPayload = Math.max(1, Math.floor(player.maxHp * 0.2));
+    player.currentHp = 0; 
+    dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2));
   }
 
+  // 🔥 ФИКС 2: Отправляем клиенту пакет финала боя ДО сохранения в БД.
+  // Это обновит ХП волка до нуля на экране телефона и покажет зеленую кнопку!
+  if (player.socketId && io) {
+    io.to(player.socketId).emit('round_result', { 
+      turnCount: finalRound, 
+      logs: logs, 
+      isOver: true, 
+      resultType: result, 
+      teamA: room.teamA.map(f => ({
+        uuid: f.uuid, name: f.name, icon: f.icon, level: f.level,
+        currentHp: f.currentHp, maxHp: f.maxHp, isBot: f.isBot,
+        hasSubmitted: !!f.turn, equipped: f.equipped || null 
+      })), 
+      teamB: room.teamB.map(f => ({
+        uuid: f.uuid, name: f.name, icon: f.icon, level: f.level,
+        currentHp: f.currentHp, maxHp: f.maxHp, isBot: f.isBot,
+        hasSubmitted: !!f.turn, equipped: f.equipped || null 
+      }))
+    });
+  }
+
+  // Сохраняем честные итоги в Supabase
   try {
     await sb.from('players').update({ 
-      gold: player.gold, xp: player.xp, hp: dbHpPayload, 
-      level: player.level, statpoints: player.statpoints 
+      gold: Number(player.gold), 
+      xp: Number(player.xp), 
+      hp: Number(dbHpPayload), 
+      level: Number(player.level), 
+      statpoints: Number(player.statpoints) 
     }).eq('id', Number(player.id));
-  } catch (err) { console.error(err); }
+    console.log(`☁️ [БД] Итоги PvE матча успешно зафиксированы для игрока ${player.id}`);
+  } catch (err) { 
+    console.error("❌ Ошибка сохранения PvE в Supabase:", err); 
+  }
 }
 
 // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
