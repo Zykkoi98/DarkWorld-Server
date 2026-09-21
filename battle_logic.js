@@ -516,7 +516,7 @@ function executeRoundCalculations(roomId, activeRooms, io) {
     // 🌲 ВЕТВЬ А: РАСЧЕТ ЛОГОВ НАГРАД СТРОГО ДЛЯ PvE (БИТВА С МОНСТРАМИ)
     // ============================================================================
     if (room.type === 'pve') {
-      const player = room.teamA[0]; // Извлекаем конкретного игрока из массива
+      const player = room.teamA[0];
       if (player && result === 'win') {
         let gainedXp = 0;
         let gainedGold = 0;
@@ -539,20 +539,42 @@ function executeRoundCalculations(roomId, activeRooms, io) {
     }
 
     // ============================================================================
-    // 📤 ОТПРАВКА СЕТЕВОГО ПАКЕТА ФИНАЛА (ОБЩАЯ ДЛЯ PvE И PvP)
+    // 🏆 ВЕТВЬ Б: 🔥 ФИКС PvP ЛОГОВ НАГРАД (ДО ОТПРАВКИ ПАКЕТА НА ТЕЛЕФОН)
     // ============================================================================
-    const myPlayerFighter = room.teamA[0];
+    if (room.type === 'pvp') {
+      const playerA = room.teamA[0]; // Ян
+      const playerB = room.teamB[0]; // Evil
+      const goldReward = 25;
+
+      const calculatePvpXpLog = (winnerLvl, loserLvl) => {
+        let baseXp = Number(loserLvl || 1) * 15;
+        let multiplier = 1;
+        if (loserLvl > winnerLvl) multiplier = 1 + ((loserLvl - winnerLvl) * 0.25);
+        else if (loserLvl < winnerLvl) multiplier = Math.max(0.1, 1 - ((winnerLvl - loserLvl) * 0.20));
+        return Math.floor(baseXp * multiplier);
+      };
+
+      if (result === 'win' && playerA && playerB) {
+        const xpGained = calculatePvpXpLog(playerA.level, playerB.level);
+        logs.push(`🏁 <strong>ПОБЕДА НА АРЕНЕ!</strong> Гладиатор <strong>${playerA.name}</strong> поверг соперника! Награда: 💰 ${goldReward} монет, ✨ ${xpGained} опыта.`);
+      } else if (result === 'lose' && playerA && playerB) {
+        const xpGained = calculatePvpXpLog(playerB.level, playerA.level);
+        logs.push(`🏁 <strong>ПОБЕДА НА АРЕНЕ!</strong> Гладиатор <strong>${playerB.name}</strong> одержал верх! Награда: 💰 ${goldReward} монет, ✨ ${xpGained} опыта.`);
+      } else {
+        logs.push(`🏁 <strong>НИЧЬЯ НА АРЕНЕ!</strong> Силы гладиаторов равны. Награды аннулированы.`);
+      }
+    }
+
+    // ============================================================================
+    // 📤 ОТПРАВКА СЕТЕВОГО ПАКЕТА ФИНАЛА (ТЕПЕРЬ ТЕКСТ НАГРАДЫ ТУТ ЕСТЬ!)
+    // ============================================================================
     [...room.teamA, ...room.teamB].forEach(p => {
       if (p.socketId) {
-        // Вычисляем тип исхода для конкретного сокета гладиатора
         let personalResult = result;
         if (room.type === 'pvp') {
           const isTargetInTeamA = room.teamA.some(f => f.uuid === p.uuid);
-          if (isTargetInTeamA) {
-            personalResult = result; // Если игрок в команде А (Ян), для него исход плоский
-          } else {
-            personalResult = (result === 'win') ? 'lose' : (result === 'lose' ? 'win' : 'draw'); // Для Evil инвертируем
-          }
+          if (isTargetInTeamA) personalResult = result;
+          else personalResult = (result === 'win') ? 'lose' : (result === 'lose' ? 'win' : 'draw');
         }
 
         io.to(p.socketId).emit('round_result', { 
@@ -566,19 +588,11 @@ function executeRoundCalculations(roomId, activeRooms, io) {
       }
     });
 
-    // ============================================================================
-    // ☁️ СОХРАНЕНИЕ ДАННЫХ В СУПЕРБЕЙЗ (ЖЕСТКОЕ РАЗДЕЛЕНИЕ ПО ТИПАМ КОМНАТ)
-    // ============================================================================
-    if (room.type === 'pve') {
-      finalizePveBattle(room, result, logs, currentRound, io);
-    } 
-    else if (room.type === 'pvp') {
-      // 🔥 ФИКС: Вызываем правильную PvP-финализацию (Часть 3, Фрагмент 2.2), 
-      // передавая io, чтобы данные Яна и Evil записались корректно
-      finalizePvpBattle(room, result, logs, currentRound, io);
-    }
+    // Вызываем мирное сохранение наград в Supabase
+    if (room.type === 'pve') finalizePveBattle(room, result, logs, currentRound, io);
+    else if (room.type === 'pvp') finalizePvpBattle(room, result, logs, currentRound, io);
     
-    // Мягко стираем комнату из оперативной памяти сервера, чтобы никто не зависал
+    // Выгружаем комнату из ОЗУ бэкенда
     setTimeout(() => {
       delete activeRooms[room.id];
       console.log(`🗑️ [ОЗУ] Комната ${room.id} полностью выгружена.`);
@@ -589,7 +603,7 @@ function executeRoundCalculations(roomId, activeRooms, io) {
     [...room.teamA, ...room.teamB].forEach(p => {
       if (p.socketId) {
         io.to(p.socketId).emit('round_result', { 
-          turnCount: currentRound, logs, isOver: false, 
+          turnCount: currentRound, logs: logs, isOver: false, 
           teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) 
         });
       }
