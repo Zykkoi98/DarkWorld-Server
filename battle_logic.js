@@ -573,7 +573,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         }
       });
 
-    if (room.type === 'pve') {
+        if (room.type === 'pve') {
             finalizePveBattle(room, result, logs, currentRound, io);
         } else if (room.type === 'pvp') {
             finalizePvpBattle(room, result, logs, currentRound, io);
