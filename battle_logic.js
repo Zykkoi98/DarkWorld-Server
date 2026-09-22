@@ -278,6 +278,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     // 🔥 ЛОГ НА СЕРВЕРЕ: Проверяем, что пришло от игрока
     console.log(`📥 [ПОЛУЧЕН ХОД] Гладиатор: ${fighter.name} | Атк: ${attack} | Блок: [${defends ? defends.join(', ') : ''}] | Цель UUID: ${targetUuid}`);
+        console.log(`📥 [ЛОГ ПРИЕМА ХОДА] Игрок: ${fighter.name} | Текущий уровень в ОЗУ боя: ${fighter.level}`);
 
     let canExecuteRound = false;
 
@@ -354,6 +355,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     const p1MaxHp = getServerMaxHp(p1Stats);
     const p2MaxHp = getServerMaxHp(p2Stats);
+     console.log(`🔎 [ИНСПЕКЦИЯ АРЕНЫ] Создатель заявки уровень:`, playerData.level, `| Оппонент уровень:`, p2Data.level);
 
     const teamA = [{
       uuid: `player_${playerData.id}`, id: String(playerData.id), name: playerData.name, icon: '👤', isBot: false,
