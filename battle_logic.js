@@ -219,8 +219,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       const teamA = [{
         uuid: `player_${dbPlayer.id}`, id: String(dbPlayer.id), name: dbPlayer.name, icon: '👤', isBot: false,
-        level: Number(dbPlayer.level), strength: Number(dbPlayer.strength), agility: Number(dbPlayer.agility),
-        endurance: Number(dbPlayer.endurance), intellect: Number(dbPlayer.intellect), luck: Number(dbPlayer.luck),
+        level: Number(dbPlayer.level), strength: Number(dbPlayer.strength), agility: Number(dbPlayer.agility), endurance: Number(dbPlayer.endurance), luck: Number(dbPlayer.luck),
         currentHp: Math.min(Number(dbPlayer.hp), pMaxHp), maxHp: pMaxHp, socketId: socket.id, turn: null,
         gold: Number(dbPlayer.gold), xp: Number(dbPlayer.xp), statpoints: Number(dbPlayer.statpoints),
         equipped: dbPlayer.equipped || {}, inventory: dbPlayer.inventory || {}, afkTurns: 0 
@@ -234,9 +233,8 @@ module.exports = function(io, socket, sb, activeRooms) {
           name: monsterCount > 1 ? `${dbMonster.name} #${i + 1}` : dbMonster.name, icon: dbMonster.icon,
           isBot: true, level: Number(dbMonster.level), strength: Number(dbMonster.strength),
           agility: Number(dbMonster.agility), endurance: Number(dbMonster.endurance),
-          intellect: Number(dbMonster.intellect), luck: Number(dbMonster.luck),
-          currentHp: mMaxHp, maxHp: mMaxHp, rewardXp: Number(dbMonster.reward_xp),
-          rewardGold: Number(dbMonster.reward_gold), lootTable: dbMonster.loot_table || [], turn: null
+          luck: Number(dbMonster.luck), currentHp: mMaxHp, maxHp: mMaxHp, rewardXp: Number(dbMonster.reward_xp),
+          rewardGold: Number(dbMonster.reward_gold), turn: null
         });
       }
 
@@ -319,8 +317,7 @@ module.exports = function(io, socket, sb, activeRooms) {
       strength: Number(playerData.strength ?? playerData.stats?.strength ?? 1),
       agility: Number(playerData.agility ?? playerData.stats?.agility ?? 1),
       endurance: Number(playerData.endurance ?? playerData.stats?.endurance ?? 1),
-      intellect: Number(playerData.intellect ?? playerData.stats?.intellect ?? 1),
-      luck: Number(playerData.luck ?? playerData.stats?.luck ?? 1),
+      luck: Number(playerData.luck ?? playerData.stats?.luck ?? 1), // Интеллект полностью удален
       equipped: playerData.equipped || {}
     };
 
@@ -328,8 +325,7 @@ module.exports = function(io, socket, sb, activeRooms) {
       strength: Number(p2Data.strength ?? p2Data.stats?.strength ?? 1),
       agility: Number(p2Data.agility ?? p2Data.stats?.agility ?? 1),
       endurance: Number(p2Data.endurance ?? p2Data.stats?.endurance ?? 1),
-      intellect: Number(p2Data.intellect ?? p2Data.stats?.intellect ?? 1),
-      luck: Number(p2Data.luck ?? p2Data.stats?.luck ?? 1),
+      luck: Number(p2Data.luck ?? p2Data.stats?.luck ?? 1), // Интеллект полностью удален
       equipped: p2Data.equipped || {}
     };
 
@@ -467,19 +463,27 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (target.turn && target.turn.defends.includes(attacker.turn.attack)) {
         logs.push(`🛡️ <strong>${target.name}</strong> заблокировал удар от <strong>${attacker.name}</strong> в ${ZONE_NAMES[attacker.turn.attack]}.`);
       } else {
-        const attLuck = getServerLuck(attacker);
-        const critChance = Math.min(50, 5 + (attLuck * 0.5));
-        const isCrit = rand(1, 100) <= critChance;
-        
-        let baseDmg = getServerAtk(attacker);
-        if (isCrit) baseDmg = Math.floor(baseDmg * 1.5);
+        // === КУСОК КОДА ДЛЯ ЗАМЕНЫ ВНУТРИ queue.forEach ===
+      
+      //  Расчет Уворота цели против Антиуворота атакующего
+      const evadeChance = Math.min(75, Math.max(5, 5 + Math.floor((dbHelper.getServerMfInv(target) - dbHelper.getServerMfAntiInv(attacker)) / 10)));
+      if (rand(1, 100) <= evadeChance) {
+        logs.push(`🏹 <strong>${target.name}</strong> увернулся от удара <strong>${attacker.name}</strong> в ${ZONE_NAMES[attacker.turn.attack]}!`);
+        return; // Урон полностью сброшен в 0, прерываем этот удар раунда
+      }
 
-        const targetDef = getServerDef(target);
-        const dmg = Math.max(1, baseDmg - targetDef);
+      //  Расчет Крита атакующего против Антикрита цели
+      const critChance = Math.min(65, Math.max(5, 5 + Math.floor((dbHelper.getServerMfCrit(attacker) - dbHelper.getServerMfAntiCrit(target)) / 10)));
+      const isCrit = rand(1, 100) <= critChance;
 
-        let oldHp = Number(target.currentHp || 0);
-        target.currentHp = Math.max(0, oldHp - dmg);
-        logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[attacker.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
+      // Расчет базового физ-урона от Силы
+      let dmg = Math.floor(2 + ((Number(attacker.strength || 1) + getEquipmentBonus(attacker.equipped, 'strength')) * 1.5)) + getEquipmentBonus(attacker.equipped, 'atk');
+      if (isCrit) dmg = Math.floor(dmg * 2.0); // Удваиваем урон при проке крита
+
+      // Вычитаем поглощающую броню Выносливости цели
+      dmg = Math.max(1, dmg - dbHelper.getServerDef(target));
+      target.currentHp = Math.max(0, Number(target.currentHp || 0) - dmg);
+      logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[attacker.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
       }
     });
 

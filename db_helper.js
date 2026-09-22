@@ -9,19 +9,19 @@ const SERVER_XP_TABLE = [
 ];
 // База характеристик предметов для честного расчёта боевых параметров на бэкенде
 const ITEMS_STAT_DB = {
-  'rusty_sword':    { atk: 2 },
-  'iron_sword':     { atk: 7 },
-  'steel_mace':     { atk: 12 },
-  'heavy_halberd':  { atk: 22 },
-  'wooden_shield':  { def: 2 },
-  'leather_cap':    { def: 1, agility: 1 },
-  'leather_armor':  { def: 4 },
-  'leather_boots':  { def: 1, agility: 2 },
-  'leather_gloves': { def: 1, strength: 1 },
-  'copper_ring':    { toughness: 1 }, // Кольцо теперь дает Стойкость вместо Выносливости
-  'wolf_amulet':    { strength: 2, luck: 1 },
-  'lucky_ring':     { luck: 3 },
-  'ruby_ring':      { strength: 3 }
+  'rusty_sword':    { atk: 2, mf_antiinv: 10 },
+  'iron_sword':     { atk: 7, mf_crit: 20 },
+  'wooden_shield':  { def: 3, mf_anticrit: 15 },
+  'steel_mace':     { atk: 12, mf_antiinv: 35 },
+  'heavy_halberd':  { atk: 22, mf_crit: 50 },
+  'leather_cap':    { def: 1, agility: 1, mf_inv: 15 },
+  'leather_armor':  { def: 4, endurance: 1, mf_anticrit: 20 },
+  'leather_boots':  { def: 1, agility: 2, mf_inv: 25 },
+  'leather_gloves': { def: 1, strength: 1, mf_antiinv: 15 },
+  'copper_ring':    { endurance: 1, mf_anticrit: 10 }, 
+  'wolf_amulet':    { strength: 2, luck: 1, mf_crit: 15 },
+  'lucky_ring':     { luck: 3, mf_crit: 30 },
+  'ruby_ring':      { strength: 3, mf_antiinv: 25 }
 };
 
 // Функция расчета серверного уровня по накопленному опыту
@@ -59,23 +59,18 @@ function getEquipmentBonus(equipped, bonusKey) {
 // 🔥 ФИКС ВЫНОСЛИВОСТИ: Рассчитывает ТОЛЬКО чистые очки здоровья (HP), без влияния на защиту
 function getServerMaxHp(fighter) {
   const baseEndurance = Number(fighter.endurance || 1);
-  const gearEndurance = getEquipmentBonus(fighter.equipped, 'endurance');
-  const totalEndurance = baseEndurance + gearEndurance;
-  const armorHp = getEquipmentBonus(fighter.equipped, 'hp');
-  return (totalEndurance * 10) + armorHp;
+  return ((baseEndurance + getEquipmentBonus(fighter.equipped, 'endurance')) * 10) + (getEquipmentBonus(fighter.equipped, 'hp') || 0);
 }
 
-// 🔥 ВНЕДРЕНИЕ СТОЙКОСТИ: Базовая броня (def) теперь зависит строго от Toughness (или интеллекта как кэша)
 function getServerDef(fighter) {
-  const baseToughness = Number(fighter.toughness || 1);
-  const gearToughness = getEquipmentBonus(fighter.equipped, 'toughness');
-  const totalToughness = baseToughness + gearToughness;
-
-  // Каждая единица Стойкости увеличивает защиту на 1.0 ед.
-  const baseDef = Math.floor(totalToughness * 1.0); 
-  const armorDef = getEquipmentBonus(fighter.equipped, 'def');
-  return baseDef + armorDef;
+  const baseEndurance = Number(fighter.endurance || 1);
+  return Math.floor((baseEndurance + getEquipmentBonus(fighter.equipped, 'endurance')) * 0.5) + (getEquipmentBonus(fighter.equipped, 'def') || 0);
 }
+// Новые функции сбора скрытых боевых модификаторов (статы + шмот)
+function getServerMfInv(fighter) { return (Number(fighter.agility || 1) * 10) + getEquipmentBonus(fighter.equipped, 'mf_inv'); }
+function getServerMfAntiInv(fighter) { return (Number(fighter.agility || 1) * 4) + getEquipmentBonus(fighter.equipped, 'mf_antiinv'); }
+function getServerMfCrit(fighter) { return (Number(fighter.luck || 1) * 10) + getEquipmentBonus(fighter.equipped, 'mf_crit'); }
+function getServerMfAntiCrit(fighter) { return (Number(fighter.luck || 1) * 4) + getEquipmentBonus(fighter.equipped, 'mf_anticrit'); }
 
 // Робот-сканер для безопасного чтения полей Supabase в любом регистре букв
 const safeReadField = (dbRow, fieldName, defaultValue = 0) => {
@@ -129,9 +124,14 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
 
 // Экспортируем методы наружу для использования в других файлах бэкенда
 module.exports = {
+ ITEMS_STAT_DB,
   getServerMaxHp,
   getServerDef,
   getServerCorrectLevelByXp,
+  getServerMfInv,
+  getServerMfAntiInv,
+  getServerMfCrit,
+  getServerMfAntiCrit,
   safeReadField,
   triggerLoadGameSuccess,
   
