@@ -423,14 +423,32 @@ module.exports = function(io, socket, sb) {
 
       console.log(`✨ [МАГАЗИН УСПЕХ] Предмет ${itemId} успешно выдан игроку ID ${nUserId}. Списано: 💰${itemConfig.price}`);
 
-      // 6. СИНХРОНИЗАЦИЯ: Шлем клиенту сигнал об успехе и принудительно обновляем его профиль в городе
-      socket.emit('shop_buy_success', { message: "🎉 Предмет успешно куплен и добавлен в рюкзак!" });
-      
-      // Принудительно пушим свежие данные золота и инвентаря на фронтенд
-      await triggerLoadGameSuccess(nUserId, socket, sb);
+const cleanPlayerProfile = {
+        id: Number(playerRow.id),
+        name: playerRow.name,
+        level: Number(playerRow.level ?? 1),
+        xp: Number(playerRow.xp ?? 0),
+        gold: Number(updatedGold), // Новое списанное золото!
+        hp: Number(playerRow.hp ?? 10),
+        statPoints: Number(playerRow.statpoints ?? playerRow.statPoints ?? 0),
+        stats: {
+          strength: Number(playerRow.strength ?? 1),
+          agility: Number(playerRow.agility ?? 1),
+          endurance: Number(playerRow.endurance ?? 1),
+          luck: Number(playerRow.luck ?? 1)
+        },
+        inventory: inventory, // Наш новый рюкзак со шмоткой!
+        equipped: playerRow.equipped || { rings: [null, null, null] }
+      };
+
+      // 🔥 ОТПРАВЛЯЕМ СИГНАЛ УСПЕХА И СРАЗУ ПЕРЕДАЕМ ОБНОВЛЕННЫЙ ПРОФИЛЬ НА ТЕЛЕФОН
+      socket.emit('shop_buy_success', { 
+        message: "🎉 Предмет успешно куплен и добавлен в рюкзак!",
+        player: cleanPlayerProfile 
+      });
 
     } catch (err) {
-      console.error("❌ Критический сбой внутри buy_item_secure:", err);
+      console.error("❌ Фатальный сбой внутри buy_item_secure:", err.message);
       socket.emit('shop_buy_error', { message: "🚨 Внутренняя ошибка сервера при обработке покупки." });
     }
   });
