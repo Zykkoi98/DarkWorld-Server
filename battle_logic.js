@@ -257,9 +257,21 @@ module.exports = function(io, socket, sb, activeRooms) {
     const room = activeRooms[roomId];
     if (!room) return;
 
-    const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
+    // 🔥 БЕЗОПАСНЫЙ ПОИСК: Ищем бойца сначала по socket.id, а если он переподключился — по UUID пакета
+    let fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
+    
+    // Если из-за дисконнекта Render ID сменился, привязываем новый socket.id к игроку прямо во время хода
+    if (!fighter) {
+      const myFighterUuid = [...room.teamA, ...room.teamB].find(p => !p.isBot && p.socketId === null || p.socketId !== socket.id);
+      if (myFighterUuid) {
+        fighter = myFighterUuid;
+        fighter.socketId = socket.id; // Перепривязываем живой сокет
+      }
+    }
+
     if (!fighter || fighter.currentHp <= 0 || fighter.turn) return;
 
+    // Записываем тактические зоны
     fighter.turn = { targetUuid, attack, defends: defends || [] };
     fighter.afkTurns = 0; 
 
@@ -270,9 +282,16 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (awaitingPvE.length === 0) canExecuteRound = true;
     } 
     else if (room.type === 'pvp') {
-      const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
-      const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
-      if (submittedTurnsCount === alivePlayersCount) canExecuteRound = true;
+      // 🔥 ЖЕСТКИЙ ФИКС PvP: Раунд запускается, когда оба живых игрока отправили ход
+      const playerA = room.teamA[0];
+      const playerB = room.teamB[0];
+      
+      const isReadyA = (playerA.currentHp <= 0 || playerA.turn !== null);
+      const isReadyB = (playerB.currentHp <= 0 || playerB.turn !== null);
+
+      if (isReadyA && isReadyB) {
+        canExecuteRound = true;
+      }
     }
 
     if (canExecuteRound) {
@@ -390,7 +409,7 @@ module.exports = function(io, socket, sb, activeRooms) {
       });
       
       executeRoundCalculations(roomId, activeRooms, io);
-    }, 30000); 
+    }, 60000); 
   }
 
   // --- 11. ВНУТРЕННЯЯ ФУНКЦИЯ: СЕРВЕРНЫЙ КАЛЬКУЛЯТОР БОЯ И ОБМЕНА УДАРАМИ ---
