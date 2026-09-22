@@ -55,7 +55,7 @@ io.on('connection', (socket) => {
     
   }
   if (typeof shopLogic === 'function') {
-  shopLogic(io, null, sb);
+  shopLogic(io, socket, sb);
   }
 
   // Безопасное отключение: чистим socketId оффлайн-игроков в активных битвах
