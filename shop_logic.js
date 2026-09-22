@@ -334,50 +334,60 @@ module.exports = function(io, socket, sb) {
   const triggerLoadGameSuccess = dbHelper.triggerLoadGameSuccess;
 
   // ОБРАБОТЧИК: АБСОЛЮТНО ЗАЩИЩЕННАЯ ПОКУПКА В МАГАЗИНЕ С АНТИ-ХАКОМ ЦЕН
-  socket.on('buy_item_secure', async ({ userId, itemId }) => {
+ socket.on('buy_item_secure', async ({ userId, itemId }) => {
     try {
       const nUserId = Number(userId);
       
-      // 1. Проверяем, существует ли вообще такой товар на сервере
       const itemConfig = SERVER_SHOP_DATABASE[itemId];
       if (!itemConfig) {
         return socket.emit('shop_buy_error', { message: "🚨 Товар не существует в каталоге магазина!" });
       }
 
-      console.log(`🛒 [МАГАЗИН ЗАПРОС] Игрок ID ${nUserId} пытается купить предмет: ${itemId}`);
+      // 🔥 ЛОГ 1: Смотрим, какой ID прилетел с телефона чистым текстом
+      console.log(`🛒 [ПОПЫТКА ПОКУПКИ] Игрок ID: ${nUserId} | Товар: ${itemId}`);
 
-      // 2. Достаем свежие данные игрока напрямую из базы (Защита от подмены баланса на телефоне)
+      // Делаем тестовый запрос по id. Если у тебя в таблице колонка называется по-другому (например user_id), мы это сразу увидим в ошибке
       const { data: playerRow, error: dbError } = await sb.from('players')
         .select('*')
         .eq('id', nUserId)
         .maybeSingle();
 
-      if (dbError || !playerRow) {
-        return socket.emit('shop_buy_error', { message: "🚨 Не удалось связаться с базой данных профиля." });
+      // 🔥 ЛОГ 2: Инспектируем ответ от базы данных Supabase
+      if (dbError) {
+        console.error(`🚨 [ОШИБКА БД SUPABASE]:`, dbError.message);
+        return socket.emit('shop_buy_error', { message: `🚨 Ошибка базы данных: ${dbError.message}` });
+      }
+
+      if (!playerRow) {
+        console.warn(`❌ [ОТКЛОНЕНО] Игрок с ID ${nUserId} вообще не найден в таблице players!`);
+        return socket.emit('shop_buy_error', { message: "❌ Критическая ошибка: Ваш профиль не найден в базе данных Арены!" });
       }
 
       // Безопасное чтение текущего золота и уровня игрока из БД
       const currentGold = Number(playerRow.gold ?? 0);
       const currentLevel = Number(playerRow.level ?? 1);
 
-      // 3. АУДИТ БАЛАНСА И ТРЕБОВАНИЙ УРОВНЯ
-       // Считываем чистые статы игрока напрямую из строки БД (row)
-      const pAgility = Number(playerRow.agility ?? playerRow.stats?.agility ?? 1);
-      const pLuck = Number(playerRow.luck ?? playerRow.stats?.luck ?? 1);
-      const pEndurance = Number(playerRow.endurance ?? playerRow.stats?.endurance ?? 1);
+      // Считываем чистые статы игрока напрямую из строки БД (row)
+      const pAgility = Number(playerRow.agility ?? 1);
+      const pLuck = Number(playerRow.luck ?? 1);
+      const pEndurance = Number(playerRow.endurance ?? 1);
 
-      // Проверяем требования к Ловкости (для Ловкача)
-      if (itemConfig.reqAgility && pAgility < itemConfig.reqAgility) {
-        return socket.emit('shop_buy_error', { message: `❌ Недостаточно Ловкости! Требуется: 🏹${itemConfig.reqAgility}, у вас: 🏹${pAgility}` });
-      }
-      // Проверяем требования к Удаче (для Критовика)
-      if (itemConfig.reqLuck && pLuck < itemConfig.reqLuck) {
-        return socket.emit('shop_buy_error', { message: `❌ Недостаточно Удачи! Требуется: 🍀${itemConfig.reqLuck}, у вас: 🍀${pLuck}` });
-      }
-      // Проверяем требования к Выносливости (для Танка)
+      // 🔥 ЛОГ 3: Выводим все статы, которые успешно поднялись из базы
+      console.log(`🔎 [СТАТЫ ИЗ БД] Персонаж: ${playerRow.name} | Золото: ${currentGold} | Выносливость: ${pEndurance} (Надо: ${itemConfig.reqEndurance || 0})`);
+
+      // Проверяем требования к Выносливости
       if (itemConfig.reqEndurance && pEndurance < itemConfig.reqEndurance) {
         return socket.emit('shop_buy_error', { message: `❌ Недостаточно Выносливости! Требуется: 🛡️${itemConfig.reqEndurance}, у вас: 🛡️${pEndurance}` });
       }
+      // Проверяем требования к Ловкости
+      if (itemConfig.reqAgility && pAgility < itemConfig.reqAgility) {
+        return socket.emit('shop_buy_error', { message: `❌ Недостаточно Ловкости! Требуется: 🏹${itemConfig.reqAgility}, у вас: 🏹${pAgility}` });
+      }
+      // Проверяем требования к Удаче
+      if (itemConfig.reqLuck && pLuck < itemConfig.reqLuck) {
+        return socket.emit('shop_buy_error', { message: `❌ Недостаточно Удачи! Требуется: 🍀${itemConfig.reqLuck}, у вас: 🍀${pLuck}` });
+      }
+
       if (currentGold < itemConfig.price) {
         return socket.emit('shop_buy_error', { message: `❌ Недостаточно золота! Нужно: 💰${itemConfig.price}, у вас: 💰${currentGold}` });
       }
