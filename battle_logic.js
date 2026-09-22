@@ -450,85 +450,89 @@ module.exports = function(io, socket, sb, activeRooms) {
         const aliveTargets = room.teamA.filter(a => a.currentHp > 0);
         if (aliveTargets.length === 0) return;
 
-        const target = aliveTargets[rand(0, aliveTargets.length - 1)];
+        const targetFighter = aliveTargets[rand(0, aliveTargets.length - 1)];
         const zones = ["head", "breast", "torso", "belt", "legs"];
+        
+        // 🔥 Динамический блок ботов: монстры до 3 уровня закрывают 2 зоны, сильные големы 5+ уровня — 3 зоны!
+        const botMaxDefends = (bot.level >= 5) ? 3 : 2;
         const mDefend = [];
-        while (mDefend.length < 2) {
+        while (mDefend.length < botMaxDefends) {
           const rz = zones[rand(0, 4)];
           if (!mDefend.includes(rz)) mDefend.push(rz);
         }
-        bot.turn = { targetUuid: target.uuid, attack: zones[rand(0, 4)], defends: mDefend };
+        
+        bot.turn = { targetUuid: targetFighter.uuid, attack: zones[rand(0, 4)], defends: mDefend };
       });
     }
 
     // Сортировка очереди ходов по показателю серверной Ловкости
     let queue = [...room.teamA, ...room.teamB];
     const aliveAtStart = queue.filter(f => f.currentHp > 0).map(f => f.uuid);
+      // === СЕРВЕРНАЯ ЗАМЕНА ОБСЧЕТА ОДНО/ДВУРУЧНЫХ УДАРОВ В BATTLE_LOGIC.JS ===
     queue.forEach(attacker => {
-      // 🔥 ИСПРАВЛЕНО ДЛЯ ОДНОВРЕМЕННОГО УДАРА (ВЗАИМНОГО УБИЙСТВА):
-      // Проверяем, был ли боец жив НА НАЧАЛО раунда. Если да — он бьет, даже если его убили в этой очереди!
       if (!aliveAtStart.includes(attacker.uuid) || !attacker.turn || !attacker.turn.targetUuid) return;
 
       let target = [...room.teamA, ...room.teamB].find(f => f.uuid === attacker.turn.targetUuid);
       if (!target) {
         const opposingTeam = room.teamA.includes(attacker) ? room.teamB : room.teamA;
-        const newAlive = opposingTeam.filter(t => t.currentHp > 0);
+        const flatOpponents = Array.isArray(opposingTeam) ? opposingTeam : [opposingTeam];
+        const newAlive = flatOpponents.filter(t => t && t.currentHp > 0);
         if (newAlive.length === 0) return;
         target = newAlive[0];
       }
-      
-      // 🔥 ИСПРАВЛЕНО: Если цель УЖЕ убили в этом раунде, атакующий все равно бьет ее остывающее тело,
-      // чтобы урон уходил в минус и фиксировалась одновременная смерть!
-      if (attacker.uuid === target.uuid) return; 
 
-      if (attacker.turn.attack === null) {
-        logs.push(`❌ <strong>${attacker.name}</strong> пропустил фазу своей атаки.`);
-        return;
-      }
+      if (attacker.uuid === target.uuid) return;
 
-      if (target.turn && target.turn.defends.includes(attacker.turn.attack)) {
-        logs.push(`🛡️ <strong>${target.name}</strong> заблокировал удар от <strong>${attacker.name}</strong> в ${ZONE_NAMES[attacker.turn.attack]}.`);
-      } else {
-        // 1. БК-МЕХАНИКА: Безопасный расчет Уворота (ищет в корне и в .stats)
+      // Превращаем атаку в массив, чтобы код одинаково обрабатывал и 1 удар (строку), и 2 удара (массив двуручника)
+      const attacksList = Array.isArray(attacker.turn.attack) ? attacker.turn.attack : [attacker.turn.attack];
+      const targetDefends = attacker.turn.defends || [];
+
+      // Обсчитываем каждую зону атаки по отдельности!
+      attacksList.forEach(currentAttackZone => {
+        if (currentAttackZone === null) return;
+
+        // 1. ПРОВЕРКА БЛОКА: Закрыл ли защитник эту конкретную зону?
+        if (targetDefends.includes(currentAttackZone)) {
+          logs.push(`🛡️ <strong>${target.name}</strong> заблокировал удар от <strong>${attacker.name}</strong> в ${ZONE_NAMES[currentAttackZone]}.`);
+          return; // Удар заблокирован щитом/оружием, переходим к следующей зоне
+        }
+
+        // 2. БК-МЕХАНИКА: Расчет Уворота цели
         const targetAgi = Number(target.agility ?? target.stats?.agility ?? 1);
         const attackerAgi = Number(attacker.agility ?? attacker.stats?.agility ?? 1);
-
         const targetMfInv = (targetAgi * 10) + getEquipmentBonus(target.equipped, 'mf_inv');
         const attackerMfAntiInv = (attackerAgi * 4) + getEquipmentBonus(attacker.equipped, 'mf_antiinv');
 
-        let finalEvadeChance = 15 + (targetAgi - attackerAgi) * 2 + Math.floor((targetMfInv - attackerMfAntiInv) / 10);
-        const evadeChance = Math.min(75, Math.max(15, finalEvadeChance));
+        let finalEvadeChance = 5 + (targetAgi - attackerAgi) * 1 + Math.floor((targetMfInv - attackerMfAntiInv) / 10);
+        const evadeChance = Math.min(75, Math.max(5, finalEvadeChance));
 
-        // Кубик на проверку уворота
-        const isEvaded = rand(1, 100) <= evadeChance;
-
-        if (isEvaded) {
-          logs.push(`🏹 <strong>${target.name}</strong> увернулся от удара <strong>${attacker.name}</strong> в ${ZONE_NAMES[attacker.turn.attack]}!`);
-        } else {
-          // 🔥 2. БК-МЕХАНИКА: Безопасный расчет Крита (ищет в корне и в .stats)
-          const attackerLuck = Number(attacker.luck ?? attacker.stats?.luck ?? 1);
-          const targetLuck = Number(target.luck ?? target.stats?.luck ?? 1);
-
-          const attackerMfCrit = (attackerLuck * 10) + getEquipmentBonus(attacker.equipped, 'mf_crit');
-          const targetMfAntiCrit = (targetLuck * 4) + getEquipmentBonus(target.equipped, 'mf_anticrit');
-
-          let finalCritChance = 10 + (attackerLuck - targetLuck) * 2 + Math.floor((attackerMfCrit - targetMfAntiCrit) / 10);
-          const critChance = Math.min(65, Math.max(5, finalCritChance));
-
-          // Кубик на проверку крита
-          const isCrit = rand(1, 100) <= critChance;
-
-          // Расчет базового физ-урона от Силы
-          let dmg = Math.floor(2 + ((Number(attacker.strength || 1) + getEquipmentBonus(attacker.equipped, 'strength')) * 1.5)) + getEquipmentBonus(attacker.equipped, 'atk');
-          if (isCrit) dmg = Math.floor(dmg * 2.0); // Удваиваем урон при крите
-
-          // Вычитаем поглощающую броню Выносливости цели
-          dmg = Math.max(1, dmg - dbHelper.getServerDef(target));
-          target.currentHp = Math.max(0, Number(target.currentHp || 0) - dmg);
-          
-          logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[attacker.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
+        if (rand(1, 100) <= evadeChance) {
+          logs.push(`🏹 <strong>${target.name}</strong> увернулся от удара <strong>${attacker.name}</strong> в ${ZONE_NAMES[currentAttackZone]}!`);
+          return; 
         }
-      }
+
+        // 3. БК-МЕХАНИКА: Расчет Крита
+        const attackerLuck = Number(attacker.luck ?? attacker.stats?.luck ?? 1);
+        const targetLuck = Number(target.luck ?? target.stats?.luck ?? 1);
+        const attackerMfCrit = (attackerLuck * 10) + getEquipmentBonus(attacker.equipped, 'mf_crit');
+        const targetMfAntiCrit = (targetLuck * 4) + getEquipmentBonus(target.equipped, 'mf_anticrit');
+
+        let finalCritChance = 10 + (attackerLuck - targetLuck) * 2 + Math.floor((attackerMfCrit - targetMfAntiCrit) / 10);
+        const critChance = Math.min(65, Math.max(5, finalCritChance));
+        const isCrit = rand(1, 100) <= critChance;
+
+        // Базовый физ-урон (если у нас 2 удара двуручником, делим урон каждого удара на 1.3 для баланса)
+        let dmgFactor = (attacksList.length === 2) ? 1.3 : 1.0;
+        let dmg = Math.floor((2 + ((Number(attacker.strength || 1) + getEquipmentBonus(attacker.equipped, 'strength')) * 1.5)) / dmgFactor) + getEquipmentBonus(attacker.equipped, 'atk');
+        
+        if (isCrit) dmg = Math.floor(dmg * 2.0);
+
+        // Поглощение брони Выносливости
+        dmg = Math.max(1, dmg - dbHelper.getServerDef(target));
+        target.currentHp = Math.max(0, Number(target.currentHp || 0) - dmg);
+        
+        logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[currentAttackZone]} ${isCrit ? '💥 КРИТ!' : ''}`);
+      });
     });
 
     room.teamA.forEach(f => f.turn = null);
