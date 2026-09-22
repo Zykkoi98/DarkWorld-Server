@@ -279,8 +279,8 @@ module.exports = function(io, socket, sb, activeRooms) {
     } 
     else if (room.type === 'pvp') {
       // Раунд запускается строго когда у обоих живых игроков есть ходы
-      const playerA = room.teamA[0];
-      const playerB = room.teamB[0];
+      const playerA = Array.isArray(room.teamA) ? room.teamA[0] : room.teamA;
+      const playerB = Array.isArray(room.teamB) ? room.teamB[0] : room.teamB;
       
       if (playerA && playerB) {
         const isReadyA = (playerA.currentHp <= 0 || playerA.turn !== null);
@@ -618,7 +618,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
   // --- 12. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvE И СИНХРОНИЗАЦИЯ НАГРАД ---
   async function finalizePveBattle(room, result, logs, finalRound, io) {
-    const player = room.teamA[0];
+    const player = Array.isArray(room.teamA) ? room.teamA[0] : room.teamA;
     if (!player) return;
 
     let gainedXp = 0; let gainedGold = 0;
@@ -655,11 +655,11 @@ module.exports = function(io, socket, sb, activeRooms) {
 
   // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
   async function finalizePvpBattle(room, result, logs, finalRound, io) {
-    const playerA = room.teamA[0]; 
-    const playerB = room.teamB[0]; 
+  const playerA = Array.isArray(room.teamA) ? room.teamA[0] : room.teamA; 
+  const playerB = Array.isArray(room.teamB) ? room.teamB[0] : room.teamB;
     
     if (!playerA || !playerB) return;
-
+    
     console.log(`
 🏁 [PvP ФИНАЛИЗАЦИЯ] Начинаем защищенную транзакцию наград. Исход для TeamA: ${result}`);
 
