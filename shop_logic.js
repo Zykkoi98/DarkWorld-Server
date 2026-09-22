@@ -330,121 +330,128 @@ const SERVER_SHOP_DATABASE = {
   'immortal_seal_10':   { price: 900, level: 10,reqEndurance: 66, type: 'equipment', slotType: 'ring' }
 
 };
-module.exports = function(io, socket, sb) {
+module.exports = function(io, _unused_socket, sb) {
+  
+  // 🔥 ГЛАВНЫЙ ИСПРАВЛЕННЫЙ ПЕРЕХВАТЧИК: Слушаем подключение игроков со всех экранов
+  io.on('connection', (globalSocket) => {
+    console.log(`🛒 [МАГАЗИН СЕТЬ] Новый сокет ${globalSocket.id} зашел на прилавок.`);
 
-  // 🔥 Авторизация комнаты магазина по ID игрока
-  socket.on('join_shop_room', ({ userId }) => {
-    if (userId) {
-      socket.join(`shop_user_${userId}`);
-      console.log(`🚪 [МАГАЗИН СОКЕТ] Игрок ID ${userId} зашел в торговую сокет-комнату.`);
-    }
-  });
-
-  // ОБРАБОТЧИК: АБСОЛЮТНО ЗАЩИЩЕННАЯ ПОКУПКА В МАГАЗИНЕ С АНТИ-ХАКОМ ЦЕН
-  socket.on('buy_item_secure', async ({ userId, itemId }) => {
-    const sUserId = String(userId);
-    try {
-      const nUserId = Number(userId);
-      
-      const itemConfig = SERVER_SHOP_DATABASE[itemId];
-      if (!itemConfig) {
-        return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: "🚨 Товар не существует в каталоге магазина!" });
+    // Авторизация комнаты магазина по ID игрока
+    globalSocket.on('join_shop_room', ({ userId }) => {
+      if (userId) {
+        globalSocket.join(`shop_user_${String(userId)}`);
+        console.log(`🚪 [МАГАЗИН КОМНАТА] Гладиатор ID ${userId} подключил адресный шлюз.`);
       }
+    });
 
-      console.log(`🛒 [ПОПЫТКА ПОКУПКИ] Игрок ID: ${nUserId} | Товар: ${itemId}`);
+    // Принимаем защищенный пакет покупки
+    globalSocket.on('buy_item_secure', async ({ userId, itemId }) => {
+      const sUserId = String(userId);
+      try {
+        const nUserId = Number(userId);
+        
+        // 1. Проверяем наличие товара в каталоге
+        const itemConfig = SERVER_SHOP_DATABASE[itemId];
+        if (!itemConfig) {
+          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: "🚨 Товар не существует в каталоге магазина!" });
+        }
 
-      const { data: playerRow, error: dbError } = await sb.from('players')
-        .select('*')
-        .eq('id', nUserId)
-        .maybeSingle();
+        console.log(`🛒 [ПОКУПКА] Игрок ID: ${nUserId} берет шмотку: ${itemId}`);
 
-      if (dbError) {
-        console.error(`🚨 [ОШИБКА БД SUPABASE]:`, dbError.message);
-        return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `🚨 Ошибка базы данных: ${dbError.message}` });
+        // 2. Достаем свежие статы из БД Supabase
+        const { data: playerRow, error: dbError } = await sb.from('players')
+          .select('*')
+          .eq('id', nUserId)
+          .maybeSingle();
+
+        if (dbError) {
+          console.error(`🚨 [ОШИБКА БД SUPABASE]:`, dbError.message);
+          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `🚨 Ошибка базы данных: ${dbError.message}` });
+        }
+
+        if (!playerRow) {
+          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: "❌ Критическая ошибка: Ваш профиль не найден в базе данных!" });
+        }
+
+        const currentGold = Number(playerRow.gold ?? 0);
+        const currentLevel = Number(playerRow.level ?? 1);
+
+        const pAgility = Number(playerRow.agility ?? 1);
+        const pLuck = Number(playerRow.luck ?? 1);
+        const pEndurance = Number(playerRow.endurance ?? 1);
+
+        // 3. АУДИТ ТРЕБОВАНИЙ К СТАТАМ, ЗОЛОТУ И УРОВНЮ
+        if (itemConfig.reqEndurance && pEndurance < itemConfig.reqEndurance) {
+          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно Выносливости! Требуется: 🛡️${itemConfig.reqEndurance}, у вас: 🛡️${pEndurance}` });
+        }
+        if (itemConfig.reqAgility && pAgility < itemConfig.reqAgility) {
+          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно Ловкости! Требуется: 🏹${itemConfig.reqAgility}, у вас: 🏹${pAgility}` });
+        }
+        if (itemConfig.reqLuck && pLuck < itemConfig.reqLuck) {
+          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно Удачи! Требуется: 🍀${itemConfig.reqLuck}, у вас: 🍀${pLuck}` });
+        }
+        if (currentGold < itemConfig.price) {
+          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно золота! Нужно: 💰${itemConfig.price}, у вас: 💰${currentGold}` });
+        }
+        if (currentLevel < itemConfig.level) {
+          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Слишком низкий уровень! Требуется: Lv. ${itemConfig.level}, у вас: Lv. ${currentLevel}` });
+        }
+
+        // 4. МОДИФИКАЦИЯ ИНВЕНТАРЯ В ОЗУ
+        let inventory = JSON.parse(JSON.stringify(playerRow.inventory || { equipment: [], consumables: [], resources: [] }));
+        if (!inventory.equipment || !Array.isArray(inventory.equipment)) {
+          inventory.equipment = [];
+        }
+
+        const newInstance = {
+          uuid: `${itemId}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          id: itemId
+        };
+        
+        inventory.equipment.push(newInstance);
+        const updatedGold = currentGold - itemConfig.price;
+
+        // 5. СОХРАНЕНИЕ ТРАНЗАКЦИИ В SUPABASE
+        const { error: updateError } = await sb.from('players')
+          .update({ gold: Number(updatedGold), inventory: inventory })
+          .eq('id', nUserId);
+
+        if (updateError) {
+          console.error(`🚨 [ОШИБКА ЗАПИСИ ИНВЕНТАРЯ В БД]:`, updateError.message);
+          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Ошибка записи инвентаря: ${updateError.message}` });
+        }
+
+        console.log(`✨ [МАГАЗИН УСПЕХ] Списание прошло. Отправляем ответ в комнату shop_user_${sUserId}`);
+
+        // 6. СИНХРОНИЗАЦИЯ С ТЕЛЕФОНОМ
+        const cleanPlayerProfile = {
+          id: Number(playerRow.id),
+          name: playerRow.name,
+          level: Number(playerRow.level ?? 1),
+          xp: Number(playerRow.xp ?? 0),
+          gold: Number(updatedGold),
+          hp: Number(playerRow.hp ?? 10),
+          statPoints: Number(playerRow.statpoints ?? playerRow.statPoints ?? 0),
+          stats: {
+            strength: Number(playerRow.strength ?? 1),
+            agility: Number(playerRow.agility ?? 1),
+            endurance: Number(playerRow.endurance ?? 1),
+            luck: Number(playerRow.luck ?? 1)
+          },
+          inventory: inventory,
+          equipped: playerRow.equipped || { rings: [null, null, null] }
+        };
+
+        io.to(`shop_user_${sUserId}`).emit('shop_buy_success', { 
+          message: "🎉 Предмет успешно куплен и добавлен в рюкзак!",
+          player: cleanPlayerProfile 
+        });
+
+      } catch (err) {
+        console.error("❌ Фатальный сбой внутри buy_item_secure:", err.message);
+        io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: "🚨 Внутренняя ошибка сервера при обработке покупки." });
       }
+    });
 
-      if (!playerRow) {
-        return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: "❌ Критическая ошибка: Ваш профиль не найден в базе данных!" });
-      }
-
-      const currentGold = Number(playerRow.gold ?? 0);
-      const currentLevel = Number(playerRow.level ?? 1);
-
-      const pAgility = Number(playerRow.agility ?? 1);
-      const pLuck = Number(playerRow.luck ?? 1);
-      const pEndurance = Number(playerRow.endurance ?? 1);
-
-      console.log(`🔎 [СТАТЫ ИЗ БД] Персонаж: ${playerRow.name} | Золото: ${currentGold} | Выносливость: ${pEndurance}`);
-
-      if (itemConfig.reqEndurance && pEndurance < itemConfig.reqEndurance) {
-        return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно Выносливости! Требуется: 🛡️${itemConfig.reqEndurance}, у вас: 🛡️${pEndurance}` });
-      }
-      if (itemConfig.reqAgility && pAgility < itemConfig.reqAgility) {
-        return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно Ловкости! Требуется: 🏹${itemConfig.reqAgility}, у вас: 🏹${pAgility}` });
-      }
-      if (itemConfig.reqLuck && pLuck < itemConfig.reqLuck) {
-        return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно Удачи! Требуется: 🍀${itemConfig.reqLuck}, у вас: 🍀${pLuck}` });
-      }
-      if (currentGold < itemConfig.price) {
-        return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно золота! Нужно: 💰${itemConfig.price}, у вас: 💰${currentGold}` });
-      }
-      if (currentLevel < itemConfig.level) {
-        return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Слишком низкий уровень! Требуется: Lv. ${itemConfig.level}, у вас: Lv. ${currentLevel}` });
-      }
-
-      // 4. МОДИФИКАЦИЯ ИНВЕНТАРЯ В ОЗУ СЕРВЕРА
-      let inventory = JSON.parse(JSON.stringify(playerRow.inventory || { equipment: [], consumables: [], resources: [] }));
-      if (!inventory.equipment || !Array.isArray(inventory.equipment)) {
-        inventory.equipment = [];
-      }
-
-      const newInstance = {
-        uuid: `${itemId}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        id: itemId
-      };
-      
-      inventory.equipment.push(newInstance);
-      const updatedGold = currentGold - itemConfig.price;
-
-      // 5. СОХРАНЕНИЕ ОЧИЩЕННОЙ ТРАНЗАКЦИИ В SUPABASE
-      const { error: updateError } = await sb.from('players')
-        .update({ gold: Number(updatedGold), inventory: inventory })
-        .eq('id', nUserId);
-
-      if (updateError) {
-        console.error(`🚨 [ОШИБКА ЗАПИСИ JSONB В БД]:`, updateError.message);
-        return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Ошибка записи инвентаря: ${updateError.message}` });
-      }
-
-      console.log(`✨ [МАГАЗИН УСПЕХ] Предмет ${itemId} успешно выдан игроку ID ${nUserId}.`);
-
-      const cleanPlayerProfile = {
-        id: Number(playerRow.id),
-        name: playerRow.name,
-        level: Number(playerRow.level ?? 1),
-        xp: Number(playerRow.xp ?? 0),
-        gold: Number(updatedGold),
-        hp: Number(playerRow.hp ?? 10),
-        statPoints: Number(playerRow.statpoints ?? playerRow.statPoints ?? 0),
-        stats: {
-          strength: Number(playerRow.strength ?? 1),
-          agility: Number(playerRow.agility ?? 1),
-          endurance: Number(playerRow.endurance ?? 1),
-          luck: Number(playerRow.luck ?? 1)
-        },
-        inventory: inventory,
-        equipped: playerRow.equipped || { rings: [null, null, null] }
-      };
-
-      // 🔥 АДРЕСНАЯ ОТПРАВКА В КОМНАТУ ИГРОКА (Никаких холостых зависаний!)
-      io.to(`shop_user_${sUserId}`).emit('shop_buy_success', { 
-        message: "🎉 Предмет успешно куплен и добавлен в рюкзак!",
-        player: cleanPlayerProfile 
-      });
-
-    } catch (err) {
-      console.error("❌ Фатальный сбой внутри buy_item_secure:", err.message);
-      io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: "🚨 Внутренняя ошибка сервера при обработке покупки." });
-    }
-  });
+  }); // Конец io.on('connection')
 };
