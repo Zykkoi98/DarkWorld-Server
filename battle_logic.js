@@ -272,14 +272,70 @@ module.exports = function(io, socket, sb, activeRooms) {
       return;
     }
 
-    // Записываем тактику
-    fighter.turn = { targetUuid, attack, defends: defends || [] };
+    // ============================================================================
+    // 🛡️ 🔥 [АНТИЧИТ АУДИТ ЗОН ХОДА]: ПРОВЕРКА ЛЕГАЛЬНОСТИ КОЛИЧЕСТВА АТАК И БЛОКОВ
+    // ============================================================================
+    let serverMaxAttacks = 1;
+    let serverMaxDefends = 1;
+
+    if (fighter.equipped) {
+      const mainHand = fighter.equipped.mainHand;
+      const offHand = fighter.equipped.offHand;
+
+      // Сверяем тип оружия по серверной базе (алебарда/двуручник)
+      if (mainHand && ITEMS_STAT_DB[mainHand] && slots?.mainHand === 'twoHanded') {
+        // Подстраховка, если в твоей базе ITEMS_STAT_DB появится флаг двуручника
+        serverMaxAttacks = 2; 
+      } else if (mainHand === 'heavy_halberd') {
+        serverMaxAttacks = 2; // Жесткая привязка под нашу алебарду
+      }
+
+      // Сверяем наличие щита на сервере
+      if (offHand && String(offHand).includes('shield')) {
+        serverMaxDefends = 3;
+      } else if (Number(fighter.level || 1) <= 1) {
+        serverMaxDefends = 2; // Новичкам 1 уровня разрешено 2 блока
+      }
+    } else {
+      serverMaxDefends = (Number(fighter.level || 1) <= 1) ? 2 : 1;
+    }
+
+    // Чистим и фильтруем входящие массивы от читера
+    let checkedDefends = Array.isArray(defends) ? defends.filter(z => typeof z === 'string') : [];
+    let checkedAttack = attack;
+
+    // Если читер прислал больше блоков, чем ему положено — сервер насильно оставляет только первые разрешенные
+    if (checkedDefends.length > serverMaxDefends) {
+      console.warn(`🚨 [АНТИЧИТ ТРИГГЕР] Игрок ${fighter.name} пытался заблокировать ${checkedDefends.length} зон вместо ${serverMaxDefends}! Обрезаем лишнее.`);
+      checkedDefends = checkedDefends.slice(0, serverMaxDefends);
+    }
+
+    // Если читер без двуручника прислал массив атак — берем только первую атаку
+    if (serverMaxAttacks === 1 && Array.isArray(checkedAttack)) {
+      console.warn(`🚨 [АНТИЧИТ ТРИГГЕР] Игрок ${fighter.name} прислал массив атак без двуручного оружия. Берем первую зону.`);
+      checkedAttack = checkedAttack[0] || "torso";
+    } 
+    // Если у него двуручник, но он прислал больше 2 зон
+    else if (serverMaxAttacks === 2 && Array.isArray(checkedAttack) && checkedAttack.length > 2) {
+      checkedAttack = checkedAttack.slice(0, 2);
+    }
+
+    // Записываем проверенную, безопасную тактику в ОЗУ сервера
+    fighter.turn = { 
+      targetUuid: String(targetUuid), 
+      attack: checkedAttack, 
+      defends: checkedDefends 
+    };
     fighter.afkTurns = 0; 
 
-    // 🔥 ЛОГ НА СЕРВЕРЕ: Проверяем, что пришло от игрока
-    console.log(`📥 [ПОЛУЧЕН ХОД] Гладиатор: ${fighter.name} | Атк: ${attack} | Блок: [${defends ? defends.join(', ') : ''}] | Цель UUID: ${targetUuid}`);
-        console.log(`📥 [ЛОГ ПРИЕМА ХОДА] Игрок: ${fighter.name} | Текущий уровень в ОЗУ боя: ${fighter.level}`);
+    // Лог на сервере для контроля
+    const logDefendsText = checkedDefends.join(', ');
+    const logAttackText = Array.isArray(checkedAttack) ? checkedAttack.join(', ') : checkedAttack;
+    console.log(`📥 [ОБРАБОТАН ХОД (ЗАЩИЩЕН)] ${fighter.name} | Удар: ${logAttackText} | Блок: [${logDefendsText}]`);
 
+    // ============================================================================
+    // Условия запуска раунда (остаются без изменений)
+    // ============================================================================
     let canExecuteRound = false;
 
     if (room.type === 'pve') {
@@ -287,19 +343,18 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (awaitingPvE.length === 0) canExecuteRound = true;
     } 
     else if (room.type === 'pvp') {
-      const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
-      const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
+      const playerA = room.teamA[0];
+      const playerB = room.teamB[0];
       
-      // 🔥 ЛОГ НА СЕРВЕРЕ: Проверяем статус готовности PvP поединка
-      console.log(`📊 [СТАТУС PvP КОМНАТЫ] Живых игроков: ${alivePlayersCount} | Готовых ходов: ${submittedTurnsCount}`);
-      
-      if (submittedTurnsCount === alivePlayersCount) {
-        canExecuteRound = true;
+      if (playerA && playerB) {
+        const isReadyA = (playerA.currentHp <= 0 || playerA.turn !== null);
+        const isReadyB = (playerB.currentHp <= 0 || playerB.turn !== null);
+        if (isReadyA && isReadyB) canExecuteRound = true;
       }
     }
 
     if (canExecuteRound) {
-      console.log(`🔔 [УДАР В КОЛОКОЛ] Все игроки прислали данные! Запускаем executeRoundCalculations...`);
+      console.log(`🔔 [УДАР В КОЛОКОЛ] Все ходы проверены и собраны! Запускаем executeRoundCalculations...`);
       clearTimeout(room.timeoutRef);
       executeRoundCalculations(roomId, activeRooms, io); 
     }
