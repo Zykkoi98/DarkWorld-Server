@@ -253,19 +253,12 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // --- 7. ОБРАБОТЧИК: ПРИЕМ ХОДА (АТАКА / БЛОК) ---
-   socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
+    socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
     const room = activeRooms[roomId];
     if (!room) return;
 
-    // Ищем игрока просто по его сокету. Легко и быстро.
-    let fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
-
-    // Если сокет моргнул, подстрахуем простым поиском живого человека в комнате
-    if (!fighter) {
-      fighter = [...room.teamA, ...room.teamB].find(p => !p.isBot && p.currentHp > 0);
-      if (fighter) fighter.socketId = socket.id; // Тихонько обновили ID без циклов
-    }
-
+    // Ищем игрока строго по его активному socketId, как в старой версии
+    const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
     if (!fighter || fighter.currentHp <= 0 || fighter.turn) return;
 
     fighter.turn = { targetUuid, attack, defends: defends || [] };
@@ -278,15 +271,10 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (awaitingPvE.length === 0) canExecuteRound = true;
     } 
     else if (room.type === 'pvp') {
-      // Раунд запускается строго когда у обоих живых игроков есть ходы
-      const playerA = Array.isArray(room.teamA) ? room.teamA[0] : room.teamA;
-      const playerB = Array.isArray(room.teamB) ? room.teamB[0] : room.teamB;
-      
-      if (playerA && playerB) {
-        const isReadyA = (playerA.currentHp <= 0 || playerA.turn !== null);
-        const isReadyB = (playerB.currentHp <= 0 || playerB.turn !== null);
-        if (isReadyA && isReadyB) canExecuteRound = true;
-      }
+      // Возвращаем честный старый подсчет ходов по всей комнате
+      const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
+      const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
+      if (submittedTurnsCount === alivePlayersCount) canExecuteRound = true;
     }
 
     if (canExecuteRound) {
@@ -655,10 +643,15 @@ module.exports = function(io, socket, sb, activeRooms) {
 
   // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
   async function finalizePvpBattle(room, result, logs, finalRound, io) {
-  const playerA = Array.isArray(room.teamA) ? room.teamA[0] : room.teamA; 
-  const playerB = Array.isArray(room.teamB) ? room.teamB[0] : room.teamB;
+  const playerA = room.teamA[0]; // Напрямую берем первый элемент из массива заявки
+    const playerB = room.teamB[0]; 
     
     if (!playerA || !playerB) return;
+
+    const [dbDataA, dbDataB] = await Promise.all([
+      sb.from('players').select('*').eq('id', Number(playerA.id)).maybeSingle(),
+      sb.from('players').select('*').eq('id', Number(playerB.id)).maybeSingle()
+    ]);
     
     console.log(`
 🏁 [PvP ФИНАЛИЗАЦИЯ] Начинаем защищенную транзакцию наград. Исход для TeamA: ${result}`);
