@@ -253,25 +253,21 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // --- 7. ОБРАБОТЧИК: ПРИЕМ ХОДА (АТАКА / БЛОК) ---
-  socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
+   socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
     const room = activeRooms[roomId];
     if (!room) return;
 
-    // 🔥 БЕЗОПАСНЫЙ ПОИСК: Ищем бойца сначала по socket.id, а если он переподключился — по UUID пакета
+    // Ищем игрока просто по его сокету. Легко и быстро.
     let fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
-    
-    // Если из-за дисконнекта Render ID сменился, привязываем новый socket.id к игроку прямо во время хода
+
+    // Если сокет моргнул, подстрахуем простым поиском живого человека в комнате
     if (!fighter) {
-      const myFighterUuid = [...room.teamA, ...room.teamB].find(p => !p.isBot && p.socketId === null || p.socketId !== socket.id);
-      if (myFighterUuid) {
-        fighter = myFighterUuid;
-        fighter.socketId = socket.id; // Перепривязываем живой сокет
-      }
+      fighter = [...room.teamA, ...room.teamB].find(p => !p.isBot && p.currentHp > 0);
+      if (fighter) fighter.socketId = socket.id; // Тихонько обновили ID без циклов
     }
 
     if (!fighter || fighter.currentHp <= 0 || fighter.turn) return;
 
-    // Записываем тактические зоны
     fighter.turn = { targetUuid, attack, defends: defends || [] };
     fighter.afkTurns = 0; 
 
@@ -282,15 +278,14 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (awaitingPvE.length === 0) canExecuteRound = true;
     } 
     else if (room.type === 'pvp') {
-      // 🔥 ЖЕСТКИЙ ФИКС PvP: Раунд запускается, когда оба живых игрока отправили ход
+      // Раунд запускается строго когда у обоих живых игроков есть ходы
       const playerA = room.teamA[0];
       const playerB = room.teamB[0];
       
-      const isReadyA = (playerA.currentHp <= 0 || playerA.turn !== null);
-      const isReadyB = (playerB.currentHp <= 0 || playerB.turn !== null);
-
-      if (isReadyA && isReadyB) {
-        canExecuteRound = true;
+      if (playerA && playerB) {
+        const isReadyA = (playerA.currentHp <= 0 || playerA.turn !== null);
+        const isReadyB = (playerB.currentHp <= 0 || playerB.turn !== null);
+        if (isReadyA && isReadyB) canExecuteRound = true;
       }
     }
 
@@ -459,8 +454,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     // Сортировка очереди ходов по показателю серверной Ловкости
     let queue = [...room.teamA, ...room.teamB];
-    queue.sort((a, b) => getServerAgility(b) - getServerAgility(a));
-
+  
     queue.forEach(attacker => {
       if (attacker.currentHp <= 0 || !attacker.turn || !attacker.turn.targetUuid) return;
 
