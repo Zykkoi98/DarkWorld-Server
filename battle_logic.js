@@ -463,19 +463,23 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     // Сортировка очереди ходов по показателю серверной Ловкости
     let queue = [...room.teamA, ...room.teamB];
-  
+    const aliveAtStart = queue.filter(f => f.currentHp > 0).map(f => f.uuid);
     queue.forEach(attacker => {
-      if (attacker.currentHp <= 0 || !attacker.turn || !attacker.turn.targetUuid) return;
+      // 🔥 ИСПРАВЛЕНО ДЛЯ ОДНОВРЕМЕННОГО УДАРА (ВЗАИМНОГО УБИЙСТВА):
+      // Проверяем, был ли боец жив НА НАЧАЛО раунда. Если да — он бьет, даже если его убили в этой очереди!
+      if (!aliveAtStart.includes(attacker.uuid) || !attacker.turn || !attacker.turn.targetUuid) return;
 
       let target = [...room.teamA, ...room.teamB].find(f => f.uuid === attacker.turn.targetUuid);
-      if (!target || target.currentHp <= 0) {
+      if (!target) {
         const opposingTeam = room.teamA.includes(attacker) ? room.teamB : room.teamA;
         const newAlive = opposingTeam.filter(t => t.currentHp > 0);
         if (newAlive.length === 0) return;
         target = newAlive[0];
       }
-
-      if (attacker.uuid === target.uuid) return; // Защита от самоповреждений
+      
+      // 🔥 ИСПРАВЛЕНО: Если цель УЖЕ убили в этом раунде, атакующий все равно бьет ее остывающее тело,
+      // чтобы урон уходил в минус и фиксировалась одновременная смерть!
+      if (attacker.uuid === target.uuid) return; 
 
       if (attacker.turn.attack === null) {
         logs.push(`❌ <strong>${attacker.name}</strong> пропустил фазу своей атаки.`);
