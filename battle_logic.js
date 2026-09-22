@@ -283,7 +283,7 @@ module.exports = function(io, socket, sb, activeRooms) {
       const offHand = fighter.equipped.offHand;
 
       // Сверяем тип оружия по серверной базе (алебарда/двуручник)
-      if (mainHand && ITEMS_STAT_DB[mainHand] && slots?.mainHand === 'twoHanded') {
+      if (mainHand && ITEMS_STAT_DB[mainHand] && ITEMS_STAT_DB[mainHand].slotType === 'twoHanded') {
         // Подстраховка, если в твоей базе ITEMS_STAT_DB появится флаг двуручника
         serverMaxAttacks = 2; 
       } else if (mainHand === 'heavy_halberd') {
