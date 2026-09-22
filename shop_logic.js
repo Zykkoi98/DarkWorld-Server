@@ -330,6 +330,7 @@ const SERVER_SHOP_DATABASE = {
   'immortal_seal_10':   { price: 900, level: 10,reqEndurance: 66, type: 'equipment', slotType: 'ring' }
 
 };
+global.SERVER_SHOP_DATABASE = SERVER_SHOP_DATABASE;
 module.exports = function(io, socket, sb) {
   // ⚡ ВАЖНО: Мы вешаем слушатель НАПРЯМУЮ на socket, пришедший из server.js.
   // Никаких внутренних io.on('connection') здесь быть не должно!

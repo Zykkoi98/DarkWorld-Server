@@ -42,7 +42,7 @@ module.exports = function(io, socket, sb) {
   const safeReadField = dbHelper.safeReadField;
 
   // --- ОБРАБОТЧИК А: ЭКИПИРОВАТЬ ПРЕДМЕТ ЧЕРЕЗ СЕРВЕР ---
-  socket.on('equip_item_secure', async ({ userId, itemId }) => {
+socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
     try {
       const nUserId = Number(userId);
       const { data: dbPlayer, error: fetchErr } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
@@ -52,26 +52,51 @@ module.exports = function(io, socket, sb) {
       let equipped = dbPlayer.equipped || { rings: [null, null, null] };
       const cloudLevel = safeReadField(dbPlayer, 'level', 1);
 
+      // 🔥 ШАГ 1: Извлекаем чистый ID предмета из прилетевшего UUID (например, rogue_buckler_1)
+      let cleanItemId = itemUuidOrId;
+      if (itemUuidOrId && itemUuidOrId.includes('_') && !ITEMS_STAT_DB[itemUuidOrId]) {
+        const parts = itemUuidOrId.split('_');
+        if (parts.length > 2) {
+          cleanItemId = parts.slice(0, -2).join('_');
+        }
+      }
+
       let slotType = null;
       let requiredLevel = 1;
 
-      if (ITEMS_STAT_DB[itemId]) {
-        const id = itemId;
-        if (id.includes('sword') || id.includes('mace')) slotType = 'mainHand';
-        if (id.includes('halberd')) slotType = 'twoHanded';
-        if (id.includes('shield')) slotType = 'offHand';
-        if (id.includes('cap')) slotType = 'head';
-        if (id.includes('armor')) slotType = 'body';
-        if (id.includes('boots')) slotType = 'legs';
-        if (id.includes('gloves')) slotType = 'gloves';
-        if (id.includes('amulet')) slotType = 'neck';
-        if (id.includes('ring')) slotType = 'ring';
+      // 🔥 ШАГ 2: Ищем характеристики шмотки сначала в старой базе, затем в глобальной базе Магазина
+      let currentItemConfig = ITEMS_STAT_DB[cleanItemId];
+      if (!currentItemConfig && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[cleanItemId]) {
+        currentItemConfig = global.SERVER_SHOP_DATABASE[cleanItemId];
+      }
 
-        if (id === 'iron_sword' || id === 'leather_armor' || id === 'leather_gloves') requiredLevel = 2;
-        if (id === 'steel_mace' || id === 'wolf_amulet' || id === 'lucky_ring') requiredLevel = 3;
-        if (id === 'heavy_halberd' || id === 'ruby_ring') requiredLevel = 5;
-      } else if (SERVER_CONSUMABLES_SLOTS[itemId]) {
-        slotType = SERVER_CONSUMABLES_SLOTS[itemId];
+      if (currentItemConfig) {
+        // Автоматически определяем требуемый уровень из конфига магазина
+        if (currentItemConfig.level) requiredLevel = currentItemConfig.level;
+
+        // Если в конфиге магазина (SERVER_SHOP_DATABASE) уже записан slotType — берем его!
+        if (currentItemConfig.slotType) {
+          slotType = currentItemConfig.slotType;
+        } else {
+          // Запасной старый парсер слотов по ключевым словам в имени ID
+          const id = cleanItemId;
+          if (id.includes('sword') || id.includes('mace') || id.includes('dagger') || id.includes('knife') || id.includes('glaive') || id.includes('pillar') || id.includes('warhammer') || id.includes('breaker') || id.startsWith('assassin_stiletto')) slotType = 'mainHand';
+          if (id.includes('halberd') || id.includes('claymore') || id.includes('broadsword') || id.includes('splitter') || id.includes('cleaver') || id.includes('harvester') || id.includes('scythe') || id.includes('maul')) slotType = 'twoHanded';
+          if (id.includes('shield') || id.includes('buckler') || id.includes('parry') || id.includes('aegis') || id.includes('screen') || id.includes('mirror') || id.includes('wall') || id.includes('bulwark') || id.includes('scutum')) slotType = 'offHand';
+          if (id.includes('cap') || id.includes('hood') || id.includes('mask') || id.includes('goggles') || id.includes('visage') || id.includes('crown') || id.includes('helm') || id.includes('barbute') || id.includes('visor') || id.includes('galea') || id.includes('armet')) slotType = 'head';
+          if (id.includes('armor') || id.includes('vest') || id.includes('jacket') || id.includes('coat') || id.includes('shroud') || id.includes('harness') || id.includes('garb') || id.includes('robes') || id.includes('cuirass') || id.includes('gi') || id.includes('plate') || id.includes('chain') || id.includes('hauberk') || id.includes('breastplate') || id.includes('lorica') || id.includes('carapace')) slotType = 'body';
+          if (id.includes('boots') || id.includes('shoes') || id.includes('treads') || id.includes('greaves') || id.includes('tabi') || id.includes('caligae') || id.includes('sabatons') || id.includes('sollerets')) slotType = 'legs';
+          if (id.includes('gloves') || id.includes('wraps') || id.includes('bracers') || id.includes('grips') || id.includes('claws') || id.includes('hands') || id.includes('touch') || id.includes('gauntlets') || id.includes('manica') || id.includes('fists') || id.includes('crags')) slotType = 'gloves';
+          if (id.includes('amulet') || id.includes('talisman') || id.includes('choker') || id.includes('chain') || id.includes('collar') || id.includes('pendant') || id.includes('necklace') || id.includes('gorget') || id.includes('torc') || id.includes('relic')) slotType = 'neck';
+          if (id.includes('ring') || id.includes('loop') || id.includes('band') || id.includes('seal') || id.includes('coil') || id.includes('cyclone') || id.includes('signet')) slotType = 'ring';
+        }
+
+        // Ручные старые перегрузки уровней для совместимости
+        if (cleanItemId === 'iron_sword' || cleanItemId === 'leather_armor' || cleanItemId === 'leather_gloves') requiredLevel = 2;
+        if (cleanItemId === 'steel_mace' || cleanItemId === 'wolf_amulet' || cleanItemId === 'lucky_ring') requiredLevel = 3;
+        if (cleanItemId === 'heavy_halberd' || cleanItemId === 'ruby_ring') requiredLevel = 5;
+      } else if (SERVER_CONSUMABLES_SLOTS[cleanItemId]) {
+        slotType = SERVER_CONSUMABLES_SLOTS[cleanItemId];
       }
 
       if (!slotType) return socket.emit('error', 'Этот предмет нельзя экипировать!');
@@ -81,7 +106,9 @@ module.exports = function(io, socket, sb) {
       if (!inventory[invTab]) inventory[invTab] = [];
       
       const inv = inventory[invTab];
-      const itemIdx = inv.findIndex(i => i.id === itemId);
+
+      // 🔥 ШАГ 3: Ищем предмет в рюкзаке по UUID, а если пришел старый сырой ID — ищем по ID
+      const itemIdx = inv.findIndex(i => i.uuid === itemUuidOrId || i.id === itemUuidOrId);
 
       if (itemIdx === -1) return socket.emit('error', 'У вас нет этого предмета в рюкзаке!');
 
@@ -92,9 +119,9 @@ module.exports = function(io, socket, sb) {
         let alreadyEquippedCount = 0;
 
         if (currentEquipped && typeof currentEquipped === 'object' && currentEquipped.id) {
-          if (currentEquipped.id === itemId) {
+          if (currentEquipped.id === cleanItemId) {
             alreadyEquippedCount = Number(currentEquipped.count || 0);
-            if (alreadyEquippedCount >= 5) return socket.emit('error', 'В этот слот уже взят максимальный стак!');
+            if (alreadyEquippedCount >= 5) return socket.emit('error', 'В этот слот уже взят maximal стак!');
           } else {
             const oldId = currentEquipped.id;
             const oldQty = Number(currentEquipped.count || 1);
@@ -107,12 +134,12 @@ module.exports = function(io, socket, sb) {
         const spaceLeft = 5 - alreadyEquippedCount;
         const countToEquip = Math.min(spaceLeft, availableInInv);
 
-        equipped[slotType] = { id: itemId, count: alreadyEquippedCount + countToEquip };
+        equipped[slotType] = { id: cleanItemId, count: alreadyEquippedCount + countToEquip };
 
         if (availableInInv > countToEquip) inv[itemIdx].count -= countToEquip;
         else inv.splice(itemIdx, 1);
       }
-       // Обычная логика оружия, щитов и элементов брони
+      // Обычная логика оружия, щитов и элементов брони
       else {
         let targetSlot = slotType;
 
@@ -128,8 +155,9 @@ module.exports = function(io, socket, sb) {
               else inventory.equipment.push({ id: oldRingId, count: 1 });
             }
           }
-          equipped.rings[ringIndex] = itemId;
+          equipped.rings[ringIndex] = cleanItemId;
         } else {
+          // Если вещь двуручная (mainHand + левая рука блокируется) или одевается в левую руку как леворучное оружие (offHand)
           if (slotType === 'twoHanded') {
             if (equipped.offHand) {
               const oldOff = equipped.offHand;
@@ -141,8 +169,8 @@ module.exports = function(io, socket, sb) {
             targetSlot = 'mainHand';
           }
 
-          if (slotType === 'offHand' && equipped.mainHand === 'heavy_halberd') {
-            return socket.emit('error', '⚠️ Нельзя взять щит с двуручным оружием!');
+          if (slotType === 'offHand' && (equipped.mainHand === 'heavy_halberd' || cleanItemId.includes('twoHanded'))) {
+            return socket.emit('error', '⚠️ Нельзя взять щит или второе оружие с двуручником!');
           }
 
           const oldItemId = equipped[targetSlot];
@@ -152,9 +180,11 @@ module.exports = function(io, socket, sb) {
             else inventory.equipment.push({ id: oldItemId, count: 1 });
           }
 
-          equipped[targetSlot] = itemId;
+          // Записываем чистый ID на куклу
+          equipped[targetSlot] = cleanItemId;
         }
 
+        // Удаляем конкретный экземпляр шмотки из рюкзака по индексу UUID
         if (Number(inv[itemIdx].count || 1) > 1) inv[itemIdx].count--;
         else inv.splice(itemIdx, 1);
       }
@@ -163,11 +193,10 @@ module.exports = function(io, socket, sb) {
       await triggerLoadGameSuccess(nUserId, socket, sb);
 
     } catch (e) {
-      console.error(e);
+      console.error("❌ Критический сбой при экипировке:", e);
       socket.emit('error', 'Ошибка сервера при смене экипировки.');
     }
   });
-
   // --- ОБРАБОТЧИК Б: СНЯТЬ ПРЕДМЕТ ЧЕРЕЗ СЕРВЕР ---
   socket.on('unequip_item_secure', async ({ userId, slotKey, ringIndex }) => {
     try {
