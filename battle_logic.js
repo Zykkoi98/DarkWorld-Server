@@ -1,9 +1,5 @@
-// ============================================================================
-// ===== 🚀 БОЕВОЙ ДВИЖОК DARK WORLD С МОДИФИКАТОРАМИ БК (BATTLE_LOGIC.JS) =====
-// ===== ЧАСТЬ 1 ИЗ 2: СЕТЕВЫЕ ОБРАБОТЧИКИ ЛОББИ, PvE ОХОТЫ И PvP ДУЭЛЕЙ =====
-// ============================================================================
-
 const dbHelper = require('./db_helper');
+
 const ZONE_NAMES = { head: "Голову", breast: "Грудь", torso: "Торс", belt: "Пояс", legs: "Ноги" };
 
 const CONSUMABLE_DATABASE = {
@@ -12,18 +8,36 @@ const CONSUMABLE_DATABASE = {
   'fish_soup':       { name: 'Уха из таверны', heal: 40 }
 };
 
-const ITEMS_STAT_DB = dbHelper.ITEMS_STAT_DB;
+const ITEMS_STAT_DB = {
+  'rusty_sword':    { atk: 2 },
+  'iron_sword':     { atk: 7 },
+  'steel_mace':     { atk: 12 },
+  'heavy_halberd':  { atk: 22 },
+  'wooden_shield':  { def: 2 },
+  'leather_cap':    { def: 1, agility: 1 },
+  'leather_armor':  { def: 4 },
+  'leather_boots':  { def: 1, agility: 2 },
+  'leather_gloves': { def: 1, strength: 1 },
+  'copper_ring':    { endurance: 1 },
+  'wolf_amulet':    { strength: 2, luck: 1 },
+  'lucky_ring':     { luck: 3 },
+  'ruby_ring':      { strength: 3 }
+};
 
+// Вспомогательная функция сбора бонусов экипировки для расчета боя
 function getEquipmentBonus(equipped, bonusKey) {
   if (!equipped) return 0;
   let totalBonus = 0;
   const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand', 'extra'];
+  
   slots.forEach(slot => {
     const itemId = equipped[slot];
-    if (itemId && ITEMS_STAT_DB[itemId] && ITEMS_STAT_DB[itemId][bonusKey] !== undefined) {
-      totalBonus += ITEMS_STAT_DB[itemId][bonusKey];
+    if (itemId && ITEMS_STAT_DB[itemId]) {
+      const item = ITEMS_STAT_DB[itemId];
+      if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
     }
   });
+
   if (equipped.rings && Array.isArray(equipped.rings)) {
     equipped.rings.forEach(itemId => {
       if (itemId && ITEMS_STAT_DB[itemId] && ITEMS_STAT_DB[itemId][bonusKey] !== undefined) {
@@ -34,6 +48,28 @@ function getEquipmentBonus(equipped, bonusKey) {
   return totalBonus;
 }
 
+// Честный серверный расчет боевых параметров персонажей
+function getServerAtk(fighter) {
+  const baseStrength = Number(fighter.strength || 1);
+  const gearStrength = getEquipmentBonus(fighter.equipped, 'strength');
+  const baseAtk = Math.floor(2 + ((baseStrength + gearStrength) * 1.5));
+  return baseAtk + getEquipmentBonus(fighter.equipped, 'atk');
+}
+
+function getServerDef(fighter) {
+  const baseEndurance = Number(fighter.endurance || 1);
+  const gearEndurance = getEquipmentBonus(fighter.equipped, 'endurance');
+  return Math.floor((baseEndurance + gearEndurance) * 0.5) + getEquipmentBonus(fighter.equipped, 'def');
+}
+
+function getServerAgility(fighter) {
+  return Number(fighter.agility || 1) + getEquipmentBonus(fighter.equipped, 'agility');
+}
+
+function getServerLuck(fighter) {
+  return Number(fighter.luck || 1) + getEquipmentBonus(fighter.equipped, 'luck');
+}
+
 function sanitizeTeam(team) {
   return team.map(f => ({
     uuid: f.uuid, name: f.name, icon: f.icon, level: f.level,
@@ -42,11 +78,14 @@ function sanitizeTeam(team) {
   }));
 }
 
+// Главный экспорт модуля боевой логики
 module.exports = function(io, socket, sb, activeRooms) {
+  
   const triggerLoadGameSuccess = dbHelper.triggerLoadGameSuccess;
   const getServerMaxHp = dbHelper.getServerMaxHp;
   const getServerCorrectLevelByXp = dbHelper.getServerCorrectLevelByXp;
 
+  // --- 1. ОБРАБОТЧИК: ЗАПРОС СПИСКА ДУЭЛЕЙ НА АРЕНЕ ---
   socket.on('arena_get_lobby', async () => {
     try {
       const nowISO = new Date().toISOString();
@@ -55,16 +94,22 @@ module.exports = function(io, socket, sb, activeRooms) {
     } catch (e) { console.error(e); }
   });
 
+  // --- 2. ОБРАБОТЧИК: ПУБЛИКАЦИЯ СВОЕГО ВЫЗОВА В ЛОББИ ---
   socket.on('arena_create_request', async ({ playerData, currentHp }) => {
     try {
-      const expiresAt = new Date(Date.now() + 180000).toISOString();
+      const expiresAt = new Date(Date.now() + 180000).toISOString(); // 3 минуты жизни заявки
       const { error } = await sb.from('arena_lobby').upsert({
-        id: Number(playerData.id), name: playerData.name, level: Number(playerData.level || 1), hp: Number(currentHp), arena_expires_at: expiresAt
+        id: Number(playerData.id),
+        name: playerData.name,
+        level: Number(playerData.level || 1),
+        hp: Number(currentHp),
+        arena_expires_at: expiresAt
       });
       if (!error) io.emit('arena_lobby_updated');
     } catch (e) { console.error(e); }
   });
 
+  // --- 3. ОБРАБОТЧИК: ОТМЕНА СВОЕГО ВЫЗОВА В ЛОББИ ---
   socket.on('arena_cancel_request', async ({ userId }) => {
     try {
       const { error } = await sb.from('arena_lobby').delete().eq('id', Number(userId));
@@ -72,291 +117,649 @@ module.exports = function(io, socket, sb, activeRooms) {
     } catch (e) { console.error(e); }
   });
 
+  // --- 4. ОБРАБОТЧИК: ПРИНЯТИЕ ЧУЖОГО PvP ВЫЗОВА ---
   socket.on('arena_accept_challenge_request', async ({ myId, opponentId, playerData, currentHp }) => {
     try {
-      const nMyId = Number(myId); const nOpponentId = Number(opponentId);
+      const nMyId = Number(myId);
+      const nOpponentId = Number(opponentId);
+
+      // Атомарный перехват: кто первый удалил строку из лобби, тот и забрал бой
       const { data, error } = await sb.from('arena_lobby').delete().eq('id', nOpponentId).select();
-      if (error || !data || data.length === 0) return socket.emit('error', 'Вызов уже принят другим гладиатором!');
+      if (error || !data || data.length === 0) {
+        return socket.emit('error', 'Вызов уже принят другим гладиатором!');
+      }
+
+      // Аннулируем собственную заявку, если она висела
       await sb.from('arena_lobby').delete().eq('id', nMyId);
 
       const roomId = `room_pvp_${opponentId}_vs_${myId}_${Date.now()}`;
+      
       const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq('id', nOpponentId).maybeSingle();
-      if (oppErr || !oppData) return socket.emit('error', 'Не удалось загрузить профиль соперника.');
+      if (oppErr || !oppData) {
+        return socket.emit('error', 'Не удалось загрузить профиль соперника.');
+      }
 
       initiatePvpMatch(roomId, playerData, currentHp, oppData, activeRooms, io);
-    } catch (e) { console.error(e); }
+    } catch (e) { 
+      console.error(e); 
+    }
   });
 
+  // --- 5. ОБРАБОТЧИКИ РЕКОННЕКТОВ И ПРОВЕРКИ СЕССИЙ (АНТИ-СБОЙ F5) ---
   socket.on('check_active_battle_directly', ({ userId }, callback) => {
     const sUserId = String(userId);
     const activeRoomId = Object.keys(activeRooms).find(roomId => 
-      activeRooms[roomId].teamA.some(f => String(f.id) === sUserId) || activeRooms[roomId].teamB.some(f => String(f.id) === sUserId)
+      activeRooms[roomId].teamA.some(f => String(f.id) === sUserId) ||
+      activeRooms[roomId].teamB.some(f => String(f.id) === sUserId)
     );
     callback({ activeRoomId: activeRoomId || null });
   });
 
   socket.on('reconnect_to_battle', ({ roomId, userId }) => {
-    const room = activeRooms[roomId]; if (!room) return socket.emit('error', 'Бой уже завершился.');
+    const room = activeRooms[roomId];
+    if (!room) return socket.emit('error', 'Бой уже завершился.');
+
     const sUserId = String(userId);
     const pFighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
+
     if (pFighter) {
-      pFighter.socketId = socket.id; socket.join(roomId);
-      socket.emit('battle_init_data', { roomId: roomId, turnCount: room.turnCount, myUuid: pFighter.uuid, teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) });
+      pFighter.socketId = socket.id;
+      socket.join(roomId);
+      socket.emit('battle_init_data', {
+        roomId: roomId, turnCount: room.turnCount, myUuid: pFighter.uuid,
+        teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB)
+      });
     }
   });
 
+  socket.on('check_active_battle', ({ userId }) => {
+    const sUserId = String(userId);
+    const activeRoomId = Object.keys(activeRooms).find(roomId => 
+      activeRooms[roomId].teamA.some(f => String(f.id) === sUserId) ||
+      activeRooms[roomId].teamB.some(f => String(f.id) === sUserId)
+    );
+    if (activeRoomId) socket.emit('arena_redirect_to_battle', { roomId: activeRoomId });
+  });
+
+  // --- 6. ОБРАБОТЧИК: ЗАПУСК PvE БОЯ (ВЫХОД НА ПРИРОДУ) ---
   socket.on('search_pve_match', async ({ playerData, monsterKey, count }) => {
     try {
-      const sPlayerId = String(playerData.id); const nPlayerId = Number(playerData.id);
-      await sb.from('arena_lobby').delete().eq('id', nPlayerId); io.emit('arena_lobby_updated');
+      const sPlayerId = String(playerData.id);
+      const nPlayerId = Number(playerData.id);
 
-      const existingRoomId = Object.keys(activeRooms).find(rId => activeRooms[rId].teamA.some(fighter => fighter.id === sPlayerId));
+      // Аннулируем вызов на Арене, так как игрок ушел в PvE лес
+      await sb.from('arena_lobby').delete().eq('id', nPlayerId);
+      io.emit('arena_lobby_updated');
+
+      // Защита от дубликатов комнат
+      const existingRoomId = Object.keys(activeRooms).find(rId => 
+        activeRooms[rId].teamA.some(fighter => fighter.id === sPlayerId)
+      );
+
       if (existingRoomId) {
         const existingRoom = activeRooms[existingRoomId];
         const pFighter = existingRoom.teamA.find(fighter => fighter.id === sPlayerId);
-        if (pFighter) pFighter.socketId = socket.id; socket.join(existingRoomId);
-        return socket.emit('battle_init_data', { roomId: existingRoomId, turnCount: existingRoom.turnCount, myUuid: pFighter ? pFighter.uuid : `player_${sPlayerId}`, teamA: sanitizeTeam(existingRoom.teamA), teamB: sanitizeTeam(existingRoom.teamB) });
+        if (pFighter) pFighter.socketId = socket.id;
+        socket.join(existingRoomId);
+        return socket.emit('battle_init_data', {
+          roomId: existingRoomId, turnCount: existingRoom.turnCount,
+          myUuid: pFighter ? pFighter.uuid : `player_${sPlayerId}`,
+          teamA: sanitizeTeam(existingRoom.teamA), teamB: sanitizeTeam(existingRoom.teamB)
+        });
       }
 
       const monsterCount = Math.min(5, Math.max(1, Number(count || 1)));
       const { data: dbMonster } = await sb.from('bots').select('*').eq('id', monsterKey).maybeSingle();
       const { data: dbPlayer } = await sb.from('players').select('*').eq('id', nPlayerId).single();
-      if (!dbMonster || !dbPlayer) return socket.emit('error', 'Ошибка инициализации PvE.');
 
-      const roomId = `room_pve_${dbPlayer.id}_${Date.now()}`; const pMaxHp = getServerMaxHp(dbPlayer);
+      if (!dbMonster || !dbPlayer) return socket.emit('error', 'Ошибка инициализации данных PvE.');
+
+      const roomId = `room_pve_${dbPlayer.id}_${Date.now()}`;
+      const pMaxHp = getServerMaxHp(dbPlayer);
+
       const teamA = [{
         uuid: `player_${dbPlayer.id}`, id: String(dbPlayer.id), name: dbPlayer.name, icon: '👤', isBot: false,
-        level: Number(dbPlayer.level), strength: Number(dbPlayer.strength), agility: Number(dbPlayer.agility), endurance: Number(dbPlayer.endurance), luck: Number(dbPlayer.luck),
+        level: Number(dbPlayer.level), strength: Number(dbPlayer.strength), agility: Number(dbPlayer.agility),
+        endurance: Number(dbPlayer.endurance), intellect: Number(dbPlayer.intellect), luck: Number(dbPlayer.luck),
         currentHp: Math.min(Number(dbPlayer.hp), pMaxHp), maxHp: pMaxHp, socketId: socket.id, turn: null,
-        gold: Number(dbPlayer.gold), xp: Number(dbPlayer.xp), statpoints: Number(dbPlayer.statpoints), equipped: dbPlayer.equipped || {}, inventory: dbPlayer.inventory || {}, afkTurns: 0 
+        gold: Number(dbPlayer.gold), xp: Number(dbPlayer.xp), statpoints: Number(dbPlayer.statpoints),
+        equipped: dbPlayer.equipped || {}, inventory: dbPlayer.inventory || {}, afkTurns: 0 
       }];
-      const teamB = []; const mMaxHp = getServerMaxHp(dbMonster);
+
+      const teamB = [];
+      const mMaxHp = getServerMaxHp(dbMonster);
       for (let i = 0; i < monsterCount; i++) {
         teamB.push({
-          uuid: `bot_${dbMonster.id}_${i}_${Date.now()}`, id: dbMonster.id, name: monsterCount > 1 ? `${dbMonster.name} #${i + 1}` : dbMonster.name, icon: dbMonster.icon, isBot: true, level: Number(dbMonster.level),
-          strength: Number(dbMonster.strength), agility: Number(dbMonster.agility), endurance: Number(dbMonster.endurance), luck: Number(dbMonster.luck),
-          currentHp: mMaxHp, maxHp: mMaxHp, rewardXp: Number(dbMonster.reward_xp), rewardGold: Number(dbMonster.reward_gold), turn: null
+          uuid: `bot_${dbMonster.id}_${i}_${Date.now()}`, id: dbMonster.id,
+          name: monsterCount > 1 ? `${dbMonster.name} #${i + 1}` : dbMonster.name, icon: dbMonster.icon,
+          isBot: true, level: Number(dbMonster.level), strength: Number(dbMonster.strength),
+          agility: Number(dbMonster.agility), endurance: Number(dbMonster.endurance),
+          intellect: Number(dbMonster.intellect), luck: Number(dbMonster.luck),
+          currentHp: mMaxHp, maxHp: mMaxHp, rewardXp: Number(dbMonster.reward_xp),
+          rewardGold: Number(dbMonster.reward_gold), lootTable: dbMonster.loot_table || [], turn: null
         });
       }
+
       activeRooms[roomId] = { id: roomId, type: 'pve', teamA, teamB, turnCount: 1, timeoutRef: null };
       socket.join(roomId);
-      socket.emit('battle_init_data', { roomId, turnCount: 1, myUuid: `player_${dbPlayer.id}`, teamA: sanitizeTeam(teamA), teamB: sanitizeTeam(teamB) });
+      
+      socket.emit('battle_init_data', {
+        roomId, turnCount: 1, myUuid: `player_${dbPlayer.id}`,
+        teamA: sanitizeTeam(teamA), teamB: sanitizeTeam(teamB)
+      });
+
       startServerTurnTimer(roomId, activeRooms, io);
-    } catch (err) { socket.emit('error', `Внутренняя ошибка: ${err.message}`); }
+    } catch (err) {
+      socket.emit('error', `Внутренняя ошибка: ${err.message}`);
+    }
   });
-    // --- 7. ОБРАБОТЧИК: ПРИЕМ ХОДА (АТАКА / БЛОК) ---
+
+  // --- 7. ОБРАБОТЧИК: ПРИЕМ ХОДА (АТАКА / БЛОК) ---
   socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
-    const room = activeRooms[roomId]; if (!room) return;
+    const room = activeRooms[roomId];
+    if (!room) return;
+
     const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
     if (!fighter || fighter.currentHp <= 0 || fighter.turn) return;
 
-    fighter.turn = { targetUuid, attack, defends: defends || [] }; 
-    fighter.afkTurns = 0;
-    
+    fighter.turn = { targetUuid, attack, defends: defends || [] };
+    fighter.afkTurns = 0; 
+
     let canExecuteRound = false;
+
     if (room.type === 'pve') {
       const awaitingPvE = room.teamA.filter(p => !p.isBot && p.currentHp > 0 && !p.turn);
       if (awaitingPvE.length === 0) canExecuteRound = true;
-    } else if (room.type === 'pvp') {
-      const alivePlayers = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0);
-      const submittedTurns = [...room.teamA, ...room.teamB].filter(p => p.turn !== null && p.currentHp > 0);
-      if (submittedTurns.length === alivePlayers.length) canExecuteRound = true;
+    } 
+    else if (room.type === 'pvp') {
+      const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
+      const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
+      if (submittedTurnsCount === alivePlayersCount) canExecuteRound = true;
     }
-    if (canExecuteRound) { 
-      clearTimeout(room.timeoutRef); 
+
+    if (canExecuteRound) {
+      clearTimeout(room.timeoutRef);
       executeRoundCalculations(roomId, activeRooms, io); 
     }
   });
 
   // --- 8. ОБРАБОТЧИК: ИСПОЛЬЗОВАНИЕ ЗЕЛИЙ В БОЮ ---
   socket.on('instant_use_potion', async ({ roomId }) => {
-    const room = activeRooms[roomId]; if (!room) return;
-    const fighter = room.teamA.find(p => p.socketId === socket.id); 
+    const room = activeRooms[roomId];
+    if (!room) return;
+
+    const fighter = room.teamA.find(p => p.socketId === socket.id);
     if (!fighter || fighter.currentHp <= 0) return;
-    
+
     const potionSlot = fighter.equipped?.potion;
+
     if (potionSlot && typeof potionSlot === 'object' && potionSlot.id && potionSlot.count > 0) {
       const potionData = CONSUMABLE_DATABASE[potionSlot.id];
+
       if (potionData) {
-        fighter.currentHp = Math.min(fighter.maxHp, fighter.currentHp + potionData.heal); 
+        fighter.currentHp = Math.min(fighter.maxHp, fighter.currentHp + potionData.heal);
         potionSlot.count--;
+        let displayCountLog = potionSlot.count;
+
         if (potionSlot.count <= 0) fighter.equipped.potion = null;
-        
-        io.to(roomId).emit('battle_effect_potion', { 
+
+        io.to(roomId).emit('battle_effect_potion', {
           uuid: fighter.uuid, currentHp: fighter.currentHp, equipped: fighter.equipped, 
-          logMsg: `🧪 <strong>${fighter.name}</strong> выпил ${potionData.name} (+${potionData.heal} HP)!` 
+          logMsg: `🧪 <strong>${fighter.name}</strong> выпил ${potionData.name} (+${potionData.heal} HP)! Осталось: ${displayCountLog} шт.`
         });
+
         await sb.from('players').update({ hp: fighter.currentHp, equipped: fighter.equipped }).eq('id', Number(fighter.id));
       }
     }
   });
-    // --- 9. ВНУТРЕННЯЯ ФУНКЦИЯ: СБОРКА PvP КОМНАТЫ ---
+
+  // --- 9. ВНУТРЕННЯЯ ФУНКЦИЯ: СБОРКА PvP КОМНАТЫ С БАЛАНСОМ ХП ---
   function initiatePvpMatch(roomId, playerData, p1Hp, p2Data, activeRooms, io) {
-    const setupStats = (p) => ({
-      strength: Number(p.strength ?? p.stats?.strength ?? 1), 
-      agility: Number(p.agility ?? p.stats?.agility ?? 1), 
-      endurance: Number(p.endurance ?? p.stats?.endurance ?? 1), 
-      luck: Number(p.luck ?? p.stats?.luck ?? 1), 
-      equipped: p.equipped || {}
-    });
-    const p1Stats = setupStats(playerData); const p2Stats = setupStats(p2Data);
-    const p1MaxHp = getServerMaxHp(p1Stats); const p2MaxHp = getServerMaxHp(p2Stats);
+    const p1Stats = {
+      strength: Number(playerData.strength ?? playerData.stats?.strength ?? 1),
+      agility: Number(playerData.agility ?? playerData.stats?.agility ?? 1),
+      endurance: Number(playerData.endurance ?? playerData.stats?.endurance ?? 1),
+      intellect: Number(playerData.intellect ?? playerData.stats?.intellect ?? 1),
+      luck: Number(playerData.luck ?? playerData.stats?.luck ?? 1),
+      equipped: playerData.equipped || {}
+    };
+
+    const p2Stats = {
+      strength: Number(p2Data.strength ?? p2Data.stats?.strength ?? 1),
+      agility: Number(p2Data.agility ?? p2Data.stats?.agility ?? 1),
+      endurance: Number(p2Data.endurance ?? p2Data.stats?.endurance ?? 1),
+      intellect: Number(p2Data.intellect ?? p2Data.stats?.intellect ?? 1),
+      luck: Number(p2Data.luck ?? p2Data.stats?.luck ?? 1),
+      equipped: p2Data.equipped || {}
+    };
+
+    const p1MaxHp = getServerMaxHp(p1Stats);
+    const p2MaxHp = getServerMaxHp(p2Stats);
 
     const teamA = [{
-      uuid: `player_${playerData.id}`, id: String(playerData.id), name: playerData.name, icon: '👤', isBot: false, level: Number(playerData.level ?? 1), ...p1Stats, currentHp: Math.min(Number(p1Hp || p1MaxHp), p1MaxHp), maxHp: p1MaxHp, socketId: null, turn: null, afkTurns: 0
+      uuid: `player_${playerData.id}`, id: String(playerData.id), name: playerData.name, icon: '👤', isBot: false,
+      level: Number(playerData.level ?? 1), strength: p1Stats.strength, agility: p1Stats.agility,
+      endurance: p1Stats.endurance, intellect: p1Stats.intellect, luck: p1Stats.luck,
+      currentHp: Math.min(Number(p1Hp || p1MaxHp), p1MaxHp), maxHp: p1MaxHp, socketId: null, turn: null,
+      equipped: playerData.equipped || {}, inventory: playerData.inventory || {}, afkTurns: 0
     }];
+
     const teamB = [{
-      uuid: `player_${p2Data.id}`, id: String(p2Data.id), name: p2Data.name, icon: '👤', isBot: false, level: Number(p2Data.level ?? 1), ...p2Stats, currentHp: Math.min(Number(p2Data.hp || p2MaxHp), p2MaxHp), maxHp: p2MaxHp, socketId: null, turn: null, afkTurns: 0
+      uuid: `player_${p2Data.id}`, id: String(p2Data.id), name: p2Data.name, icon: '👤', isBot: false, 
+      level: Number(p2Data.level ?? 1), strength: p2Stats.strength, agility: p2Stats.agility,
+      endurance: p2Stats.endurance, intellect: p2Stats.intellect, luck: p2Stats.luck,
+      currentHp: Math.min(Number(p2Data.hp || p2MaxHp), p2MaxHp), maxHp: p2MaxHp, socketId: null, turn: null,
+      equipped: p2Data.equipped || {}, inventory: p2Data.inventory || {}, afkTurns: 0
     }];
+
     activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, timeoutRef: null };
-    setTimeout(() => { io.emit('arena_lobby_updated'); io.emit('arena_redirect_to_battle', { roomId }); }, 150);
+    console.log(`⚔️ [PvP ЗАПУСК] Комната: ${roomId} для ${playerData.name} vs ${p2Data.name}`);
+    
+    setTimeout(() => {
+      io.emit('arena_lobby_updated');
+      io.emit('arena_redirect_to_battle', { roomId: roomId });
+    }, 150);
+
     startServerTurnTimer(roomId, activeRooms, io);
   }
 
   // --- 10. ВНУТРЕННЯЯ ФУНКЦИЯ: ТАЙМЕР АФК КЛИЕНТОВ (30 СЕКУНД) ---
   function startServerTurnTimer(roomId, activeRooms, io) {
-    const room = activeRooms[roomId]; if (!room) return;
+    const room = activeRooms[roomId];
+    if (!room) return;
     if (room.timeoutRef) clearTimeout(room.timeoutRef);
+
     room.timeoutRef = setTimeout(() => {
       if (!activeRooms[roomId]) return;
+      
+      console.log(`⏱️ [АФК ТРИГГЕР] Время на ход вышло в комнате ${roomId}.`);
       const allFighters = [...room.teamA, ...room.teamB];
+      
       allFighters.forEach(f => {
-        if (!f.isBot && f.currentHp > 0 && !f.turn) {
-          f.afkTurns = (f.afkTurns || 0) + 1;
-          const aliveEnemies = (room.teamA.includes(f) ? room.teamB : room.teamA).filter(e => e.currentHp > 0);
-          f.turn = { targetUuid: aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null, attack: null, defends: [] };
+        if (!f.isBot && f.currentHp > 0) {
+          if (!f.turn) {
+            f.afkTurns = (f.afkTurns || 0) + 1;
+            const opposingTeam = room.teamA.includes(f) ? room.teamB : room.teamA;
+            const aliveEnemies = opposingTeam.filter(e => e.currentHp > 0);
+            
+            f.turn = { 
+              targetUuid: aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null, 
+              attack: null, 
+              defends: [] 
+            };
+          } else {
+            f.afkTurns = 0;
+          }
         }
       });
+      
       executeRoundCalculations(roomId, activeRooms, io);
     }, 30000); 
   }
+
   // --- 11. ВНУТРЕННЯЯ ФУНКЦИЯ: СЕРВЕРНЫЙ КАЛЬКУЛЯТОР БОЯ И ОБМЕНА УДАРАМИ ---
   function executeRoundCalculations(roomId, activeRooms, io) {
-    const room = activeRooms[roomId]; if (!room) return;
-    const logs = []; const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    const room = activeRooms[roomId];
+    if (!room) return;
 
-    let afkFighter = [...room.teamA, ...room.teamB].filter(f => !f.isBot && f.currentHp > 0).find(f => (f.afkTurns || 0) >= 3);
-    if (afkFighter) {
-      logs.push(`🛑 Гладиатор <strong>${afkFighter.name}</strong> застыл. Техническое поражение.`);
-      afkFighter.currentHp = 0;
-      let res = room.teamA.every(f => f.currentHp <= 0) ? 'lose' : 'win';
-      if (room.type === 'pve') finalizePveBattle(room, res, logs, room.turnCount, io);
-      else finalizePvpBattle(room, res, logs, room.turnCount, io);
+    const logs = [];
+    const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+    // Проверка тотальной АФК дисквалификации (3 пропуска подряд)
+    const allHumanFighters = [...room.teamA, ...room.teamB].filter(f => !f.isBot && f.currentHp > 0);
+    let afkDisqualifiedFighter = allHumanFighters.find(f => (f.afkTurns || 0) >= 3);
+
+    if (afkDisqualifiedFighter) {
+      logs.push(`🛑 Гладиатор <strong>${afkDisqualifiedFighter.name}</strong> застыл на месте слишком долго. Техническое поражение.`);
+      afkDisqualifiedFighter.currentHp = 0;
+
+      const isTeamADead = room.teamA.every(f => f.currentHp <= 0);
+      const isTeamBDead = room.teamB.every(f => f.currentHp <= 0);
+      let result = 'draw';
+      if (!isTeamADead && isTeamBDead) result = 'win';
+      if (isTeamADead && !isTeamBDead) result = 'lose';
+
+      if (room.type === 'pve') finalizePveBattle(room, result, logs, room.turnCount, io);
+      else if (room.type === 'pvp') finalizePvpBattle(room, result, logs, room.turnCount, io);
       return;
     }
 
+    // Расчет ИИ монстров в режиме PvE
     if (room.type === 'pve') {
       room.teamB.forEach(bot => {
-        if (bot.currentHp <= 0) return;
-        const targets = room.teamA.filter(a => a.currentHp > 0); if (targets.length === 0) return;
-        const zones = ["head", "breast", "torso", "belt", "legs"]; const mDef = [];
-        while (mDef.length < 2) { const rz = zones[rand(0, 4)]; if (!mDef.includes(rz)) mDef.push(rz); }
-        bot.turn = { targetUuid: targets[rand(0, targets.length - 1)].uuid, attack: zones[rand(0, 4)], defends: mDef };
+        if (bot.currentHp <= 0 || !bot.isBot) return;
+        const aliveTargets = room.teamA.filter(a => a.currentHp > 0);
+        if (aliveTargets.length === 0) return;
+
+        const target = aliveTargets[rand(0, aliveTargets.length - 1)];
+        const zones = ["head", "breast", "torso", "belt", "legs"];
+        const mDefend = [];
+        while (mDefend.length < 2) {
+          const rz = zones[rand(0, 4)];
+          if (!mDefend.includes(rz)) mDefend.push(rz);
+        }
+        bot.turn = { targetUuid: target.uuid, attack: zones[rand(0, 4)], defends: mDefend };
       });
     }
 
+    // Сортировка очереди ходов по показателю серверной Ловкости
     let queue = [...room.teamA, ...room.teamB];
+    queue.sort((a, b) => getServerAgility(b) - getServerAgility(a));
+
     queue.forEach(attacker => {
       if (attacker.currentHp <= 0 || !attacker.turn || !attacker.turn.targetUuid) return;
+
       let target = [...room.teamA, ...room.teamB].find(f => f.uuid === attacker.turn.targetUuid);
       if (!target || target.currentHp <= 0) {
-        const alive = (room.teamA.includes(attacker) ? room.teamB : room.teamA).filter(t => t.currentHp > 0);
-        if (alive.length === 0) return; target = alive[0];
+        const opposingTeam = room.teamA.includes(attacker) ? room.teamB : room.teamA;
+        const newAlive = opposingTeam.filter(t => t.currentHp > 0);
+        if (newAlive.length === 0) return;
+        target = newAlive[0];
       }
-      if (attacker.uuid === target.uuid || attacker.turn.attack === null) return;
+
+      if (attacker.uuid === target.uuid) return; // Защита от самоповреждений
+
+      if (attacker.turn.attack === null) {
+        logs.push(`❌ <strong>${attacker.name}</strong> пропустил фазу своей атаки.`);
+        return;
+      }
 
       if (target.turn && target.turn.defends.includes(attacker.turn.attack)) {
         logs.push(`🛡️ <strong>${target.name}</strong> заблокировал удар от <strong>${attacker.name}</strong> в ${ZONE_NAMES[attacker.turn.attack]}.`);
-        return;
+      } else {
+        const attLuck = getServerLuck(attacker);
+        const critChance = Math.min(50, 5 + (attLuck * 0.5));
+        const isCrit = rand(1, 100) <= critChance;
+        
+        let baseDmg = getServerAtk(attacker);
+        if (isCrit) baseDmg = Math.floor(baseDmg * 1.5);
+
+        const targetDef = getServerDef(target);
+        const dmg = Math.max(1, baseDmg - targetDef);
+
+        let oldHp = Number(target.currentHp || 0);
+        target.currentHp = Math.max(0, oldHp - dmg);
+        logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[attacker.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
       }
-
-      // БК-МЕХАНИКА: Уворот (Ловкость)
-      const evadeChance = Math.min(75, Math.max(5, 5 + Math.floor((dbHelper.getServerMfInv(target) - dbHelper.getServerMfAntiInv(attacker)) / 10)));
-      if (rand(1, 100) <= evadeChance) {
-        logs.push(`🏹 <strong>${target.name}</strong> увернулся от удара <strong>${attacker.name}</strong> в ${ZONE_NAMES[attacker.turn.attack]}!`);
-        return;
-      }
-
-      // БК-МЕХАНИКА: Крит (Удача)
-      const critChance = Math.min(65, Math.max(5, 5 + Math.floor((dbHelper.getServerMfCrit(attacker) - dbHelper.getServerMfAntiCrit(target)) / 10)));
-      const isCrit = rand(1, 100) <= critChance;
-
-      let dmg = Math.floor(2 + ((Number(attacker.strength || 1) + getEquipmentBonus(attacker.equipped, 'strength')) * 1.5)) + getEquipmentBonus(attacker.equipped, 'atk');
-      if (isCrit) dmg = Math.floor(dmg * 2.0);
-
-      dmg = Math.max(1, dmg - dbHelper.getServerDef(target));
-      target.currentHp = Math.max(0, Number(target.currentHp || 0) - dmg);
-      logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[attacker.turn.attack]} ${isCrit ? '💥 КРИТ!' : ''}`);
     });
-     room.teamA.forEach(f => f.turn = null); room.teamB.forEach(f => f.turn = null);
-    const isADead = room.teamA.every(f => f.currentHp <= 0); const isBDead = room.teamB.every(f => f.currentHp <= 0);
-    const currentRound = room.turnCount; room.turnCount++;
 
-    if (isADead || isBDead || room.turnCount > 40) {
-      let result = isADead && isBDead ? 'draw' : (!isADead ? 'win' : 'lose');
-      
+    room.teamA.forEach(f => f.turn = null);
+    room.teamB.forEach(f => f.turn = null);
+
+    const isTeamADead = room.teamA.every(f => f.currentHp <= 0);
+    const isTeamBDead = room.teamB.every(f => f.currentHp <= 0);
+    const currentRound = room.turnCount;
+    room.turnCount++;
+
+    if (isTeamADead || isTeamBDead || room.turnCount > 40) {
+      let result = 'draw';
+      if (!isTeamADead && isTeamBDead) result = 'win';  // Победила команда А
+      if (isTeamADead && !isTeamBDead) result = 'lose'; // Победила команда B
+
+      console.log(`🏁 [ФИНАЛ МАТЧА] Тип комнаты: ${room.type}. Результат для TeamA: ${result}`);
+
+      // ============================================================================
+      // 🌲 ВЕТВЬ А: РАСЧЕТ ЛОГОВ НАГРАД СТРОГО ДЛЯ PvE (БИТВА С МОНСТРАМИ)
+      // ============================================================================
+      if (room.type === 'pve') {
+        const player = room.teamA[0];
+        if (player && result === 'win') {
+          let gainedXp = 0;
+          let gainedGold = 0;
+          room.teamB.forEach(m => {
+            gainedXp += Number(m.rewardXp || 0);
+            gainedGold += Number(m.rewardGold || 0);
+          });
+
+          const oldLevel = Number(player.level || 1);
+          const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp + gainedXp);
+
+          if (correctLevel > oldLevel) {
+            logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня!`);
+          }
+          logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда: 💰 ${gainedGold} монет, ✨ ${gainedXp} опыта.`);
+        } else if (player && result === 'lose') {
+          logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Воскрешение в городе.`);
+        }
+      }
+
+      // ============================================================================
+      // 🏆 ВЕТВЬ Б: 🔥 ФИКС PvP ЛОГОВ НАГРАД (ДО ОТПРАВКИ ПАКЕТА НА ТЕЛЕФОН)
+      // ============================================================================
+      if (room.type === 'pvp') {
+        const playerA = room.teamA[0]; // Ян
+        const playerB = room.teamB[0]; // Evil
+        const goldReward = 25;
+
+        const calculatePvpXpLog = (winnerLvl, loserLvl) => {
+          let baseXp = Number(loserLvl || 1) * 15;
+          let multiplier = 1;
+          if (loserLvl > winnerLvl) multiplier = 1 + ((loserLvl - winnerLvl) * 0.25);
+          else if (loserLvl < winnerLvl) multiplier = Math.max(0.1, 1 - ((winnerLvl - loserLvl) * 0.20));
+          return Math.floor(baseXp * multiplier);
+        };
+
+        if (result === 'win' && playerA && playerB) {
+          const xpGained = calculatePvpXpLog(playerA.level, playerB.level);
+          logs.push(`🏁 <strong>ПОБЕДА НА АРЕНЕ!</strong> Гладиатор <strong>${playerA.name}</strong> поверг соперника! Награда: 💰 ${goldReward} монет, ✨ ${xpGained} опыта.`);
+        } else if (result === 'lose' && playerA && playerB) {
+          const xpGained = calculatePvpXpLog(playerB.level, playerA.level);
+          logs.push(`🏁 <strong>ПОБЕДА НА АРЕНЕ!</strong> Гладиатор <strong>${playerB.name}</strong> одержал верх! Награда: 💰 ${goldReward} монет, ✨ ${xpGained} опыта.`);
+        } else {
+          logs.push(`🏁 <strong>НИЧЬЯ НА АРЕНЕ!</strong> Силы гладиаторов равны. Награды аннулированы.`);
+        }
+      }
+
+      // ============================================================================
+      // 📤 ОТПРАВКА СЕТЕВОГО ПАКЕТА ФИНАЛА
+      // ============================================================================
       [...room.teamA, ...room.teamB].forEach(p => {
         if (p.socketId) {
-          let resType = room.type === 'pvp' ? (room.teamA.some(f => f.uuid === p.uuid) ? result : (result === 'win' ? 'lose' : (result === 'lose' ? 'win' : 'draw'))) : result;
-          io.to(p.socketId).emit('round_result', { turnCount: currentRound, logs: logs, isOver: true, resultType: resType, teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) });
+          let personalResult = result;
+          if (room.type === 'pvp') {
+            const isTargetInTeamA = room.teamA.some(f => f.uuid === p.uuid);
+            if (isTargetInTeamA) personalResult = result;
+            else personalResult = (result === 'win') ? 'lose' : (result === 'lose' ? 'win' : 'draw');
+          }
+
+          io.to(p.socketId).emit('round_result', { 
+            turnCount: currentRound, 
+            logs: logs, 
+            isOver: true, 
+            resultType: personalResult,
+            teamA: sanitizeTeam(room.teamA), 
+            teamB: sanitizeTeam(room.teamB) 
+          });
         }
       });
-      if (room.type === 'pve') finalizePveBattle(room, result, logs, currentRound, io);
-      else finalizePvpBattle(room, result, logs, currentRound, io);
-      setTimeout(() => { delete activeRooms[room.id]; }, 1200);
+
+        if (room.type === 'pve') {
+            finalizePveBattle(room, result, logs, currentRound, io);
+        } else if (room.type === 'pvp') {
+            finalizePvpBattle(room, result, logs, currentRound, io);
+        }
+      
+      setTimeout(() => {
+        delete activeRooms[room.id];
+        console.log(`🗑️ [ОЗУ] Комната ${room.id} полностью выгружена.`);
+      }, 1200);
+      
     } else {
-      [...room.teamA, ...room.teamB].forEach(p => { if (p.socketId) io.to(p.socketId).emit('round_result', { turnCount: currentRound, logs: logs, isOver: false, teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) }); });
+      [...room.teamA, ...room.teamB].forEach(p => {
+        if (p.socketId) {
+          io.to(p.socketId).emit('round_result', { 
+            turnCount: currentRound, logs: logs, isOver: false, 
+            teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) 
+          });
+        }
+      });
       startServerTurnTimer(roomId, activeRooms, io);
     }
   }
 
   // --- 12. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvE И СИНХРОНИЗАЦИЯ НАГРАД ---
   async function finalizePveBattle(room, result, logs, finalRound, io) {
-    const player = room.teamA[0]; if (!player) return;
-    let xpG = 0; let goldG = 0;
+    const player = room.teamA[0];
+    if (!player) return;
+
+    let gainedXp = 0; let gainedGold = 0;
+    let dbHpPayload = player.currentHp;
+
     if (result === 'win') {
-      room.teamB.forEach(m => { xpG += Number(m.rewardXp || 0); goldG += Number(m.rewardGold || 0); });
-      player.gold += goldG; player.xp += xpG;
-      const oldL = player.level; const correctL = dbHelper.getServerCorrectLevelByXp(player.xp);
-      if (correctL > oldL) { player.statpoints = (player.statpoints || 0) + ((correctL - oldL) * 5); player.level = correctL; player.currentHp = dbHelper.getServerMaxHp(player); }
-    } else player.currentHp = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2));
-
-    try { await sb.from('players').update({ gold: Number(player.gold), xp: Number(player.xp), hp: Number(player.currentHp), level: Number(player.level), statpoints: Number(player.statpoints) }).eq('id', Number(player.id)); } catch (err) { console.error(err); }
-  }
-
-  // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ---
-  async function finalizePvpBattle(room, result, logs, finalRound, io) {
-    const playerA = room.teamA[0]; const playerB = room.teamB[0]; if (!playerA || !playerB) return;
-    const goldReward = 25;
-    const calcXp = (w, l) => Math.floor((Number(l || 1) * 15) * (l > w ? 1 + ((l - w) * 0.25) : Math.max(0.1, 1 - ((w - l) * 0.20))));
+      room.teamB.forEach(m => { 
+        gainedXp += Number(m.rewardXp || 0); 
+        gainedGold += Number(m.rewardGold || 0); 
+      });
+      player.gold += gainedGold;
+      player.xp += gainedXp;
+      
+      const oldLevel = Number(player.level || 1);
+      const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp);
+      if (correctLevel > oldLevel) {
+        player.statpoints = (player.statpoints || 0) + ((correctLevel - oldLevel) * 5);
+        player.level = correctLevel;
+        player.currentHp = dbHelper.getServerMaxHp(player);
+      }
+      dbHpPayload = player.currentHp;
+    } else {
+      player.currentHp = 0;
+      dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2));
+    }
 
     try {
-      const [dbA, dbB] = await Promise.all([sb.from('players').select('*').eq('id', Number(playerA.id)).maybeSingle(), sb.from('players').select('*').eq('id', Number(playerB.id)).maybeSingle()]);
-      if (!dbA.data || !dbB.data) return;
-      const rA = dbA.data; const rB = dbB.data;
-      const pKA = rA.statpoints !== undefined ? 'statpoints' : 'statPoints'; const pKB = rB.statpoints !== undefined ? 'statpoints' : 'statPoints';
-
-      let gA = dbHelper.safeReadField(rA, 'gold', 0); let xA = dbHelper.safeReadField(rA, 'xp', 0); let lA = dbHelper.safeReadField(rA, 'level', 1); let sA = dbHelper.safeReadField(rA, pKA, 0);
-      let gB = dbHelper.safeReadField(rB, 'gold', 0); let xB = dbHelper.safeReadField(rB, 'xp', 0); let lB = dbHelper.safeReadField(rB, 'level', 1); let sB = dbHelper.safeReadField(rB, pKB, 0);
-
-      const maxA = dbHelper.getServerMaxHp({ endurance: dbHelper.safeReadField(rA, 'endurance', 1) });
-      const maxB = dbHelper.getServerMaxHp({ endurance: dbHelper.safeReadField(rB, 'endurance', 1) });
-      let hpA = maxA; let hpB = maxB;
-
-      if (result === 'win') {
-        gA += goldReward; xA += calcXp(lA, lB);
-        let cLA = dbHelper.getServerCorrectLevelByXp(xA); if (cLA > lA) { sA += (cLA - lA) * 5; lA = cLA; }
-        hpA = Math.max(1, Number(playerA.currentHp)); hpB = Math.max(1, Math.floor(maxB * 0.2));
-      } else if (result === 'lose') {
-        gB += goldReward; xB += calcXp(lB, lA);
-        let cLB = dbHelper.getServerCorrectLevelByXp(xB); if (cLB > lB) { sB += (cLB - lB) * 5; lB = cLB; }
-        hpA = Math.max(1, Math.floor(maxA * 0.2)); hpB = Math.max(1, Number(playerB.currentHp));
-      } else { hpA = Math.max(1, Math.floor(maxA * 0.2)); hpB = Math.max(1, Math.floor(maxB * 0.2)); }
-
-      await Promise.all([
-        sb.from('players').update({ gold: Number(gA), xp: Number(xA), level: Number(lA), [pKA]: Number(sA), hp: Number(hpA) }).eq('id', Number(playerA.id)),
-        sb.from('players').update({ gold: Number(gB), xp: Number(xB), level: Number(lB), [pKB]: Number(sB), hp: Number(hpB) }).eq('id', Number(playerB.id))
-      ]);
+      await sb.from('players').update({ 
+        gold: Number(player.gold), xp: Number(player.xp), hp: Number(dbHpPayload), 
+        level: Number(player.level), statpoints: Number(player.statpoints) 
+      }).eq('id', Number(player.id));
     } catch (err) { console.error(err); }
   }
+
+  // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
+  async function finalizePvpBattle(room, result, logs, finalRound, io) {
+    const playerA = room.teamA[0]; 
+    const playerB = room.teamB[0]; 
+    
+    if (!playerA || !playerB) return;
+
+    console.log(`
+🏁 [PvP ФИНАЛИЗАЦИЯ] Начинаем защищенную транзакцию наград. Исход для TeamA: ${result}`);
+
+    const goldReward = 25; 
+
+    const calculatePvpXp = (winnerLvl, loserLvl) => {
+      let baseXp = Number(loserLvl || 1) * 15; 
+      let multiplier = 1;
+      if (loserLvl > winnerLvl) multiplier = 1 + ((loserLvl - winnerLvl) * 0.25);
+      else if (loserLvl < winnerLvl) multiplier = Math.max(0.1, 1 - ((winnerLvl - loserLvl) * 0.20));
+      return Math.floor(baseXp * multiplier);
+    };
+
+    try {
+      const [dbDataA, dbDataB] = await Promise.all([
+        sb.from('players').select('*').eq('id', Number(playerA.id)).maybeSingle(),
+        sb.from('players').select('*').eq('id', Number(playerB.id)).maybeSingle()
+      ]);
+
+      if (!dbDataA.data || !dbDataB.data) {
+        console.error("🚨 [КРИТ] Не удалось прочитать профили из БД перед выдачей PvP наград!");
+        return;
+      }
+
+      const rowA = dbDataA.data;
+      const rowB = dbDataB.data;
+
+      const safeRead = (row, field, def = 0) => {
+        const low = field.toLowerCase();
+        const up = field.toUpperCase();
+        const cap = field.charAt(0).toUpperCase() + field.slice(1);
+        return Number(row[low] ?? row[up] ?? row[cap] ?? row[field] ?? def);
+      };
+
+      let pointsKeyA = rowA.statpoints !== undefined ? 'statpoints' : 'statPoints';
+      let pointsKeyB = rowB.statpoints !== undefined ? 'statpoints' : 'statPoints';
+
+      let goldA = safeRead(rowA, 'gold', 0);
+      let xpA = safeRead(rowA, 'xp', 0);
+      let levelA = safeRead(rowA, 'level', 1);
+      let statpointsA = safeRead(rowA, pointsKeyA, 0);
+
+      let goldB = safeRead(rowB, 'gold', 0);
+      let xpB = safeRead(rowB, 'xp', 0);
+      let levelB = safeRead(rowB, 'level', 1);
+      let statpointsB = safeRead(rowB, pointsKeyB, 0);
+
+      const maxHpA = dbHelper.getServerMaxHp({ endurance: safeRead(rowA, 'endurance', 1), equipped: rowA.equipped || {} });
+      const maxHpB = dbHelper.getServerMaxHp({ endurance: safeRead(rowB, 'endurance', 1), equipped: rowB.equipped || {} });
+
+      let endHpA = maxHpA;
+      let endHpB = maxHpB;
+
+      if (result === 'win') {
+        const pvpXp = calculatePvpXp(levelA, levelB);
+        goldA += goldReward;
+        xpA += pvpXp;
+
+        const correctLevelA = dbHelper.getServerCorrectLevelByXp(xpA);
+        if (correctLevelA > levelA) {
+          statpointsA += (correctLevelA - levelA) * 5;
+          levelA = correctLevelA;
+        }
+
+        // 🔥 ИСПРАВЛЕНО: Победитель сохраняет остаток своего ХП из боя (но не меньше 1)
+        endHpA = Math.max(1, Number(playerA.currentHp));
+        endHpB = Math.max(1, Math.floor(maxHpB * 0.2)); // Проигравшему Evil пишем легальные 20%
+      } 
+      else if (result === 'lose') {
+        const pvpXp = calculatePvpXp(levelB, levelA);
+        goldB += goldReward;
+        xpB += pvpXp;
+
+        const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
+        if (correctLevelB > levelB) {
+          statpointsB += (correctLevelB - levelB) * 5;
+          levelB = correctLevelB;
+        }
+
+        endHpA = Math.max(1, Math.floor(maxHpA * 0.2)); // Проигравшему Яну пишем легальные 20%
+        // 🔥 ИСПРАВЛЕНО: Победитель сохраняет остаток своего ХП из боя (но не меньше 1)
+        endHpB = Math.max(1, Number(playerB.currentHp));
+      }
+      else if (result === 'lose') {
+        const pvpXp = calculatePvpXp(levelB, levelA);
+        goldB += goldReward;
+        xpB += pvpXp;
+
+        const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
+        if (correctLevelB > levelB) {
+          statpointsB += (correctLevelB - levelB) * 5;
+          levelB = correctLevelB;
+        }
+
+        endHpA = Math.max(1, Math.floor(maxHpA * 0.2));
+        endHpB = maxHpB;
+      } 
+      else {
+        endHpA = Math.max(1, Math.floor(maxHpA * 0.2));
+        endHpB = Math.max(1, Math.floor(maxHpB * 0.2));
+      }
+
+      await Promise.all([
+        sb.from('players').update({
+          gold: Number(goldA), xp: Number(xpA), level: Number(levelA),
+          [pointsKeyA]: Number(statpointsA), hp: Number(endHpA)
+        }).eq('id', Number(playerA.id)),
+
+        sb.from('players').update({
+          gold: Number(goldB), xp: Number(xpB), level: Number(levelB),
+          [pointsKeyB]: Number(statpointsB), hp: Number(endHpB)
+        }).eq('id', Number(playerB.id))
+      ]);
+
+      console.log("☁️ [БД PvP УСПЕХ] Данные успешно сохранены.");
+
+    } catch (err) {
+      console.error("❌ Фатальная ошибка транзакции PvP наград:", err);
+    }
+  }
+
 };
