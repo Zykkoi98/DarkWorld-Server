@@ -10,7 +10,7 @@ const { createClient } = require('@supabase/supabase-js');
 const dbHelper = require('./db_helper');
 const inventoryLogic = require('./inventory_logic');
 const battleLogic = require('./battle_logic');
-
+const shopLogic = require('./shop_logic');
 const app = express();
 app.get('/', (req, res) => res.send('⚔️ Боевое ядро Dark World активно на Render!'));
 
