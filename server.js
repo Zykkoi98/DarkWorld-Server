@@ -52,6 +52,10 @@ io.on('connection', (socket) => {
   // 3. Инициализируем боевой движок (PvE монстры, PvP Арена лобби и комнаты)
   if (typeof battleLogic === 'function') {
     battleLogic(io, socket, sb, activeRooms);
+    
+  }
+  if (typeof shopLogic === 'function') {
+  shopLogic(io, null, sb);
   }
 
   // Безопасное отключение: чистим socketId оффлайн-игроков в активных битвах
