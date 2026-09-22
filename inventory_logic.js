@@ -223,14 +223,17 @@ socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
       const invTab = (slotKey === 'potion' || slotKey === 'scroll') ? 'consumables' : 'equipment';
       if (!inventory[invTab]) inventory[invTab] = [];
 
+      // 🛡️ Проверяем лимит сумки перед снятием шмотки
       const exists = inventory[invTab].find(i => i.id === itemId);
-      if (!exists && inventory[invTab].length >= 30) {
+      if (inventory[invTab].length >= 30 && (invTab !== 'consumables' && invTab !== 'resources')) {
         return socket.emit('error', '⚠️ Сумка переполнена! Некуда снять вещь.');
       }
 
-      if (exists) {
+      // 🔥 ИСПРАВЛЕНО: Расходники и ресурсы стакаем, а для ШМОТОК всегда создаем новый уникальный UUID
+      if (exists && (invTab === 'consumables' || invTab === 'resources')) {
         exists.count = (exists.count || 1) + countToReturn;
       } else {
+        // Подстраховка названий и эмодзи для дефолтных вещей города
         let name = itemId; let icon = '📦';
         if (itemId === 'iron_sword') { name = 'Железный меч'; icon = '⚔️'; }
         if (itemId === 'rusty_sword') { name = 'Ржавый меч'; icon = '🗡️'; }
@@ -242,20 +245,31 @@ socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
         if (itemId === 'copper_ring') { name = 'Медное кольцо'; icon = '💍'; }
         if (itemId === 'wolf_amulet') { name = 'Амулет Волка'; icon = '📿'; }
         
-        inventory[invTab].push({ id: itemId, name: name, icon: icon, count: countToReturn });
+        // Генерируем новый легальный UUID для шмотки, чтобы её можно было переодеть без F5
+        const returnedInstance = {
+          uuid: `${itemId}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          id: itemId,
+          name: name,
+          icon: icon,
+          count: 1
+        };
+
+        inventory[invTab].push(returnedInstance);
       }
 
+      // Снимаем вещь с куклы в ОЗУ сервера
       if (slotKey === 'ring' && ringIndex !== null) {
         equipped.rings[ringIndex] = null;
       } else {
         equipped[slotKey] = null;
       }
 
+      // Записываем чистые транзакции в облако Supabase
       await sb.from('players').update({ inventory, equipped }).eq('id', nUserId);
       await triggerLoadGameSuccess(nUserId, socket, sb);
 
     } catch (e) {
-      console.error(e);
+      console.error("❌ Критический сбой при снятии экипировки:", e);
       socket.emit('error', 'Ошибка сервера при снятии экипировки.');
     }
   });
