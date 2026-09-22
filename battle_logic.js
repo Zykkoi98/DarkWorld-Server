@@ -489,22 +489,38 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (target.turn && target.turn.defends.includes(attacker.turn.attack)) {
         logs.push(`🛡️ <strong>${target.name}</strong> заблокировал удар от <strong>${attacker.name}</strong> в ${ZONE_NAMES[attacker.turn.attack]}.`);
       } else {
-        // 1. БК-МЕХАНИКА: Расчет Уворота цели против Антиуворота атакующего
-        const evadeChance = Math.min(75, Math.max(5, 5 + Math.floor((dbHelper.getServerMfInv(target) - dbHelper.getServerMfAntiInv(attacker)) / 10)));
+        // 1. БК-МЕХАНИКА: Безопасный расчет Уворота (ищет в корне и в .stats)
+        const targetAgi = Number(target.agility ?? target.stats?.agility ?? 1);
+        const attackerAgi = Number(attacker.agility ?? attacker.stats?.agility ?? 1);
+
+        const targetMfInv = (targetAgi * 10) + getEquipmentBonus(target.equipped, 'mf_inv');
+        const attackerMfAntiInv = (attackerAgi * 4) + getEquipmentBonus(attacker.equipped, 'mf_antiinv');
+
+        let finalEvadeChance = 15 + (targetAgi - attackerAgi) * 2 + Math.floor((targetMfInv - attackerMfAntiInv) / 10);
+        const evadeChance = Math.min(75, Math.max(15, finalEvadeChance));
+
+        // Кубик на проверку уворота
         const isEvaded = rand(1, 100) <= evadeChance;
 
         if (isEvaded) {
           logs.push(`🏹 <strong>${target.name}</strong> увернулся от удара <strong>${attacker.name}</strong> в ${ZONE_NAMES[attacker.turn.attack]}!`);
         } else {
-          // 🔥 ИСПРАВЛЕНО: Код расчета урона выполнится ТОЛЬКО если уворота НЕ БЫЛО, без ломающих цикл return!
-          
-          // 2. БК-МЕХАНИКА: Расчет Крита атакующего против Антикрита цели
-          const critChance = Math.min(65, Math.max(5, 5 + Math.floor((dbHelper.getServerMfCrit(attacker) - dbHelper.getServerMfAntiCrit(target)) / 10)));
+          // 🔥 2. БК-МЕХАНИКА: Безопасный расчет Крита (ищет в корне и в .stats)
+          const attackerLuck = Number(attacker.luck ?? attacker.stats?.luck ?? 1);
+          const targetLuck = Number(target.luck ?? target.stats?.luck ?? 1);
+
+          const attackerMfCrit = (attackerLuck * 10) + getEquipmentBonus(attacker.equipped, 'mf_crit');
+          const targetMfAntiCrit = (targetLuck * 4) + getEquipmentBonus(target.equipped, 'mf_anticrit');
+
+          let finalCritChance = 10 + (attackerLuck - targetLuck) * 2 + Math.floor((attackerMfCrit - targetMfAntiCrit) / 10);
+          const critChance = Math.min(65, Math.max(5, finalCritChance));
+
+          // Кубик на проверку крита
           const isCrit = rand(1, 100) <= critChance;
 
           // Расчет базового физ-урона от Силы
           let dmg = Math.floor(2 + ((Number(attacker.strength || 1) + getEquipmentBonus(attacker.equipped, 'strength')) * 1.5)) + getEquipmentBonus(attacker.equipped, 'atk');
-          if (isCrit) dmg = Math.floor(dmg * 2.0); // Удваиваем урон при проке крита
+          if (isCrit) dmg = Math.floor(dmg * 2.0); // Удваиваем урон при крите
 
           // Вычитаем поглощающую броню Выносливости цели
           dmg = Math.max(1, dmg - dbHelper.getServerDef(target));
