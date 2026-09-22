@@ -332,33 +332,27 @@ const SERVER_SHOP_DATABASE = {
 };
 module.exports = function(io, _unused_socket, sb) {
   
-  // 🔥 ГЛАВНЫЙ ИСПРАВЛЕННЫЙ ПЕРЕХВАТЧИК: Слушаем подключение игроков со всех экранов
+  // Главный перехватчик: слушаем подключение игроков со всех экранов Mini App
   io.on('connection', (globalSocket) => {
-    console.log(`🛒 [МАГАЗИН СЕТЬ] Новый сокет ${globalSocket.id} зашел на прилавок.`);
+    console.log(`🔌 [МАГАЗИН] Сокет ${globalSocket.id} успешно зашел на прилавок.`);
 
-    // Авторизация комнаты магазина по ID игрока
-    globalSocket.on('join_shop_room', ({ userId }) => {
-      if (userId) {
-        globalSocket.join(`shop_user_${String(userId)}`);
-        console.log(`🚪 [МАГАЗИН КОМНАТА] Гладиатор ID ${userId} подключил адресный шлюз.`);
-      }
-    });
-
-    // Принимаем защищенный пакет покупки
+    // ПРИЕМ ПАКЕТА ЗАЩИЩЕННОЙ ПОКУПКИ
     globalSocket.on('buy_item_secure', async ({ userId, itemId }) => {
-      const sUserId = String(userId);
       try {
         const nUserId = Number(userId);
-        
-        // 1. Проверяем наличие товара в каталоге
-        const itemConfig = SERVER_SHOP_DATABASE[itemId];
-        if (!itemConfig) {
-          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: "🚨 Товар не существует в каталоге магазина!" });
+        if (!nUserId) {
+          return globalSocket.emit('shop_buy_error', { message: "❌ Ошибка авторизации сокета игрока!" });
         }
 
-        console.log(`🛒 [ПОКУПКА] Игрок ID: ${nUserId} берет шмотку: ${itemId}`);
+        // 1. Проверяем наличие товара в каталоге цен на сервере
+        const itemConfig = SERVER_SHOP_DATABASE[itemId];
+        if (!itemConfig) {
+          return globalSocket.emit('shop_buy_error', { message: "🚨 Товар не существует в каталоге магазина!" });
+        }
 
-        // 2. Достаем свежие статы из БД Supabase
+        console.log(`🛒 [ГЛОБАЛЬНЫЙ МАКЕТ] Игрок ID: ${nUserId} покупает: ${itemId}`);
+
+        // 2. Достаем свежие данные Яна/Evil из БД Supabase напрямую
         const { data: playerRow, error: dbError } = await sb.from('players')
           .select('*')
           .eq('id', nUserId)
@@ -366,43 +360,48 @@ module.exports = function(io, _unused_socket, sb) {
 
         if (dbError) {
           console.error(`🚨 [ОШИБКА БД SUPABASE]:`, dbError.message);
-          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `🚨 Ошибка базы данных: ${dbError.message}` });
+          return globalSocket.emit('shop_buy_error', { message: `🚨 Ошибка базы данных: ${dbError.message}` });
         }
 
         if (!playerRow) {
-          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: "❌ Критическая ошибка: Ваш профиль не найден в базе данных!" });
+          return globalSocket.emit('shop_buy_error', { message: "❌ Критическая ошибка: Ваш профиль не найден в базе данных!" });
         }
 
         const currentGold = Number(playerRow.gold ?? 0);
         const currentLevel = Number(playerRow.level ?? 1);
 
+        // Чистый сбор характеристик из корня строки таблицы
         const pAgility = Number(playerRow.agility ?? 1);
         const pLuck = Number(playerRow.luck ?? 1);
         const pEndurance = Number(playerRow.endurance ?? 1);
 
-        // 3. АУДИТ ТРЕБОВАНИЙ К СТАТАМ, ЗОЛОТУ И УРОВНЮ
+        console.log(`🔎 [СТАТЫ ИЗ БД] Персонаж: ${playerRow.name} | Золото: ${currentGold} | Выносливость: ${pEndurance}`);
+
+        // 3. АУДИТ АНТИЧИТА: ТРЕБОВАНИЯ К ХАРАКТЕРИСТИКАМ, СТАТАМ, ЗОЛОТУ И УРОВНЮ
         if (itemConfig.reqEndurance && pEndurance < itemConfig.reqEndurance) {
-          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно Выносливости! Требуется: 🛡️${itemConfig.reqEndurance}, у вас: 🛡️${pEndurance}` });
+          return globalSocket.emit('shop_buy_error', { message: `❌ Недостаточно Выносливости! Требуется: 🛡️${itemConfig.reqEndurance}, у вас: 🛡️${pEndurance}` });
         }
         if (itemConfig.reqAgility && pAgility < itemConfig.reqAgility) {
-          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно Ловкости! Требуется: 🏹${itemConfig.reqAgility}, у вас: 🏹${pAgility}` });
+          return globalSocket.emit('shop_buy_error', { message: `❌ Недостаточно Ловкости! Требуется: 🏹${itemConfig.reqAgility}, у вас: 🏹${pAgility}` });
         }
         if (itemConfig.reqLuck && pLuck < itemConfig.reqLuck) {
-          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно Удачи! Требуется: 🍀${itemConfig.reqLuck}, у вас: 🍀${pLuck}` });
+          return globalSocket.emit('shop_buy_error', { message: `❌ Недостаточно Удачи! Требуется: 🍀${itemConfig.reqLuck}, у вас: 🍀${pLuck}` });
         }
         if (currentGold < itemConfig.price) {
-          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Недостаточно золота! Нужно: 💰${itemConfig.price}, у вас: 💰${currentGold}` });
+          return globalSocket.emit('shop_buy_error', { message: `❌ Недостаточно золота! Нужно: 💰${itemConfig.price}, у вас: 💰${currentGold}` });
         }
         if (currentLevel < itemConfig.level) {
-          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Слишком низкий уровень! Требуется: Lv. ${itemConfig.level}, у вас: Lv. ${currentLevel}` });
+          return globalSocket.emit('shop_buy_error', { message: `❌ Слишком низкий уровень! Требуется: Lv. ${itemConfig.level}, у вас: Lv. ${currentLevel}` });
         }
 
-        // 4. МОДИФИКАЦИЯ ИНВЕНТАРЯ В ОЗУ
+        // 4. МОДИФИКАЦИЯ ИНВЕНТАРЯ В ОЗУ СЕРВЕРА
+        // Разрываем ссылки через глубокое копирование JSON, чтобы Postgres не капризничал
         let inventory = JSON.parse(JSON.stringify(playerRow.inventory || { equipment: [], consumables: [], resources: [] }));
         if (!inventory.equipment || !Array.isArray(inventory.equipment)) {
           inventory.equipment = [];
         }
 
+        // Генерируем уникальный инстанс предмета под рюкзак
         const newInstance = {
           uuid: `${itemId}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
           id: itemId
@@ -411,19 +410,19 @@ module.exports = function(io, _unused_socket, sb) {
         inventory.equipment.push(newInstance);
         const updatedGold = currentGold - itemConfig.price;
 
-        // 5. СОХРАНЕНИЕ ТРАНЗАКЦИИ В SUPABASE
+        // 5. СОХРАНЕНИЕ ОЧИЩЕННОЙ ТРАНЗАКЦИИ В SUPABASE
         const { error: updateError } = await sb.from('players')
           .update({ gold: Number(updatedGold), inventory: inventory })
           .eq('id', nUserId);
 
         if (updateError) {
-          console.error(`🚨 [ОШИБКА ЗАПИСИ ИНВЕНТАРЯ В БД]:`, updateError.message);
-          return io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: `❌ Ошибка записи инвентаря: ${updateError.message}` });
+          console.error(`🚨 [ОШИБКА ЗАПИСИ JSONB В БД]:`, updateError.message);
+          return globalSocket.emit('shop_buy_error', { message: `❌ Ошибка записи инвентаря: ${updateError.message}` });
         }
 
-        console.log(`✨ [МАГАЗИН УСПЕХ] Списание прошло. Отправляем ответ в комнату shop_user_${sUserId}`);
+        console.log(`✨ [МАГАЗИН УСПЕХ] Транзакция завершена. Шлем прямой ответ в сокет ${globalSocket.id}`);
 
-        // 6. СИНХРОНИЗАЦИЯ С ТЕЛЕФОНОМ
+        // 6. СИНХРОНИЗАЦИЯ: Собираем чистый профиль для мгновенной перерисовки шапки лавки
         const cleanPlayerProfile = {
           id: Number(playerRow.id),
           name: playerRow.name,
@@ -442,14 +441,15 @@ module.exports = function(io, _unused_socket, sb) {
           equipped: playerRow.equipped || { rings: [null, null, null] }
         };
 
-        io.to(`shop_user_${sUserId}`).emit('shop_buy_success', { 
+        // 🔥 МГНОВЕННЫЙ ОТВЕТ НА ЭКРАН ТЕЛЕФОНА
+        globalSocket.emit('shop_buy_success', { 
           message: "🎉 Предмет успешно куплен и добавлен в рюкзак!",
           player: cleanPlayerProfile 
         });
 
       } catch (err) {
-        console.error("❌ Фатальный сбой внутри buy_item_secure:", err.message);
-        io.to(`shop_user_${sUserId}`).emit('shop_buy_error', { message: "🚨 Внутренняя ошибка сервера при обработке покупки." });
+        console.error("❌ Фатальный сбой внутри глобального сокета магазина:", err.message);
+        globalSocket.emit('shop_buy_error', { message: `🚨 Внутренний сбой сервера: ${err.message}` });
       }
     });
 
