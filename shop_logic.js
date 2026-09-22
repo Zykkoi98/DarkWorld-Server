@@ -396,29 +396,34 @@ module.exports = function(io, socket, sb) {
       }
 
       // 4. МОДИФИКАЦИЯ ИНВЕНТАРЯ В ОЗУ СЕРВЕРА
-      let inventory = playerRow.inventory || { equipment: [], consumables: [], resources: [] };
-      if (!inventory.equipment) inventory.equipment = [];
+       let inventory = JSON.parse(JSON.stringify(playerRow.inventory || { equipment: [], consumables: [], resources: [] }));
+      
+      if (!inventory.equipment || !Array.isArray(inventory.equipment)) {
+        inventory.equipment = [];
+      }
 
-      // Генерируем уникальный UUID для вещи, чтобы можно было купить 2 одинаковых меча
+      // Генерируем уникальный экземпляр шмотки для рюкзака
       const newInstance = {
         uuid: `${itemId}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
         id: itemId
       };
       
+      // Добавляем шмотку в массив снаряжения
       inventory.equipment.push(newInstance);
+      
       const updatedGold = currentGold - itemConfig.price;
 
-      // 5. СОХРАНЕНИЕ ОЧИЩЕННОЙ ТРАНЗАКЦИИ В SUPABASE
+      // 5. 🔥 ЖЕСТКИЙ ФИКС ДЛЯ JSONB: Превращаем рюкзак обратно в чистый JSON-объект, чтобы Postgres его принял!
       const { error: updateError } = await sb.from('players')
         .update({
-          gold: updatedGold,
-          inventory: inventory
+          gold: Number(updatedGold),
+          inventory: inventory // Supabase съест этот очищенный объект
         })
         .eq('id', nUserId);
 
       if (updateError) {
-        console.error(`❌ Ошибка финализации покупки в БД для ID ${nUserId}:`, updateError.message);
-        return socket.emit('shop_buy_error', { message: "🚨 Ошибка записи данных в облако." });
+        console.error(`🚨 [ОШИБКА ЗАПИСИ JSONB В БД]:`, updateError.message);
+        return socket.emit('shop_buy_error', { message: `❌ Ошибка записи инвентаря: ${updateError.message}` });
       }
 
       console.log(`✨ [МАГАЗИН УСПЕХ] Предмет ${itemId} успешно выдан игроку ID ${nUserId}. Списано: 💰${itemConfig.price}`);
