@@ -253,16 +253,31 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // --- 7. ОБРАБОТЧИК: ПРИЕМ ХОДА (АТАКА / БЛОК) ---
-    socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
+  socket.on('submit_turn', ({ roomId, targetUuid, attack, defends }) => {
     const room = activeRooms[roomId];
-    if (!room) return;
+    if (!room) {
+      console.log(`⚠️ [ХОД ОТКЛОНЕН] Комната ${roomId} не найдена в ОЗУ.`);
+      return;
+    }
 
-    // Ищем игрока строго по его активному socketId, как в старой версии
     const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
-    if (!fighter || fighter.currentHp <= 0 || fighter.turn) return;
+    if (!fighter) {
+      console.log(`⚠️ [ХОД ОТКЛОНЕН] Боец с сокетом ${socket.id} не найден в комнате ${roomId}.`);
+      return;
+    }
 
+    if (fighter.currentHp <= 0) return;
+    if (fighter.turn) {
+      console.log(`⚠️ [ХОД ОТКЛОНЕН] Гладиатор ${fighter.name} уже отправил ход в этом раунде.`);
+      return;
+    }
+
+    // Записываем тактику
     fighter.turn = { targetUuid, attack, defends: defends || [] };
     fighter.afkTurns = 0; 
+
+    // 🔥 ЛОГ НА СЕРВЕРЕ: Проверяем, что пришло от игрока
+    console.log(`📥 [ПОЛУЧЕН ХОД] Гладиатор: ${fighter.name} | Атк: ${attack} | Блок: [${defends ? defends.join(', ') : ''}] | Цель UUID: ${targetUuid}`);
 
     let canExecuteRound = false;
 
@@ -271,13 +286,19 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (awaitingPvE.length === 0) canExecuteRound = true;
     } 
     else if (room.type === 'pvp') {
-      // Возвращаем честный старый подсчет ходов по всей комнате
       const alivePlayersCount = [...room.teamA, ...room.teamB].filter(p => p.currentHp > 0).length;
       const submittedTurnsCount = [...room.teamA, ...room.teamB].filter(p => p.turn !== null).length;
-      if (submittedTurnsCount === alivePlayersCount) canExecuteRound = true;
+      
+      // 🔥 ЛОГ НА СЕРВЕРЕ: Проверяем статус готовности PvP поединка
+      console.log(`📊 [СТАТУС PvP КОМНАТЫ] Живых игроков: ${alivePlayersCount} | Готовых ходов: ${submittedTurnsCount}`);
+      
+      if (submittedTurnsCount === alivePlayersCount) {
+        canExecuteRound = true;
+      }
     }
 
     if (canExecuteRound) {
+      console.log(`🔔 [УДАР В КОЛОКОЛ] Все игроки прислали данные! Запускаем executeRoundCalculations...`);
       clearTimeout(room.timeoutRef);
       executeRoundCalculations(roomId, activeRooms, io); 
     }
@@ -492,6 +513,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     room.teamA.forEach(f => f.turn = null);
     room.teamB.forEach(f => f.turn = null);
+    console.log(`⚔️ [МАТЕМАТИКА РАУНДА ЗАВЕРШЕНА] Логи урона собраны. Переходим к отправке round_result и вызову базы наград...`);
 
     const isTeamADead = room.teamA.every(f => f.currentHp <= 0);
     const isTeamBDead = room.teamB.every(f => f.currentHp <= 0);
