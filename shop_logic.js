@@ -329,7 +329,7 @@ const SERVER_SHOP_DATABASE = {
   'immortal_talisman_10':{ price: 950,level: 10,reqEndurance: 66, type: 'equipment', slotType: 'neck' },
   'immortal_seal_10':   { price: 900, level: 10,reqEndurance: 66, type: 'equipment', slotType: 'ring' }
 
-}
+};
 module.exports = function(io, socket, sb) {
   const triggerLoadGameSuccess = dbHelper.triggerLoadGameSuccess;
 
