@@ -138,17 +138,26 @@ module.exports = {
   // Главный инициализатор сокет-обработчиков
   init: function(io, socket, sb) {
 
-    // --- 1. ЗАЩИЩЕННАЯ ЗАГРУЗКА И АНТИЧИТ-АУДИТ ПРИ ВХОДЕ ---
+     // --- 1. ЗАЩИЩЕННАЯ ЗАГРУЗКА И АНТИЧИТ-АУДИТ ПРИ ВХОДЕ ---
     socket.on('load_game_secure', async ({ userId, username }) => {
       try {
         const nUserId = Number(userId);
         console.log(`🔍 [АУДИТ ВХОДА] Проверка игрока ID: ${nUserId} (${username})...`);
 
-        const { data, error } = await sb.from('players').select('*').eq('id', nUserId);
-        if (error) return socket.emit('load_game_failed', { message: error.message });
+        // 🔥 ИСПРАВЛЕНО: Используем .maybeSingle() вместо .single()
+        // Теперь если в базе пусто, код не вылетит, а пойдет дальше!
+        const { data: cloudPlayer, error } = await sb.from('players')
+          .select('*')
+          .eq('id', nUserId)
+          .maybeSingle();
 
-        if (data && data.length > 0) {
-          let cloudPlayer = data[0]; // Читаем объект из массива
+        if (error) {
+          console.error("🚨 Ошибка запроса к Supabase:", error.message);
+          return socket.emit('load_game_failed', { message: error.message });
+        }
+
+        // Если нашли персонажа в базе — загружаем и проверяем античитом
+        if (cloudPlayer) {
           
           const currentXp = safeReadField(cloudPlayer, 'xp', 0);
           const correctLevel = getServerCorrectLevelByXp(currentXp);
@@ -157,13 +166,12 @@ module.exports = {
           const str = safeReadField(cloudPlayer, 'strength', 1);
           const agi = safeReadField(cloudPlayer, 'agility', 1);
           const end = safeReadField(cloudPlayer, 'endurance', 1);
-          const tgh = safeReadField(cloudPlayer, 'toughness', 1); // Только стойкость
           const lck = safeReadField(cloudPlayer, 'luck', 1);
           
           let pointsKey = cloudPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
           const freePoints = safeReadField(cloudPlayer, pointsKey, 0);
 
-          const totalFighterPoints = str + agi + end + tgh + lck + freePoints;
+          const totalFighterPoints = str + agi + end + lck + freePoints;
           const maxLegalPoints = 5 + 5 + ((correctLevel - 1) * 5); 
 
           let needsDbSync = false;
@@ -171,21 +179,15 @@ module.exports = {
 
           if (dbLevel !== correctLevel || totalFighterPoints > maxLegalPoints) {
             console.warn(`🚨 [АНТИЧИТ] Сброс на легальную норму уровня ${correctLevel}`);
-            
-            let levelKey = cloudPlayer.level !== undefined ? 'level' : 'Level';
-            let hpKey = cloudPlayer.hp !== undefined ? 'hp' : 'hp';
-            const statsKeys = ['strength', 'agility', 'endurance', 'toughness', 'luck'];
+            const statsKeys = ['strength', 'agility', 'endurance', 'luck'];
             
             statsKeys.forEach(key => {
-              let finalKey = cloudPlayer[key] !== undefined ? key : key.toLowerCase();
-              updatePayload[finalKey] = 1;
+              updatePayload[key] = 1;
             });
 
-            updatePayload[levelKey] = correctLevel;
+            updatePayload[cloudPlayer.level !== undefined ? 'level' : 'level'] = correctLevel;
             updatePayload[pointsKey] = maxLegalPoints - 5; 
-            
-            const freshMaxHp = getServerMaxHp({ endurance: 1, toughness: 1, equipped: cloudPlayer.equipped || {} });
-            updatePayload[hpKey] = freshMaxHp;
+            updatePayload['hp'] = getServerMaxHp({ endurance: 1, equipped: cloudPlayer.equipped || {} });
 
             needsDbSync = true;
           }
@@ -195,9 +197,13 @@ module.exports = {
           }
 
           await triggerLoadGameSuccess(nUserId, socket, sb);
+
         } else {
-          socket.emit('player_not_found', { userId, username });
+          // 🔥 ТЕПЕРЬ СРАБОТАЕТ СЮДА: Если записей в БД вообще нет, шлём клиенту сигнал создать новичка!
+          console.log(`🆕 Игрок не найден в базе. Отправляем сигнал 'player_not_found'...`);
+          socket.emit('player_not_found', { userId: nUserId, username: username });
         }
+
       } catch (err) {
         console.error("❌ Критическая ошибка при загрузке игры на сервере:", err);
         socket.emit('load_game_failed', { message: err.message });
