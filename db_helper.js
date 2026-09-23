@@ -208,7 +208,7 @@ module.exports = {
           const freePoints = safeReadField(cloudPlayer, pointsKey, 0);
 
           const totalFighterPoints = str + agi + end + lck + freePoints;
-          const maxLegalPoints = 8 + 8 + ((correctLevel - 1) * 8); 
+          const maxLegalPoints = 5 + 8 + ((correctLevel - 1) * 8); 
 
           let needsDbSync = false;
           let updatePayload = {};
