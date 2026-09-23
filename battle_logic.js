@@ -873,8 +873,9 @@ module.exports = function(io, socket, sb, activeRooms) {
       const oldLevel = Number(player.level || 1);
       const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp);
       
-      if (correctLevel > oldLevel) {
-        player.statpoints = Number(player.statpoints || player.statPoints || 0) + ((correctLevel - oldLevel) * 5);
+    if (correctLevel > oldLevel) {
+        const levelsGained = correctLevel - oldLevel;
+        player.statpoints = Number(player.statpoints || player.statPoints || 0) + (levelsGained * 8);
         player.level = correctLevel;
         player.currentHp = dbHelper.getServerMaxHp(player);
       }
