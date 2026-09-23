@@ -32,16 +32,45 @@ function getEquipmentBonus(equipped, bonusKey) {
   
   slots.forEach(slot => {
     const itemId = equipped[slot];
-    if (itemId && ITEMS_STAT_DB[itemId]) {
-      const item = ITEMS_STAT_DB[itemId];
+    if (!itemId) return;
+
+    // 🔥 ФИКС: Если шмотки нет в старой базе, заглядываем в глобальный каталог магазина SERVER_SHOP_DATABASE
+    let item = ITEMS_STAT_DB[itemId];
+    if (!item && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[itemId]) {
+      item = global.SERVER_SHOP_DATABASE[itemId];
+    }
+
+    if (item) {
+      // Проверяем прямые бонусы (например, price, level, slotType, atk, def)
       if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
+      
+      // Проверяем вложенные бонусы характеристик (если они записаны в объекте bonus)
+      if (item.bonus) {
+        if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
+        if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
+          totalBonus += item.bonus.stats[bonusKey];
+        }
+      }
     }
   });
 
   if (equipped.rings && Array.isArray(equipped.rings)) {
     equipped.rings.forEach(itemId => {
-      if (itemId && ITEMS_STAT_DB[itemId] && ITEMS_STAT_DB[itemId][bonusKey] !== undefined) {
-        totalBonus += ITEMS_STAT_DB[itemId][bonusKey];
+      if (!itemId) return;
+      
+      let item = ITEMS_STAT_DB[itemId];
+      if (!item && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[itemId]) {
+        item = global.SERVER_SHOP_DATABASE[itemId];
+      }
+
+      if (item) {
+        if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
+        if (item.bonus) {
+          if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
+          if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
+            totalBonus += item.bonus.stats[bonusKey];
+          }
+        }
       }
     });
   }
@@ -542,7 +571,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       // Превращаем атаку в массив, чтобы код одинаково обрабатывал и 1 удар (строку), и 2 удара (массив двуручника)
       const attacksList = Array.isArray(attacker.turn.attack) ? attacker.turn.attack : [attacker.turn.attack];
-      const targetDefends = attacker.turn.defends || [];
+      const targetDefends = (target.turn && Array.isArray(target.turn.defends)) ? target.turn.defends : [];
 
       // Обсчитываем каждую зону атаки по отдельности!
       attacksList.forEach(currentAttackZone => {
@@ -551,10 +580,9 @@ module.exports = function(io, socket, sb, activeRooms) {
         // 1. ПРОВЕРКА БЛОКА: Закрыл ли защитник эту конкретную зону?
         if (targetDefends.includes(currentAttackZone)) {
           logs.push(`🛡️ <strong>${target.name}</strong> заблокировал удар от <strong>${attacker.name}</strong> в ${ZONE_NAMES[currentAttackZone]}.`);
-          return; // Удар заблокирован щитом/оружием, переходим к следующей зоне
+          return; // Удар успешно заблокирован щитом/оружием цели, переходим к следующему удару
         }
 
-        // 2. БК-МЕХАНИКА: Расчет Уворота цели
         const targetAgi = Number(target.agility ?? target.stats?.agility ?? 1);
         const attackerAgi = Number(attacker.agility ?? attacker.stats?.agility ?? 1);
         const targetMfInv = (targetAgi * 10) + getEquipmentBonus(target.equipped, 'mf_inv');
@@ -580,7 +608,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         // Базовый физ-урон (если у нас 2 удара двуручником, делим урон каждого удара на 1.3 для баланса)
         let dmgFactor = (attacksList.length === 2) ? 1.3 : 1.0;
-        let dmg = Math.floor((2 + ((Number(attacker.strength || 1) + getEquipmentBonus(attacker.equipped, 'strength')) * 1.5)) / dmgFactor) + getEquipmentBonus(attacker.equipped, 'atk');
+        let dmg = Math.floor(getServerAtk(attacker) / dmgFactor);
         
         if (isCrit) dmg = Math.floor(dmg * 2.0);
 

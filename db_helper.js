@@ -40,16 +40,42 @@ function getEquipmentBonus(equipped, bonusKey) {
   
   slots.forEach(slot => {
     const itemId = equipped[slot];
-    if (itemId && ITEMS_STAT_DB[itemId]) {
-      const item = ITEMS_STAT_DB[itemId];
+    if (!itemId) return;
+
+    // 🔥 ФИКС АНТИЧИТА: Заставляем его проверять глобальную базу магазина
+    let item = ITEMS_STAT_DB[itemId];
+    if (!item && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[itemId]) {
+      item = global.SERVER_SHOP_DATABASE[itemId];
+    }
+
+    if (item) {
       if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
+      if (item.bonus) {
+        if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
+        if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
+          totalBonus += item.bonus.stats[bonusKey];
+        }
+      }
     }
   });
 
   if (equipped.rings && Array.isArray(equipped.rings)) {
     equipped.rings.forEach(itemId => {
-      if (itemId && ITEMS_STAT_DB[itemId] && ITEMS_STAT_DB[itemId][bonusKey] !== undefined) {
-        totalBonus += ITEMS_STAT_DB[itemId][bonusKey];
+      if (!itemId) return;
+      
+      let item = ITEMS_STAT_DB[itemId];
+      if (!item && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[itemId]) {
+        item = global.SERVER_SHOP_DATABASE[itemId];
+      }
+
+      if (item) {
+        if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
+        if (item.bonus) {
+          if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
+          if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
+            totalBonus += item.bonus.stats[bonusKey];
+          }
+        }
       }
     });
   }
