@@ -208,7 +208,7 @@ module.exports = {
           const freePoints = safeReadField(cloudPlayer, pointsKey, 0);
 
           const totalFighterPoints = str + agi + end + lck + freePoints;
-          const maxLegalPoints = 5 + 5 + ((correctLevel - 1) * 5); 
+          const maxLegalPoints = 8 + 8 + ((correctLevel - 1) * 8); 
 
           let needsDbSync = false;
           let updatePayload = {};
@@ -222,7 +222,7 @@ module.exports = {
             });
 
             updatePayload[cloudPlayer.level !== undefined ? 'level' : 'level'] = correctLevel;
-            updatePayload[pointsKey] = maxLegalPoints - 5; 
+            updatePayload[pointsKey] = maxLegalPoints - 8; 
             updatePayload['hp'] = getServerMaxHp({ endurance: 1, equipped: cloudPlayer.equipped || {} });
 
             needsDbSync = true;
@@ -312,7 +312,7 @@ module.exports = {
         
         let finalPointsKey = dbPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
         const currentDbFreePoints = safeReadField(dbPlayer, finalPointsKey, 0);
-        const maxLegalTotalPoints = 5 + 5 + ((cloudLevel - 1) * 5);
+        const maxLegalTotalPoints = 8 + 8 + ((cloudLevel - 1) * 8);
         const projectedTotal = totalDbStatsSum + totalSpentNow + (currentDbFreePoints - totalSpentNow);
 
         if (projectedTotal > maxLegalTotalPoints || totalSpentNow > currentDbFreePoints) {

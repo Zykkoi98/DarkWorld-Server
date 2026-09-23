@@ -984,7 +984,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         const correctLevelA = dbHelper.getServerCorrectLevelByXp(xpA);
         if (correctLevelA > levelA) {
-          statpointsA += (correctLevelA - levelA) * 5;
+          statpointsA += (correctLevelA - levelA) * 8;
           levelA = correctLevelA;
         }
 
@@ -999,7 +999,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
         if (correctLevelB > levelB) {
-          statpointsB += (correctLevelB - levelB) * 5;
+          statpointsB += (correctLevelB - levelB) * 8;
           levelB = correctLevelB;
         }
 
@@ -1014,7 +1014,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
         if (correctLevelB > levelB) {
-          statpointsB += (correctLevelB - levelB) * 5;
+          statpointsB += (correctLevelB - levelB) * 8;
           levelB = correctLevelB;
         }
 
