@@ -622,7 +622,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         const primaryAttackZone = Array.isArray(attacker.turn.attack) ? attacker.turn.attack[0] : attacker.turn.attack;
         
         // Вторая рука бьет в случайную зону, чтобы защитник не мог легко предугадать сдвоенный блок
-        const zones = ['head', 'torso', 'legs'];
+        const zones = ["head", "breast", "torso", "belt", "legs"];
         const leftHandZone = zones[Math.floor(Math.random() * zones.length)];
         
         attacksList = [primaryAttackZone, leftHandZone]; 
