@@ -739,24 +739,33 @@ module.exports = function(io, socket, sb, activeRooms) {
 
   // --- 12. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvE И СИНХРОНИЗАЦИЯ НАГРАД ---
   async function finalizePveBattle(room, result, logs, finalRound, io) {
-    const player = Array.isArray(room.teamA) ? room.teamA[0] : room.teamA;
-    if (!player) return;
+  try {
+    // Безопасно достаем объект игрока, проверяя, массив это или одиночный объект
+    const player = (room && room.teamA && Array.isArray(room.teamA)) ? room.teamA[0] : (room ? room.teamA : null);
+    if (!player) {
+      console.error("🚨 [КРИТ] finalizePveBattle: Объект игрока в комнате не найден!");
+      return;
+    }
 
-    let gainedXp = 0; let gainedGold = 0;
-    let dbHpPayload = player.currentHp;
+    let gainedXp = 0; 
+    let gainedGold = 0;
+    let dbHpPayload = Number(player.currentHp || 0);
 
     if (result === 'win') {
-      room.teamB.forEach(m => { 
-        gainedXp += Number(m.rewardXp || 0); 
-        gainedGold += Number(m.rewardGold || 0); 
-      });
-      player.gold += gainedGold;
-      player.xp += gainedXp;
+      if (room.teamB && Array.isArray(room.teamB)) {
+        room.teamB.forEach(m => { 
+          gainedXp += Number(m.rewardXp || 0); 
+          gainedGold += Number(m.rewardGold || 0); 
+        });
+      }
+      player.gold = Number(player.gold || 0) + gainedGold;
+      player.xp = Number(player.xp || 0) + gainedXp;
       
       const oldLevel = Number(player.level || 1);
       const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp);
+      
       if (correctLevel > oldLevel) {
-        player.statpoints = (player.statpoints || 0) + ((correctLevel - oldLevel) * 5);
+        player.statpoints = Number(player.statpoints || player.statPoints || 0) + ((correctLevel - oldLevel) * 5);
         player.level = correctLevel;
         player.currentHp = dbHelper.getServerMaxHp(player);
       }
@@ -766,13 +775,32 @@ module.exports = function(io, socket, sb, activeRooms) {
       dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2));
     }
 
-    try {
-      await sb.from('players').update({ 
-        gold: Number(player.gold), xp: Number(player.xp), hp: Number(dbHpPayload), 
-        level: Number(player.level), statpoints: Number(player.statpoints) 
-      }).eq('id', Number(player.id));
-    } catch (err) { console.error(err); }
+    // 🔥 ФИКС РЕГИСТРА: Проверяем, какое имя поля используется в вашей базе Supabase для статпоинтов
+    let pointsKey = (player.statpoints !== undefined) ? 'statpoints' : 'statPoints';
+
+    console.log(`📡 [БД PvE БЕЗОПАСНЫЙ АПДЕЙТ] Отправка наград для игрока ID: ${player.id} в Supabase...`);
+    
+    // Выполняем запись в базу данных
+    const { error } = await sb.from('players').update({ 
+      gold: Number(player.gold), 
+      xp: Number(player.xp), 
+      hp: Number(dbHpPayload), 
+      level: Number(player.level), 
+      [pointsKey]: Number(player.statpoints || player.statPoints || 0) 
+    }).eq('id', Number(player.id));
+
+    if (error) {
+      console.error("🚨 [Supabase SQL Error]:", error.message);
+      // 🔥 ДАЖЕ ЕСЛИ БАЗА ВЫДАЛА ОШИБКУ, МЫ НЕ ПАДАЕМ, А ДАЕМ БОЮ ЗАВЕРШИТЬСЯ, ЧТОБЫ ЭКРАН НЕ ВИС!
+    } else {
+      console.log(`☁️ [БД PvE УСПЕХ] Награды для ${player.name} успешно зафиксированы в облаке.`);
+    }
+
+  } catch (err) {
+    // Ловим любые синтаксические ошибки и опечатки (например, undefined полей), защищая поток сокета от зависания
+    console.error("❌ Фатальный сбой внутри функции finalizePveBattle:", err.message);
   }
+}
 
   // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
   async function finalizePvpBattle(room, result, logs, finalRound, io) {
