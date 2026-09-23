@@ -79,9 +79,11 @@ function getEquipmentBonus(equipped, bonusKey) {
 
 // Честный серверный расчет боевых параметров персонажей
 function getServerAtk(fighter) {
-  const baseStrength = Number(fighter.strength || 1);
-  const gearStrength = getEquipmentBonus(fighter.equipped, 'strength');
-  const baseAtk = Math.floor(2 + ((baseStrength + gearStrength) * 1.5));
+  // Базовая сила + сила от вещей (например, Амулет Волка дает +2 к силе)
+  const totalStrength = Number(fighter.strength || 1) + getEquipmentBonus(fighter.equipped, 'strength');
+  const baseAtk = Math.floor(2 + (totalStrength * 1.5));
+  
+  // Добавляем чистый урон оружия (например, Меч дает +7 к атаке)
   return baseAtk + getEquipmentBonus(fighter.equipped, 'atk');
 }
 
@@ -579,12 +581,13 @@ module.exports = function(io, socket, sb, activeRooms) {
         // 1. ПРОВЕРКА БЛОКА: Закрыл ли защитник (target) именно ту зону, куда летит удар?
         if (targetDefends.includes(currentAttackZone)) {
           logs.push(`🛡️ <strong>${target.name}</strong> заблокировал удар от <strong>${attacker.name}</strong> в ${ZONE_NAMES[currentAttackZone]}.`);
-          return; // Удар заблокирован, переходим к следующему удару
+          return; // Удар успешно заблокирован целью, переходим к следующей зоне атаки
         }
 
-        // 2. БК-МЕХАНИКА: Расчет Уворота цели
-        const targetAgi = Number(target.agility ?? target.stats?.agility ?? 1);
-        const attackerAgi = Number(attacker.agility ?? attacker.stats?.agility ?? 1);
+        // 2. БК-МЕХАНИКА: Расчет Уворота цели (Используем яркие функции!)
+        const targetAgi = getServerAgility(target);      // 🔥 Вызываем функцию! Больше никакого тусклого цвета!
+        const attackerAgi = getServerAgility(attacker);  // 🔥 Считываем полную ловкость атакующего
+        
         const targetMfInv = (targetAgi * 10) + getEquipmentBonus(target.equipped, 'mf_inv');
         const attackerMfAntiInv = (attackerAgi * 4) + getEquipmentBonus(attacker.equipped, 'mf_antiinv');
 
@@ -593,29 +596,30 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         if (rand(1, 100) <= evadeChance) {
           logs.push(`🏹 <strong>${target.name}</strong> увернулся от удара <strong>${attacker.name}</strong> в ${ZONE_NAMES[currentAttackZone]}!`);
-          return; 
+          return; // Цель увернулась, урон обнулен, прерываем этот удар
         }
 
-        // 3. БК-МЕХАНИКА: Расчет Крита
-        const attackerLuck = Number(attacker.luck ?? attacker.stats?.luck ?? 1);
-        const targetLuck = Number(target.luck ?? target.stats?.luck ?? 1);
+        // 3. БК-МЕХАНИКА: Расчет Крита (Используем яркие функции!)
+        const attackerLuck = getServerLuck(attacker);  // 🔥 Вызываем функцию! Больше никакого тусклого цвета!
+        const targetLuck = getServerLuck(target);      // 🔥 Считываем полную удачу защищающегося
+        
         const attackerMfCrit = (attackerLuck * 10) + getEquipmentBonus(attacker.equipped, 'mf_crit');
         const targetMfAntiCrit = (targetLuck * 4) + getEquipmentBonus(target.equipped, 'mf_anticrit');
 
         let finalCritChance = 10 + (attackerLuck - targetLuck) * 2 + Math.floor((attackerMfCrit - targetMfAntiCrit) / 10);
-        const critChance = Math.min(65, Math.max(5, finalCritChance));
-        const isCrit = rand(1, 100) <= critChance;
+        const criticalChance = Math.min(65, Math.max(5, finalCritChance));
+        const isCrit = rand(1, 100) <= criticalChance;
 
         // Базовый физ-урон (если у нас 2 удара двуручником, делим урон каждого удара на 1.3 для баланса)
         let dmgFactor = (attacksList.length === 2) ? 1.3 : 1.0;
         
-        // 🔥 ФИКС УРОНА ОРУЖИЯ: Вызываем честный серверный калькулятор атаки!
+        // 🔥 ФИКС: Вызываем честный серверный калькулятор атаки!
         let dmg = Math.floor(getServerAtk(attacker) / dmgFactor);
         
         if (isCrit) dmg = Math.floor(dmg * 2.0);
 
-        // Поглощение брони Выносливости
-        dmg = Math.max(1, dmg - dbHelper.getServerDef(target));
+        // 🔥 ФИКС ЗАЩИТЫ: Поглощение урона броней Выносливости (Убрали dbHelper, вызываем напрямую!)
+        dmg = Math.max(1, dmg - getServerDef(target)); 
         target.currentHp = Math.max(0, Number(target.currentHp || 0) - dmg);
         
         logs.push(`⚔️ <strong>${attacker.name}</strong> нанес <strong>${target.name}</strong> <strong>${dmg}</strong> урона в ${ZONE_NAMES[currentAttackZone]} ${isCrit ? '💥 КРИТ!' : ''}`);
