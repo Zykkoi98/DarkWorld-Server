@@ -2,7 +2,7 @@
 // ===== 🛒 ИЗОЛИРОВАННЫЙ БЕЗОПАСНЫЙ СЕРВЕРНЫЙ МОДУЛЬ МАГАЗИНА (SHOP_LOGIC.JS) =====
 // ============================================================================
 
-const dbHelper = require('./db_helper');
+const dbHelper = require('../db_helper');
 
 // 🔥 СЕРВЕРНЫЙ КАТАЛОГ МАГАЗИНА (SHOP_LOGIC.JS) — ВСЕ 3 КЛАССА НА 10 УРОВНЕЙ
 const SERVER_SHOP_DATABASE = {

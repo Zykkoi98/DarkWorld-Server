@@ -1,4 +1,5 @@
 const dbHelper = require('./db_helper');
+const GAME_ITEMS_DATABASE = require('./shop/shop_items_config'); 
 
 const ZONE_NAMES = { head: "Голову", breast: "Грудь", torso: "Торс", belt: "Пояс", legs: "Ноги" };
 
@@ -28,23 +29,20 @@ const ITEMS_STAT_DB = {
 function getEquipmentBonus(equipped, bonusKey) {
   if (!equipped) return 0;
   let totalBonus = 0;
-  const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand', 'extra'];
+  const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand', 'extra', 'potion', 'scroll'];
   
   slots.forEach(slot => {
     const itemId = equipped[slot];
     if (!itemId) return;
 
-    // 🔥 ФИКС: Если шмотки нет в старой базе, заглядываем в глобальный каталог магазина SERVER_SHOP_DATABASE
-    let item = ITEMS_STAT_DB[itemId];
-    if (!item && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[itemId]) {
-      item = global.SERVER_SHOP_DATABASE[itemId];
-    }
+    // 🔥 ФИКС: Ищем предмет сначала в старой базе, а затем в нашем новом глобальном конфиге
+    let item = ITEMS_STAT_DB[itemId] || GAME_ITEMS_DATABASE[itemId];
 
     if (item) {
-      // Проверяем прямые бонусы (например, price, level, slotType, atk, def)
+      // Проверяем старый формат (если статы лежат на верхнем уровне объекта)
       if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
       
-      // Проверяем вложенные бонусы характеристик (если они записаны в объекте bonus)
+      // 🔥 Проверяем новый формат (если статы лежат внутри объекта bonus, как на фронтенде)
       if (item.bonus) {
         if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
         if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
@@ -54,15 +52,11 @@ function getEquipmentBonus(equipped, bonusKey) {
     }
   });
 
+  // Обсчет колец в слотах бижутерии
   if (equipped.rings && Array.isArray(equipped.rings)) {
     equipped.rings.forEach(itemId => {
       if (!itemId) return;
-      
-      let item = ITEMS_STAT_DB[itemId];
-      if (!item && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[itemId]) {
-        item = global.SERVER_SHOP_DATABASE[itemId];
-      }
-
+      let item = ITEMS_STAT_DB[itemId] || GAME_ITEMS_DATABASE[itemId];
       if (item) {
         if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
         if (item.bonus) {
