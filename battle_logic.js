@@ -573,16 +573,16 @@ module.exports = function(io, socket, sb, activeRooms) {
       const attacksList = Array.isArray(attacker.turn.attack) ? attacker.turn.attack : [attacker.turn.attack];
       const targetDefends = (target.turn && Array.isArray(target.turn.defends)) ? target.turn.defends : [];
 
-      // Обсчитываем каждую зону атаки по отдельности!
       attacksList.forEach(currentAttackZone => {
         if (currentAttackZone === null) return;
 
-        // 1. ПРОВЕРКА БЛОКА: Закрыл ли защитник эту конкретную зону?
+        // 1. ПРОВЕРКА БЛОКА: Закрыл ли защитник (target) именно ту зону, куда летит удар?
         if (targetDefends.includes(currentAttackZone)) {
           logs.push(`🛡️ <strong>${target.name}</strong> заблокировал удар от <strong>${attacker.name}</strong> в ${ZONE_NAMES[currentAttackZone]}.`);
-          return; // Удар успешно заблокирован щитом/оружием цели, переходим к следующему удару
+          return; // Удар заблокирован, переходим к следующему удару
         }
 
+        // 2. БК-МЕХАНИКА: Расчет Уворота цели
         const targetAgi = Number(target.agility ?? target.stats?.agility ?? 1);
         const attackerAgi = Number(attacker.agility ?? attacker.stats?.agility ?? 1);
         const targetMfInv = (targetAgi * 10) + getEquipmentBonus(target.equipped, 'mf_inv');
@@ -608,6 +608,8 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         // Базовый физ-урон (если у нас 2 удара двуручником, делим урон каждого удара на 1.3 для баланса)
         let dmgFactor = (attacksList.length === 2) ? 1.3 : 1.0;
+        
+        // 🔥 ФИКС УРОНА ОРУЖИЯ: Вызываем честный серверный калькулятор атаки!
         let dmg = Math.floor(getServerAtk(attacker) / dmgFactor);
         
         if (isCrit) dmg = Math.floor(dmg * 2.0);
