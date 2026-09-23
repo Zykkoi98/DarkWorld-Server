@@ -33,6 +33,7 @@ const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // Глобальная память для активных боевых комнат
 let activeRooms = {}; 
+  global.activeRooms = activeRooms;
 
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
