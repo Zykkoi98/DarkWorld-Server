@@ -336,7 +336,7 @@ module.exports = function(io, socket, sb) {
   // Никаких внутренних io.on('connection') здесь быть не должно!
   if (!socket) return; 
 
-  console.log(`🛒 [МАГАЗИН ИНИЦИАЛИЗАЦИЯ] Слушатель привязан к сокету: ${socket.id}`);
+ // console.log(`🛒 [МАГАЗИН ИНИЦИАЛИЗАЦИЯ] Слушатель привязан к сокету: ${socket.id}`);
 
   // Принимаем защищенный пакет покупки
 socket.on('buy_item_secure', async ({ userId, itemId }) => {
