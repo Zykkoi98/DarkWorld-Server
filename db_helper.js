@@ -42,43 +42,89 @@ function getEquipmentBonus(equipped, bonusKey) {
     const itemId = equipped[slot];
     if (!itemId) return;
 
-    // 🔥 ФИКС АНТИЧИТА: Заставляем его проверять глобальную базу магазина
     let item = ITEMS_STAT_DB[itemId];
     if (!item && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[itemId]) {
       item = global.SERVER_SHOP_DATABASE[itemId];
     }
 
     if (item) {
+      // 1. Если статы прописаны напрямую в объекте (старые вещи)
       if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
       if (item.bonus) {
         if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
-        if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
-          totalBonus += item.bonus.stats[bonusKey];
+        if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) totalBonus += item.bonus.stats[bonusKey];
+      }
+
+      // 🔥 2. АЛГОРИТМИЧЕСКИЙ ФИКС ДЛЯ ЛАВКИ МАГАЗИНА (Если в базе только price и level)
+      // Парсим уровень предмета (например, из mercenary_kris_4 вытаскиваем 4 уровень)
+      if (item.level && item.level >= 1) {
+        const lvl = Number(item.level);
+        
+        // Каноничная прогрессия статов БК для комплектов вещей по уровням:
+        if (bonusKey === 'atk') {
+          // Оружие (mainHand, offHand, twoHanded) должно давать урон в зависимости от уровня сета
+          if (slot === 'mainHand' || slot === 'twoHanded') {
+            const multi = (slot === 'twoHanded') ? 1.5 : 1.0;
+            totalBonus += Math.floor((lvl * 4.5) * multi); // 4 лвл даст ~18 урона!
+          } else if (slot === 'offHand' && !itemId.includes('shield')) {
+            totalBonus += Math.floor(lvl * 2.5); // Левое оружие ловкача/крита
+          }
+        }
+        
+        if (bonusKey === 'def') {
+          // Броня (body, head, legs, gloves, щиты) дает защиту
+          if (slot === 'body') totalBonus += Math.floor(lvl * 2.5); // 4 лвл даст 10 дефа!
+          if (slot === 'head' || slot === 'legs' || slot === 'offHand') totalBonus += Math.floor(lvl * 1.2);
+          if (slot === 'gloves') totalBonus += Math.floor(lvl * 0.7);
+        }
+
+        // Автоматический расчет прибавок к характеристикам (Сила, Ловкость, Выносливость, Удача) под класс сета
+        if (itemId.includes('rogue_') || itemId.includes('bandit_') || itemId.includes('thief_') || itemId.includes('mercenary_') || itemId.includes('assassin_') || itemId.includes('stalker_') || itemId.includes('shadow_') || itemId.includes('phantom_') || itemId.includes('gale_') || itemId.includes('grandmaster_')) {
+          // Сет Ловкача -> Автоматически генерирует Ловкость в зависимости от уровня вещи!
+          if (bonusKey === 'agility') {
+            if (slot === 'body') totalBonus += Math.floor(lvl * 1.2);
+            if (slot === 'mainHand' || slot === 'offHand' || slot === 'head' || slot === 'legs' || slot === 'ring') totalBonus += Math.floor(lvl * 0.8);
+          }
+        }
+        
+        if (itemId.includes('scratched_') || itemId.includes('savage_') || itemId.includes('barbarian_') || itemId.includes('seeker_') || itemId.includes('highland_') || itemId.includes('slasher_') || itemId.includes('ravager_') || itemId.includes('berserk_') || itemId.includes('blood_') || itemId.includes('reaper_') || itemId.includes('hellfire_') || itemId.includes('executioner_')) {
+          // Сет Крита -> Автоматически генерирует Удачу!
+          if (bonusKey === 'luck') {
+            if (slot === 'body') totalBonus += Math.floor(lvl * 1.2);
+            if (slot === 'mainHand' || slot === 'twoHanded' || slot === 'head' || slot === 'ring') totalBonus += Math.floor(lvl * 0.8);
+          }
+        }
+
+        if (itemId.includes('wooden_') || itemId.includes('recruit_') || itemId.includes('militia_') || itemId.includes('iron_') || itemId.includes('guard_') || itemId.includes('order_') || itemId.includes('guardian_') || itemId.includes('centurion_') || itemId.includes('ancient_') || itemId.includes('gothic_') || itemId.includes('titan_') || itemId.includes('immortal_')) {
+          // Сет Танка -> Автоматически генерирует Выносливость!
+          if (bonusKey === 'endurance') {
+            if (slot === 'body') totalBonus += Math.floor(lvl * 1.2);
+            if (slot === 'offHand' || slot === 'head' || slot === 'legs' || slot === 'ring') totalBonus += Math.floor(lvl * 0.8);
+          }
         }
       }
     }
   });
 
+  // Аналогичный обсчет колец для лобби
   if (equipped.rings && Array.isArray(equipped.rings)) {
     equipped.rings.forEach(itemId => {
       if (!itemId) return;
-      
-      let item = ITEMS_STAT_DB[itemId];
-      if (!item && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[itemId]) {
-        item = global.SERVER_SHOP_DATABASE[itemId];
-      }
-
+      let item = ITEMS_STAT_DB[itemId] || (global.SERVER_SHOP_DATABASE ? global.SERVER_SHOP_DATABASE[itemId] : null);
       if (item) {
         if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
-        if (item.bonus) {
-          if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
-          if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
-            totalBonus += item.bonus.stats[bonusKey];
+        if (item.level) {
+          const lvl = Number(item.level);
+          if (itemId.includes('ring') || itemId.includes('band') || itemId.includes('seal') || itemId.includes('signet')) {
+            if (bonusKey === 'agility' && (itemId.includes('rogue') || itemId.includes('mercenary') || itemId.includes('thief') || itemId.includes('bandit'))) totalBonus += Math.floor(lvl * 0.8);
+            if (bonusKey === 'luck' && (itemId.includes('savage') || itemId.includes('fury') || itemId.includes('seeker') || itemId.includes('ravager'))) totalBonus += Math.floor(lvl * 0.8);
+            if (bonusKey === 'endurance' && (itemId.includes('recruit') || itemId.includes('militia') || itemId.includes('guard') || itemId.includes('order'))) totalBonus += Math.floor(lvl * 0.8);
           }
         }
       }
     });
   }
+  
   return totalBonus;
 }
 
