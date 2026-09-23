@@ -164,14 +164,27 @@ module.exports = {
   // Главный инициализатор сокет-обработчиков
   init: function(io, socket, sb) {
 
-     // --- 1. ЗАЩИЩЕННАЯ ЗАГРУЗКА И АНТИЧИТ-АУДИТ ПРИ ВХОДЕ ---
+  // --- 1. ЗАЩИЩЕННАЯ ЗАГРУЗКА И АНТИЧИТ-АУДИТ ПРИ ВХОДЕ ---
     socket.on('load_game_secure', async ({ userId, username }) => {
       try {
         const nUserId = Number(userId);
+        const sUserId = String(userId);
         console.log(`🔍 [АУДИТ ВХОДА] Проверка игрока ID: ${nUserId} (${username})...`);
 
-        // 🔥 ИСПРАВЛЕНО: Используем .maybeSingle() вместо .single()
-        // Теперь если в базе пусто, код не вылетит, а пойдет дальше!
+        // 🔥 ФИКС РЕКОННЕКТА В ГОРОДЕ: Если игрок переподключился, и у него поменялся сокет,
+        // мы пробегаемся по ОЗУ сервера и принудительно прописываем ему НОВЫЙ живой ID сокета в активных комнатах!
+        if (global.activeRooms) {
+          Object.keys(global.activeRooms).forEach(roomId => {
+            const room = global.activeRooms[roomId];
+            const fighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
+            if (fighter) {
+              console.log(`🔄 [РЕКОННЕКТ ФИКС] Боец ${fighter.name} переподключился в бою. Новый сокет: ${socket.id}`);
+              fighter.socketId = socket.id;
+              socket.join(roomId); // Автоматически возвращаем его сокет в комнату Socket.io
+            }
+          });
+        }
+
         const { data: cloudPlayer, error } = await sb.from('players')
           .select('*')
           .eq('id', nUserId)
