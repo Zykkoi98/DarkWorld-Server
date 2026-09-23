@@ -16,6 +16,8 @@ app.get('/', (req, res) => res.send('⚔️ Боевое ядро Dark World а�
 
 const server = http.createServer(app);
 const io = new Server(server, { 
+  pingTimeout: 120000,  // Сервер будет ждать ответа от смартфона целых 2 минуты (120 сек) вместо 25
+  pingInterval: 45000, // Сервер будет отправлять пинг раз в 45 секунд, снижая нагрузку на сеть
   cors: { 
     origin: [
       "https://zykkoi98.github.io",
