@@ -567,24 +567,64 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
 
     // Расчет ИИ монстров в режиме PvE
-    if (room.type === 'pve') {
+  if (room.type === 'pve') {
       room.teamB.forEach(bot => {
         if (bot.currentHp <= 0 || !bot.isBot) return;
         const aliveTargets = room.teamA.filter(a => a.currentHp > 0);
         if (aliveTargets.length === 0) return;
 
         const targetFighter = aliveTargets[rand(0, aliveTargets.length - 1)];
+        
+        // Каноничные 5 зон Бойцовского Клуба
         const zones = ["head", "breast", "torso", "belt", "legs"];
         
-        // 🔥 Динамический блок ботов: монстры до 3 уровня закрывают 2 зоны, сильные големы 5+ уровня — 3 зоны!
-        const botMaxDefends = (bot.level >= 5) ? 3 : 2;
+        // Считываем «голые» статы монстра из ОЗУ комнаты
+        const bAgi = Number(bot.agility || 1);
+        const bLuck = Number(bot.luck || 1);
+        const bEnd = Number(bot.endurance || 1);
+
+        let botMaxAttacks = 1;
+        let botMaxDefends = 2; // Базовая схема по умолчанию
+
+        // 🔥 АНАЛИЗИРУЕМ КЛАСС МОНСТРА НА ОСНОВЕ ЕГО ХАРАКТЕРИСТИК:
+        if (bEnd > bAgi && bEnd > bLuck) {
+          // СЦЕНАРИЙ А: ТАНК (Выносливость выше всего). Пример: Каменный Голем
+          botMaxAttacks = 1;
+          botMaxDefends = 3; // Ставит 3 блока, бьет 1 раз
+        } 
+        else if (bAgi > bEnd || bLuck > bEnd) {
+          // СЦЕНАРИЙ Б: ЛОВКАЧ / КРИТОВИК. Пример: Дикий Волк или Бешеный Гоблин
+          botMaxAttacks = 2; // Атакует дуалами (2 удара)
+          botMaxDefends = 2; // Но защищает всего 2 зоны!
+        }
+
+        // 1. ГЕНЕРИРУЕМ БЛОКИ МОНСТРА (в зависимости от botMaxDefends)
         const mDefend = [];
         while (mDefend.length < botMaxDefends) {
-          const rz = zones[rand(0, 4)];
+          const rz = zones[rand(0, zones.length - 1)];
           if (!mDefend.includes(rz)) mDefend.push(rz);
         }
-        
-        bot.turn = { targetUuid: targetFighter.uuid, attack: zones[rand(0, 4)], defends: mDefend };
+
+        // 2. ГЕНЕРИРУЕМ АТАКУ МОНСТРА (в зависимости от botMaxAttacks)
+        let botAttackPayload = null;
+        if (botMaxAttacks === 2) {
+          // Если монстр — ловкач, генерируем СДВОЕННЫЙ УДАР (массив из двух случайных зон)
+          const firstHit = zones[rand(0, zones.length - 1)];
+          const secondHit = zones[rand(0, zones.length - 1)];
+          botAttackPayload = [firstHit, secondHit];
+          
+          console.log(`🤖⚔️ [ИИ ДУАЛЫ] Бот ${bot.name} (Ловкач/Крит) бьет 2 раза: [${firstHit}, ${secondHit}]`);
+        } else {
+          // Обычный танк — бьет 1 раз (строка)
+          botAttackPayload = zones[rand(0, zones.length - 1)];
+        }
+
+        // Записываем собранный классовый ход ИИ в ОЗУ сервера
+        bot.turn = { 
+          targetUuid: targetFighter.uuid, 
+          attack: botAttackPayload, 
+          defends: mDefend 
+        };
       });
     }
 
@@ -604,13 +644,19 @@ module.exports = function(io, socket, sb, activeRooms) {
         target = newAlive[0];
       }
 
-      if (attacker.uuid === target.uuid) return;
+  
 
       // Превращаем атаку в массив, чтобы код одинаково обрабатывал и 1 удар (строку), и 2 удара (массив двуручника)
       if (attacker.uuid === target.uuid) return;
 
-      // 🔥 ФИКС МАТЕМАТИКИ РАУНДА: Генерируем удары в зависимости от дуалов или двуручника!
-      let attacksList = [];
+      // 🔥 УНИВЕРСАЛЬНЫЙ СБОРЩИК АТАК (ДЛЯ ИГРОКОВ И КЛАССОВЫХ МОНСТРОВ)
+    let attacksList = [];
+
+    if (attacker.isBot) {
+      // Если ходит монстр — просто берем то, что сгенерировал ему наш новый ИИ (массив из 2-х зон или 1 строку)
+      attacksList = Array.isArray(attacker.turn.attack) ? attacker.turn.attack : [attacker.turn.attack];
+    } else {
+      // Если ходит живой игрок — проверяем его дуалы/двуручники на сервере
       const mainWeapon = attacker.equipped?.mainHand;
       const offWeapon = attacker.equipped?.offHand;
 
@@ -618,20 +664,19 @@ module.exports = function(io, socket, sb, activeRooms) {
         // Двуручник — берем массив двух зон, отправленный с фронтенда
         attacksList = Array.isArray(attacker.turn.attack) ? attacker.turn.attack : [attacker.turn.attack];
       } else if (offWeapon && !isShield(offWeapon)) {
-        // 🔥 У ИГРОКА ДУАЛЫ: Оружие в левой руке! Насильно удваиваем атаку за раунд!
+        // Игрок с дуалами бьет в выбранную зону + случайную из 5 зон БК
         const primaryAttackZone = Array.isArray(attacker.turn.attack) ? attacker.turn.attack[0] : attacker.turn.attack;
-        
-        // Вторая рука бьет в случайную зону, чтобы защитник не мог легко предугадать сдвоенный блок
         const zones = ["head", "breast", "torso", "belt", "legs"];
         const leftHandZone = zones[Math.floor(Math.random() * zones.length)];
         
         attacksList = [primaryAttackZone, leftHandZone]; 
-        console.log(`⚔️⚔️ [ОБМЕН УДАРАМИ] Гладиатор ${attacker.name} бьет дуалами! Правая: ${primaryAttackZone}, Левая: ${leftHandZone}`);
+        console.log(`⚔️⚔️ [ОБМЕН УДАРАМИ] Игрок ${attacker.name} бьет дуалами! Правая: ${primaryAttackZone}, Левая: ${leftHandZone}`);
       } else {
-        // Обычный одноручник со щитом или без — строго 1 удар
+        // Обычный одноручник/щитовик — 1 выбранный удар
         const singleZone = Array.isArray(attacker.turn.attack) ? attacker.turn.attack[0] : attacker.turn.attack;
         attacksList = [singleZone];
       }
+    }
 
       const targetDefends = (target.turn && Array.isArray(target.turn.defends)) ? target.turn.defends : [];
         
