@@ -312,7 +312,7 @@ module.exports = {
         
         let finalPointsKey = dbPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
         const currentDbFreePoints = safeReadField(dbPlayer, finalPointsKey, 0);
-        const maxLegalTotalPoints = 8 + 8 + ((cloudLevel - 1) * 8);
+        const maxLegalTotalPoints = 5 + 8 + ((cloudLevel - 1) * 8);
         const projectedTotal = totalDbStatsSum + totalSpentNow + (currentDbFreePoints - totalSpentNow);
 
         if (projectedTotal > maxLegalTotalPoints || totalSpentNow > currentDbFreePoints) {
