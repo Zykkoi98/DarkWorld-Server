@@ -8,7 +8,23 @@ const CONSUMABLE_DATABASE = {
   'hp_potion_big':   { name: 'Большое зелье HP', heal: 60 },
   'fish_soup':       { name: 'Уха из таверны', heal: 40 }
 };
-
+// Умная проверка: является ли предмет в левой руке щитом по данным из shop_items_config
+function isShield(itemId) {
+  if (!itemId) return false;
+  
+  // Ищем предмет в нашей глобальной базе данных предметов из папки shop
+  const itemData = global.SERVER_SHOP_DATABASE ? global.SERVER_SHOP_DATABASE[itemId] : null;
+  
+  if (itemData && itemData.name) {
+    const name = itemData.name.toLowerCase();
+    // Если в красивом русском названии вещи есть "щит", "баклер" или "эгида" — это щит!
+    return name.includes('щит') || name.includes('баклер') || name.includes('эгида');
+  }
+  
+  // Подстраховка по системному ID, если база еще не прогрузилась
+  const id = itemId.toLowerCase();
+  return id.includes('shield') || id.includes('buckler') || id.includes('aegis') || id.includes('screen') || id.includes('mirror') || id.includes('wall');
+}
 const ITEMS_STAT_DB = {
   'rusty_sword':    { atk: 2 },
   'iron_sword':     { atk: 7 },
@@ -327,16 +343,21 @@ module.exports = function(io, socket, sb, activeRooms) {
       const mainHand = fighter.equipped.mainHand;
       const offHand = fighter.equipped.offHand;
 
-      // Сверяем тип оружия по серверной базе (алебарда/двуручник)
-      if (mainHand && ITEMS_STAT_DB[mainHand] && ITEMS_STAT_DB[mainHand].slotType === 'twoHanded') {
-        // Подстраховка, если в твоей базе ITEMS_STAT_DB появится флаг двуручника
-        serverMaxAttacks = 2; 
-      } else if (mainHand === 'heavy_halberd') {
-        serverMaxAttacks = 2; // Жесткая привязка под нашу алебарду
-      }
+      // 1. ПРОВЕРКА ЛИМИТА АТАК АНТИЧИТОМ
+      const mainItemData = global.SERVER_SHOP_DATABASE ? global.SERVER_SHOP_DATABASE[mainHand] : null;
+      const isTwoHanded = (mainHand && mainHand.includes('twoHanded')) || 
+                          (mainItemData && mainItemData.slotType === 'twoHanded') || 
+                          (mainHand === 'heavy_halberd');
 
+      if (isTwoHanded) {
+        serverMaxAttacks = 2; // Двуручник легально дает 2 удара
+      } else if (offHand && !isShield(offHand)) {
+        serverMaxAttacks = 2; // 🔥 ДУАЛЫ: Если в левой руке оружие (не щит) — разрешаем 2 удара!
+      } else {
+        serverMaxAttacks = 1;
+      }
       // Сверяем наличие щита на сервере
-      if (offHand && String(offHand).includes('shield')) {
+      if (offHand && isShield(offHand)) {
         serverMaxDefends = 3;
       } else if (Number(fighter.level || 1) <= 1) {
         serverMaxDefends = 2; // Новичкам 1 уровня разрешено 2 блока
@@ -586,9 +607,34 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (attacker.uuid === target.uuid) return;
 
       // Превращаем атаку в массив, чтобы код одинаково обрабатывал и 1 удар (строку), и 2 удара (массив двуручника)
-      const attacksList = Array.isArray(attacker.turn.attack) ? attacker.turn.attack : [attacker.turn.attack];
-      const targetDefends = (target.turn && Array.isArray(target.turn.defends)) ? target.turn.defends : [];
+      if (attacker.uuid === target.uuid) return;
 
+      // 🔥 ФИКС МАТЕМАТИКИ РАУНДА: Генерируем удары в зависимости от дуалов или двуручника!
+      let attacksList = [];
+      const mainWeapon = attacker.equipped?.mainHand;
+      const offWeapon = attacker.equipped?.offHand;
+
+      if (mainWeapon && (mainWeapon.includes('twoHanded') || mainWeapon === 'heavy_halberd')) {
+        // Двуручник — берем массив двух зон, отправленный с фронтенда
+        attacksList = Array.isArray(attacker.turn.attack) ? attacker.turn.attack : [attacker.turn.attack];
+      } else if (offWeapon && !isShield(offWeapon)) {
+        // 🔥 У ИГРОКА ДУАЛЫ: Оружие в левой руке! Насильно удваиваем атаку за раунд!
+        const primaryAttackZone = Array.isArray(attacker.turn.attack) ? attacker.turn.attack[0] : attacker.turn.attack;
+        
+        // Вторая рука бьет в случайную зону, чтобы защитник не мог легко предугадать сдвоенный блок
+        const zones = ['head', 'torso', 'legs'];
+        const leftHandZone = zones[Math.floor(Math.random() * zones.length)];
+        
+        attacksList = [primaryAttackZone, leftHandZone]; 
+        console.log(`⚔️⚔️ [ОБМЕН УДАРАМИ] Гладиатор ${attacker.name} бьет дуалами! Правая: ${primaryAttackZone}, Левая: ${leftHandZone}`);
+      } else {
+        // Обычный одноручник со щитом или без — строго 1 удар
+        const singleZone = Array.isArray(attacker.turn.attack) ? attacker.turn.attack[0] : attacker.turn.attack;
+        attacksList = [singleZone];
+      }
+
+      const targetDefends = (target.turn && Array.isArray(target.turn.defends)) ? target.turn.defends : [];
+        
       attacksList.forEach(currentAttackZone => {
         if (currentAttackZone === null) return;
 
