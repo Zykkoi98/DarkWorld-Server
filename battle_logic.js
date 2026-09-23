@@ -270,6 +270,26 @@ module.exports = function(io, socket, sb, activeRooms) {
       }
 
       activeRooms[roomId] = { id: roomId, type: 'pve', teamA, teamB, turnCount: 1, timeoutRef: null };
+      // ============================================================================
+      // 🔥 ЭКСПРЕСС-АУДИТ ХАРАКТЕРИСТИК ПРИ ЗАГРУЗКЕ В БОЙ (ЛОГ В КОНСОЛЬ СЕРВЕРА)
+      // ============================================================================
+      const testFighter = teamA[0];
+                if (testFighter) {
+                  console.log(`
+          📊 === [БОЕВОЙ АУДИТ ПЕРСОНАЖА: ${testFighter.name.toUpperCase()}] ===
+          👤 Базовые статы из БД: 💪Сил:${testFighter.strength} | 🏹Ловк:${testFighter.agility} | 🛡️Вын:${testFighter.endurance} | 🍀Уд:${testFighter.luck}
+          🎒 Надето в MainHand (Оружие): "${testFighter.equipped?.mainHand || 'НИЧЕГО'}"
+          🛡️ Надето в OffHand (Щит/Второе): "${testFighter.equipped?.offHand || 'НИЧЕГО'}"
+          ⚔️ Бонус чистого урона от вещей (atk): +${getEquipmentBonus(testFighter.equipped, 'atk')} ед.
+          💪 Бонус Силы от вещей (strength): +${getEquipmentBonus(testFighter.equipped, 'strength')} ед.
+          🏹 Итоговая боевая Ловкость (getServerAgility): ${getServerAgility(testFighter)}
+          🍀 Итоговая боевая Удача (getServerLuck): ${getServerLuck(testFighter)}
+          🛡️ Итоговая боевая Защита (getServerDef): ${getServerDef(testFighter)} ед.
+          💥 ИТОГОВАЯ БОЕВАЯ АТАКА СЕРВЕРА (getServerAtk): ${getServerAtk(testFighter)} ед.
+          ======================================================
+                  `);
+                }
+
       socket.join(roomId);
       
       socket.emit('battle_init_data', {
