@@ -222,7 +222,7 @@ module.exports = {
             });
 
             updatePayload[cloudPlayer.level !== undefined ? 'level' : 'level'] = correctLevel;
-            updatePayload[pointsKey] = maxLegalPoints - 8; 
+            updatePayload[pointsKey] = maxLegalPoints - 5; 
             updatePayload['hp'] = getServerMaxHp({ endurance: 1, equipped: cloudPlayer.equipped || {} });
 
             needsDbSync = true;
