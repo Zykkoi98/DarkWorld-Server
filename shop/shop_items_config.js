@@ -113,7 +113,7 @@ const GAME_ITEMS_DATABASE = {
   // === УРОВЕНЬ 1: СЕТ ДИКАРЯ ===
   'scratched_axe_1': { name: 'Поцарапанный топор', icon: '🪓', slotType: 'mainHand', price: 12, level: 1, req: { luck: 3 }, desc: 'Старый топор дровосека. Повышает крит.', bonus: { atk: 3, mf_crit: 10 } },
   'scratched_club_1': { name: 'Шипастая заноза (Л)', icon: '🪵', slotType: 'offHand', price: 12, level: 1, req: { luck: 3 }, desc: 'Оружие в левую руку. Добавляет ярости.', bonus: { atk: 1, mf_crit: 5 } },
-  'rusty_splitter_1': { name: 'Ржавый Колун', icon: '🪓', slotType: 'twoHanded', price: 20, level: 1, req: { luck: 4 }, desc: 'Тяжелый двуручник. Бьет сразу в 2 ЗОНЫ АТАК И!', bonus: { atk: 5, mf_crit: 15 } },
+  'rusty_splitter_1': { name: 'Ржавый Колун', icon: '🪓', slotType: 'twoHanded', price: 20, level: 1, req: { luck: 4 }, desc: 'Тяжелый двуручник.', bonus: { atk: 5, mf_crit: 15 } },
   'savage_band_1': { name: 'Повязка Дикаря', icon: '🥻', slotType: 'head', price: 8, level: 1, req: { luck: 2 }, desc: 'Кожаный ремешок, стягивающий волосы.', bonus: { def: 1, stats: { luck: 1 }, mf_crit: 5 } },
   'savage_vest_1': { name: 'Обрез Дикаря', icon: '👕', slotType: 'body', price: 14, level: 1, req: { luck: 3 }, desc: 'Грубая меховая накидка.', bonus: { def: 2, stats: { luck: 1 }, mf_crit: 10 } },
   'savage_boots_1': { name: 'Обмотки Дикаря', icon: '🥾', slotType: 'legs', price: 8, level: 1, req: { luck: 2 }, desc: 'Шкуры, намотанные на ноги.', bonus: { def: 1, mf_crit: 5 } },
@@ -134,7 +134,7 @@ const GAME_ITEMS_DATABASE = {
   // === УРОВЕНЬ 5: СЕТ ИСКАТЕЛЯ ===
   'seeker_axe_3': { name: 'Топор Искателя', icon: '🪓', slotType: 'mainHand', price: 55, level: 5, req: { luck: 11 }, desc: 'Пластинчатый топор.', bonus: { atk: 8, mf_crit: 20 } },
   'seeker_fist_3': { name: 'Шип Искателя (Л)', icon: '🗡️', slotType: 'offHand', price: 55, level: 5, req: { luck: 11 }, desc: 'Оружие левой руки.', bonus: { atk: 4, stats: { luck: 1 }, mf_crit: 10 } },
-  'heavy_halberd': { name: 'Тяжелая алебарда', icon: '🔱', slotType: 'twoHanded', price: 120, level: 5, req: { luck: 13 }, desc: 'Двуручное древковое оружие. Бьет в 2 ЗОНЫ АТАК И!', bonus: { atk: 14, mf_crit: 40 } },
+  'heavy_halberd': { name: 'Тяжелая алебарда', icon: '🔱', slotType: 'twoHanded', price: 120, level: 5, req: { luck: 13 }, desc: 'Двуручное древковое оружие. ', bonus: { atk: 14, mf_crit: 40 } },
   'seeker_hood_3': { name: 'Капюшон Искателя', icon: '🥷', slotType: 'head', price: 38, level: 5, req: { luck: 9 }, desc: 'Кожаный шлем.', bonus: { def: 2, stats: { luck: 2 }, mf_crit: 15 } },
   'seeker_hauberk_3': { name: 'Лорка Искателя', icon: '👕', slotType: 'body', price: 65, level: 5, req: { luck: 12 }, desc: 'Усиленная куртка.', bonus: { def: 5, stats: { luck: 3 }, mf_crit: 25 } },
   'seeker_boots_3': { name: 'Сапоги Искателя', icon: '🥾', slotType: 'legs', price: 38, level: 5, req: { luck: 9 }, desc: 'Плотные сапоги.', bonus: { def: 2, stats: { luck: 1 }, mf_crit: 15 } },
@@ -145,7 +145,7 @@ const GAME_ITEMS_DATABASE = {
   // === УРОВЕНЬ 7: СЕТ ГОРЦА ===
   'highland_claymore_4': { name: 'Клеймор Горца', icon: '⚔️', slotType: 'mainHand', price: 100, level: 7, req: { luck: 16 }, desc: 'Шотландский палаш.', bonus: { atk: 12, mf_crit: 25 } },
   'highland_dirk_4': { name: 'Дирк Горца (Л)', icon: '🗡️', slotType: 'offHand', price: 100, level: 7, req: { luck: 16 }, desc: 'Кинжал левой руки.', bonus: { atk: 6, stats: { luck: 2 }, mf_crit: 15 } },
-  'highland_broadsword_4': { name: 'Двуруч Горца', icon: '⚔️', slotType: 'twoHanded', price: 180, level: 7, req: { luck: 18 }, desc: 'Тяжелый меч. Бьет в 2 ЗОНЫ АТАК И.', bonus: { atk: 18, mf_crit: 50 } },
+  'highland_broadsword_4': { name: 'Двуруч Горца', icon: '⚔️', slotType: 'twoHanded', price: 180, level: 7, req: { luck: 18 }, desc: 'Тяжелый меч.', bonus: { atk: 18, mf_crit: 50 } },
   'highland_cap_4': { name: 'Берет Горца', icon: '🥻', slotType: 'head', price: 70, level: 7, req: { luck: 14 }, desc: 'Плотный шерстяной берет.', bonus: { def: 3, stats: { luck: 3 }, mf_crit: 20 } },
   'highland_kilt_4': { name: 'Килт Горца', icon: '👕', slotType: 'body', price: 120, level: 7, req: { luck: 18 }, desc: 'Плотная клетчатая тартан-броня.', bonus: { def: 8, stats: { luck: 4 }, mf_crit: 30 } },
   'highland_brogues_4': { name: 'Броги Горца', icon: '🥾', slotType: 'legs', price: 70, level: 7, req: { luck: 14 }, desc: 'Кожаная перфорированная обувь.', bonus: { def: 3, stats: { strength: 2 }, mf_crit: 20 } },
@@ -167,7 +167,7 @@ const GAME_ITEMS_DATABASE = {
   // === УРОВЕНЬ 11: СЕТ БЕРСЕРКА ===
   'berserk_machete_6': { name: 'Мачете Берсерка', icon: '⚔️', slotType: 'mainHand', price: 260, level: 11, req: { luck: 29 }, desc: 'Широкое кромсающее лезвие.', bonus: { atk: 24, mf_crit: 45 } },
   'berserk_hook_6': { name: 'Серп Берсерка (Л)', icon: '🗡️', slotType: 'offHand', price: 260, level: 11, req: { luck: 29 }, desc: 'Левый зазубренный тесак ярости.', bonus: { atk: 12, stats: { luck: 4 }, mf_crit: 25 } },
-  'berserk_greataxe_6': { name: 'Секира Раздора', icon: '🪓', slotType: 'twoHanded', price: 420, level: 11, req: { luck: 32 }, desc: 'Огромный боевой топор. Бьет в 2 ЗОНЫ АТАК И.', bonus: { atk: 35, mf_crit: 75 } },
+  'berserk_greataxe_6': { name: 'Секира Раздора', icon: '🪓', slotType: 'twoHanded', price: 420, level: 11, req: { luck: 32 }, desc: 'Огромный боевой топор.', bonus: { atk: 35, mf_crit: 75 } },
   'berserk_crown_6': { name: 'Корона Ярости', icon: '👑', slotType: 'head', price: 190, level: 11, req: { luck: 25 }, desc: 'Венец безумного воителя.', bonus: { def: 5, stats: { luck: 5 }, mf_crit: 30 } },
   'berserk_cuirass_6': { name: 'Кираса Берсерка', icon: '👕', slotType: 'body', price: 310, level: 11, req: { luck: 32 }, desc: 'Изувеченный в боях стальной нагрудник.', bonus: { def: 14, stats: { luck: 6, strength: 2 }, mf_crit: 45 } },
   'berserk_greaves_6': { name: 'Поножи Берсерка', icon: '🥾', slotType: 'legs', price: 190, level: 11, req: { luck: 25 }, desc: 'Латная защита голеней со сколами.', bonus: { def: 5, stats: { strength: 3 }, mf_crit: 30 } },
@@ -177,7 +177,7 @@ const GAME_ITEMS_DATABASE = {
   // === УРОВЕНЬ 13: СЕТ КРОВИ ===
   'blood_cleaver_7': { name: 'Мясник Крови', icon: '🪓', slotType: 'mainHand', price: 380, level: 13, req: { luck: 38 }, desc: 'Кровавая секира, разрывающая плоть.', bonus: { atk: 34, mf_crit: 50 } },
   'blood_hook_7': { name: 'Зацеп Крови (Л)', icon: '⛓️', slotType: 'offHand', price: 380, level: 13, req: { luck: 38 }, desc: 'Левый зазубренный серп для критов.', bonus: { atk: 18, stats: { luck: 4 }, mf_crit: 25 } },
-  'bloodlust_harvester_7': { name: 'Жнец Крови', icon: '🔱', slotType: 'twoHanded', price: 620, level: 13, req: { luck: 42 }, desc: 'Двуручная коса. Бьет сразу в 2 ЗОНЫ АТАК И.', bonus: { atk: 45, mf_crit: 85 } },
+  'bloodlust_harvester_7': { name: 'Жнец Крови', icon: '🔱', slotType: 'twoHanded', price: 620, level: 13, req: { luck: 42 }, desc: 'Двуручная коса.', bonus: { atk: 45, mf_crit: 85 } },
   'blood_mask_7': { name: 'Маска Крови', icon: '🎭', slotType: 'head', price: 280, level: 13, req: { luck: 34 }, desc: 'Устрашающее забрало культа.', bonus: { def: 6, stats: { luck: 5 }, mf_crit: 35 } },
   'bloodlust_plate_7': { name: 'Латы Кровавого Натиска', icon: '👕', slotType: 'body', price: 450, level: 13, req: { luck: 42 }, desc: 'Стальной нагрудник, закаленный в боях.', bonus: { def: 18, stats: { luck: 7, strength: 4 }, mf_crit: 50 } },
   'blood_boots_7': { name: 'Сапоги Крови', icon: '🥾', slotType: 'legs', price: 280, level: 13, req: { luck: 34 }, desc: 'Кованая тяжелая обувь.', bonus: { def: 6, stats: { strength: 4 }, mf_crit: 30 } },
@@ -188,7 +188,7 @@ const GAME_ITEMS_DATABASE = {
   // === УРОВЕНЬ 15: СЕТ ТЕМНОГО ГЛАДИАТОР А ===
   'reaper_blade_8': { name: 'Клинок Жнеца', icon: '⚔️', slotType: 'mainHand', price: 520, level: 15, req: { luck: 48 }, desc: 'Тяжелый меч, несущий гибель.', bonus: { atk: 44, mf_crit: 60 } },
   'reaper_spike_8': { name: 'Шип Жнеца (Л)', icon: '🗡️', slotType: 'offHand', price: 520, level: 15, req: { luck: 48 }, desc: 'Оружие левой руки для пробития уворота.', bonus: { atk: 22, stats: { luck: 5 }, mf_antiinv: 35 } },
-  'oblivion_scythe_8': { name: 'Коса Забвения', icon: '🔱', slotType: 'twoHanded', price: 850, level: 15, req: { luck: 52 }, desc: 'Огромное двуручное лезвие. Бьет в 2 ЗОНЫ АТАК И.', bonus: { atk: 58, mf_crit: 100 } },
+  'oblivion_scythe_8': { name: 'Коса Забвения', icon: '🔱', slotType: 'twoHanded', price: 850, level: 15, req: { luck: 52 }, desc: 'Огромное двуручное лезвие.', bonus: { atk: 58, mf_crit: 100 } },
   'reaper_helm_8': { name: 'Шлем Жнеца', icon: '🪖', slotType: 'head', price: 390, level: 15, req: { luck: 42 }, desc: 'Глухой шлем паладина тьмы.', bonus: { def: 8, stats: { luck: 6 }, mf_crit: 40 } },
   'reaper_cuirass_8': { name: 'Латы Жнеца', icon: '👕', slotType: 'body', price: 600, level: 15, req: { luck: 52 }, desc: 'Тяжелая литая броня разрушения.', bonus: { def: 24, stats: { luck: 8, strength: 5 }, mf_crit: 60 } },
   'reaper_boots_8': { name: 'Сапоги Жнеца', icon: '🥾', slotType: 'legs', price: 390, level: 15, req: { luck: 42 }, desc: 'Шипованные боевые ботинки.', bonus: { def: 8, stats: { strength: 5 }, mf_crit: 35 } },
@@ -199,7 +199,7 @@ const GAME_ITEMS_DATABASE = {
   // === УРОВЕНЬ 17: СЕТ ОГНЯ ===
   'hellfire_axe_9': { name: 'Топор Адского Пламени', icon: '🪓', slotType: 'mainHand', price: 750, level: 17, req: { luck: 58 }, desc: 'Оружие, раскаленное добела.', bonus: { atk: 56, mf_crit: 75 } },
   'hellfire_claws_9': { name: 'Когти Пламени (Л)', icon: '🧤', slotType: 'offHand', price: 750, level: 17, req: { luck: 58 }, desc: 'Огненные шипы левой руки.', bonus: { atk: 30, stats: { luck: 6 }, mf_crit: 40 } },
-  'inferno_breaker_9': { name: 'Разрушитель Инферно', icon: '🔨', slotType: 'twoHanded', price: 1100, level: 17, req: { luck: 64 }, desc: 'Двуручный молот преисподней. Бьет в 2 ЗОНЫ АТАК И.', bonus: { atk: 75, mf_crit: 120 } },
+  'inferno_breaker_9': { name: 'Разрушитель Инферно', icon: '🔨', slotType: 'twoHanded', price: 1100, level: 17, req: { luck: 64 }, desc: 'Двуручный молот преисподней.', bonus: { atk: 75, mf_crit: 120 } },
   'hellfire_crown_9': { name: 'Венец Инферно', icon: '👑', slotType: 'head', price: 540, level: 17, req: { luck: 52 }, desc: 'Корона из застывшей лавы.', bonus: { def: 10, stats: { luck: 8 }, mf_crit: 50 } },
   'hellfire_plate_9': { name: 'Латы Адского Пламени', icon: '👕', slotType: 'body', price: 880, level: 17, req: { luck: 64 }, desc: 'Магматический непробиваемый доспех.', bonus: { def: 30, stats: { luck: 10, strength: 6 }, mf_crit: 70 } },
   'hellfire_boots_9': { name: 'Сапоги Инферно', icon: '🥾', slotType: 'legs', price: 540, level: 17, req: { luck: 52 }, desc: 'Ботинки, оставляющие огненный след.', bonus: { def: 10, stats: { strength: 6 }, mf_crit: 45 } },
