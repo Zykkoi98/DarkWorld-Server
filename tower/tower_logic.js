@@ -66,7 +66,13 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       // 2. Загружаем данные игрока и пула ботов из Supabase
       const { data: dbPlayer } = await sb.from('players').select('*').eq('id', nUserId).single();
-      const { data: allBots, error: botsErr } = await sb.from('bots').select('*');
+      const { data: allBots, error: botsErr } = await sb.from('bots')
+        .select('*')
+        .eq('category', 'tower'); // Жесткий античит-фильтр группы спавна
+
+      if (!dbPlayer || botsErr || !allBots || allBots.length === 0) {
+        return socket.emit('error', 'В базе данных Supabase не найдены шаблоны монстров с категорией "tower".');
+      }
 
       if (!dbPlayer || botsErr || !allBots || allBots.length === 0) {
         return socket.emit('error', 'Ошибка загрузки данных Башни.');
