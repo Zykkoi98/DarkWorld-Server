@@ -298,7 +298,30 @@ module.exports = function(io, socket, sb, activeRooms) {
         });
       }
 
-      activeRooms[roomId] = { id: roomId, type: 'pve', teamA, teamB, turnCount: 1, timeoutRef: null };
+     activeRooms[roomId] = { id: roomId, type: 'pve', teamA, teamB, turnCount: 1, timeoutRef: null };
+      socket.join(roomId);
+      
+      // 1. СНАЧАЛА СРАЗУ ИНИЦИАЛИЗИРУЕМ БОЙ НА КЛИЕНТЕ
+      socket.emit('battle_init_data', {
+        roomId, turnCount: 1, myUuid: `player_${dbPlayer.id}`,
+        teamA: sanitizeTeam(teamA), teamB: sanitizeTeam(teamB)
+      });
+
+      // 2. ЗАТЕМ ПРОВЕРЯЕМ НА 0 HP И ДЕЛАЕМ ЭКСПРЕСС-ФИНАЛ
+      const startCheckTeamA = teamA.every(f => f.currentHp <= 0);
+      const startCheckTeamB = teamB.every(f => f.currentHp <= 0);
+
+      if (startCheckTeamA || startCheckTeamB) {
+        console.log(`🏁 [PvE ЭКСПРЕСС-ФИНАЛ] Игрок зашел в PvE бой с 0 HP. Мгновенное завершение.`);
+        // Маленький таймаут, чтобы страница успела отрисовать интерфейс
+        setTimeout(() => {
+          executeRoundCalculations(roomId, activeRooms, io);
+        }, 200);
+        return; // Прерываем функцию, чтобы не запускался обычный таймер раунда
+      }
+
+      // 3. ЕСЛИ ВСЕ ЖИВЫ — ЗАПУСКАЕМ СТАНДАРТНЫЙ ТАЙМЕР ХОДА
+      startServerTurnTimer(roomId, activeRooms, io);
       // ============================================================================
       // 🔥 ЭКСПРЕСС-АУДИТ ХАРАКТЕРИСТИК ПРИ ЗАГРУЗКЕ В БОЙ (ЛОГ В КОНСОЛЬ СЕРВЕРА)
       // ============================================================================
@@ -539,14 +562,29 @@ module.exports = function(io, socket, sb, activeRooms) {
       equipped: p2Data.equipped || {}, inventory: p2Data.inventory || {}, afkTurns: 0
     }];
 
-    activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, timeoutRef: null };
+activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, timeoutRef: null };
     console.log(`⚔️ [PvP ЗАПУСК] Комната: ${roomId} для ${playerData.name} vs ${p2Data.name}`);
     
+    // 1. СНАЧАЛА ОБЯЗАТЕЛЬНО ОТПРАВЛЯЕМ ИГРОКОВ В БОЙ
     setTimeout(() => {
       io.emit('arena_lobby_updated');
       io.emit('arena_redirect_to_battle', { roomId: roomId });
     }, 150);
 
+    // 2. ЗАТЕМ ПРОВЕРЯЕМ НА 0 HP И ДЕЛАЕМ ЭКСПРЕСС-ФИНАЛ
+    const startCheckTeamA = teamA.every(f => f.currentHp <= 0);
+    const startCheckTeamB = teamB.every(f => f.currentHp <= 0);
+
+    if (startCheckTeamA || startCheckTeamB) {
+      console.log(`🏁 [PvP ЭКСПРЕСС-ФИНАЛ] Один из гладиаторов зашел на Арену с 0 HP. Мгновенное завершение.`);
+      // Вызываем расчет раунда через маленький таймаут, чтобы клиенты успели загрузить страницу боя
+      setTimeout(() => {
+        executeRoundCalculations(roomId, activeRooms, io);
+      }, 300);
+      return; // Здесь return легален, так как редирект уже улетел в сеть
+    }
+
+    // 3. ЕСЛИ ВСЕ ЖИВЫ — ЗАПУСКАЕМ ОБЫЧНЫЙ ТАЙМЕР ХОДА
     startServerTurnTimer(roomId, activeRooms, io);
   }
 
