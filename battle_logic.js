@@ -703,7 +703,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         const attackerMfAntiInv = (attackerAgi * 4) + getEquipmentBonus(attacker.equipped, 'mf_antiinv');
 
         let finalEvadeChance = 5 + (targetAgi - attackerAgi) * 1 + Math.floor((targetMfInv - attackerMfAntiInv) / 10);
-        const evadeChance = Math.min(75, Math.max(5, finalEvadeChance));
+        const evadeChance = Math.min(70, Math.max(5, finalEvadeChance));
 
         if (rand(1, 100) <= evadeChance) {
           logs.push(`🏹 <strong>${target.name}</strong> увернулся от удара <strong>${attacker.name}</strong> в ${ZONE_NAMES[currentAttackZone]}!`);
