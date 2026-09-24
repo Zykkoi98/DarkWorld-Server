@@ -407,32 +407,58 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // --- 8. ОБРАБОТЧИК: ИСПОЛЬЗОВАНИЕ ЗЕЛИЙ В БОЮ ---
-  socket.on('instant_use_potion', async ({ roomId }) => {
-    const room = activeRooms[roomId];
-    if (!room) return;
+   socket.on('instant_use_potion', async ({ roomId }) => {
+    try {
+      const room = activeRooms[roomId];
+      if (!room) return;
 
-    const fighter = room.teamA.find(p => p.socketId === socket.id);
-    if (!fighter || fighter.currentHp <= 0) return;
+      // 🔥 ИСПРАВЛЕНО: Ищем тебя в обеих командах, чтобы в PvP за команду Б сервер не падал!
+      const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
+      if (!fighter || fighter.currentHp <= 0) return;
 
-    const potionSlot = fighter.equipped?.potion;
+      const potionSlot = fighter.equipped?.potion;
 
-    if (potionSlot && typeof potionSlot === 'object' && potionSlot.id && potionSlot.count > 0) {
-      const potionData = CONSUMABLE_DATABASE[potionSlot.id];
+      if (potionSlot && typeof potionSlot === 'object' && potionSlot.id && potionSlot.count > 0) {
+        
+        // 🔥 ИСПРАВЛЕНО: Читаем данные из новой базы GAME_ITEMS_DATABASE, так как старую ты удалил
+        const itemConfig = GAME_ITEMS_DATABASE[potionSlot.id];
+        
+        // Вытаскиваем хил или берём резервное значение, если в конфиге пусто
+        let healAmount = 25;
+        let potionName = "Зелье HP";
+        
+        if (itemConfig) {
+          potionName = itemConfig.name || "Зелье HP";
+          healAmount = itemConfig.heal || itemConfig.bonus?.heal || itemConfig.bonus?.stats?.heal || 0;
+        }
+        
+        // Подстраховка дефолтных банок
+        if (!healAmount) {
+          if (potionSlot.id === 'hp_potion_small') { healAmount = 25; potionName = "Малое зелье HP"; }
+          if (potionSlot.id === 'hp_potion_big') { healAmount = 60; potionName = "Большое зелье HP"; }
+          if (potionSlot.id === 'fish_soup') { healAmount = 40; potionName = "Уха из таверны"; }
+        }
 
-      if (potionData) {
-        fighter.currentHp = Math.min(fighter.maxHp, fighter.currentHp + potionData.heal);
+        // Твой каноничный код логики применения
+        fighter.currentHp = Math.min(fighter.maxHp, fighter.currentHp + healAmount);
         potionSlot.count--;
         let displayCountLog = potionSlot.count;
 
         if (potionSlot.count <= 0) fighter.equipped.potion = null;
 
+        // Твоя каноничная отправка пакета на фронтенд
         io.to(roomId).emit('battle_effect_potion', {
-          uuid: fighter.uuid, currentHp: fighter.currentHp, equipped: fighter.equipped, 
-          logMsg: `🧪 <strong>${fighter.name}</strong> выпил ${potionData.name} (+${potionData.heal} HP)! Осталось: ${displayCountLog} шт.`
+          uuid: fighter.uuid, 
+          currentHp: fighter.currentHp, 
+          equipped: fighter.equipped, 
+          logMsg: `🧪 <strong>${fighter.name}</strong> выпил ${potionName} (+${healAmount} HP)! Осталось: ${displayCountLog} шт.`
         });
 
         await sb.from('players').update({ hp: fighter.currentHp, equipped: fighter.equipped }).eq('id', Number(fighter.id));
       }
+    } catch (err) {
+      // Защитный барьер: если что-то пойдёт не так, сервер выдаст лог, но НЕ упадёт в 503!
+      console.error("🚨 Ошибка применения банки в бою:", err.message);
     }
   });
 
