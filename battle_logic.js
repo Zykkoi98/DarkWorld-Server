@@ -240,7 +240,47 @@ module.exports = function(io, socket, sb, activeRooms) {
     );
     if (activeRoomId) socket.emit('arena_redirect_to_battle', { roomId: activeRoomId });
   });
+   // 🔥 [НОВОЕ] СЕРВЕРНЫЙ ОБРАБОТЧИК: ОТДАЧА ТОЧНЫХ ХАРАКТЕРИСТИК ДЛЯ ПОПОГВЕРА
+  socket.on('get_fighter_exact_stats', ({ roomId, targetUuid }, callback) => {
+    try {
+      const room = activeRooms[roomId];
+      if (!room) return callback({ error: "Комната боя не найдена" });
 
+      // Ищем бойца (игрока или бота) во всей комнате по его уникальному UUID
+      const fighter = [...room.teamA, ...room.teamB].find(f => f.uuid === targetUuid);
+      if (!fighter) return callback({ error: "Боец не найден в ОЗУ" });
+
+      // Собираем статы, используя ТВОИ точные серверные функции расчета боя!
+      const totalStr = Number(fighter.strength || 1) + (getEquipmentBonus ? getEquipmentBonus(fighter.equipped, 'strength') : 0);
+      const totalAgi = Number(fighter.agility || 1) + (getEquipmentBonus ? getEquipmentBonus(fighter.equipped, 'agility') : 0);
+      const totalEnd = Number(fighter.endurance || 1) + (getEquipmentBonus ? getEquipmentBonus(fighter.equipped, 'endurance') : 0);
+      const totalLuck = Number(fighter.luck || 1) + (getEquipmentBonus ? getEquipmentBonus(fighter.equipped, 'luck') : 0);
+
+      // Считаем модификаторы БК по твоим серверным формулам
+      const mfInv = (totalAgi * 10) + (getEquipmentBonus ? getEquipmentBonus(fighter.equipped, 'mf_inv') : 0);
+      const mfAntiInv = (totalAgi * 4) + (getEquipmentBonus ? getEquipmentBonus(fighter.equipped, 'mf_antiinv') : 0);
+      const mfCrit = (totalLuck * 10) + (getEquipmentBonus ? getEquipmentBonus(fighter.equipped, 'mf_crit') : 0);
+      const mfAntiCrit = (totalLuck * 4) + (getEquipmentBonus ? getEquipmentBonus(fighter.equipped, 'mf_anticrit') : 0);
+
+      // Отправляем клиенту в колбэк чистый, проверенный сервером пакет
+      callback({
+        success: true,
+        stats: [
+          { label: '💪 Сила', value: totalStr },
+          { label: '🏹 Ловкость', value: totalAgi },
+          { label: '🛡️ Выносливость', value: totalEnd },
+          { label: '🍀 Удача', value: totalLuck },
+          { label: '🏹 Мф. Уворота', value: `+${mfInv}%` },
+          { label: '🎯 Мф. Антиуворота', value: `+${mfAntiInv}%` },
+          { label: '💥 Мф. Крита', value: `+${mfCrit}%` },
+          { label: '🛡️ Мф. Антикрита', value: `+${mfAntiCrit}%` }
+        ]
+      });
+    } catch (err) {
+      console.error("🚨 Ошибка при сборке статов для поповера:", err.message);
+      callback({ error: "Внутренняя ошибка сервера" });
+    }
+  });
   // --- 6. ОБРАБОТЧИК: ЗАПУСК PvE БОЯ (ВЫХОД НА ПРИРОДУ) ---
   socket.on('search_pve_match', async ({ playerData, monsterKey, count }) => {
     try {
