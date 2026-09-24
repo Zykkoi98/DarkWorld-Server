@@ -6,11 +6,11 @@ const dbHelper = require('../db_helper');
 
 // 🔥 СЕРВЕРНЫЙ КАТАЛОГ МАГАЗИНА (SHOP_LOGIC.JS) — ВСЕ 3 КЛАССА НА 10 УРОВНЕЙ
 const SERVER_SHOP_DATABASE = {
-  // === 🧪 РАСХОДНИКИ БОЯ ===
+   // === 🧪 РАСХОДНИКИ И БОЕВОЙ ПРОВИАНТ  ===
   'hp_potion_small':   { price: 6,   level: 1, type: 'consumable', slotType: 'potion' },
   'hp_potion_big':     { price: 15,  level: 1, type: 'consumable', slotType: 'potion' },
   'fish_soup':         { price: 10,  level: 1, type: 'consumable', slotType: 'potion' },
-
+  'blessing_scroll':   { price: 20,  level: 1, type: 'consumable', slotType: 'scroll' },
   // === 🏹 ЛОВКАЧ: УРОВЕНЬ 1 (СЕТ ПЛУТА) ===
   'rogue_knife_1':     { price: 10,  level: 1, reqAgility: 3,  type: 'equipment', slotType: 'mainHand' },
   'rogue_offknife_1':  { price: 10,  level: 1, reqAgility: 3,  type: 'equipment', slotType: 'offHand' },  // Вторая пушка!

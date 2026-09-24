@@ -1,4 +1,9 @@
 const GAME_ITEMS_DATABASE = {
+  // === 🧪 РАСХОДНИКИ И БОЕВОЙ ПРОВИАНТ ===
+  'hp_potion_small': { name: 'Малое зелье HP', icon: '🧪', slotType: 'potion', price: 6, level: 1, desc: 'Мгновенно восстанавливает +25 HP прямо в бою.' },
+  'hp_potion_big':   { name: 'Большое зелье HP', icon: '⚗️', slotType: 'potion', price: 15, level: 1, desc: 'Сильный эликсир. Восстанавливает +60 HP прямо в бою.' },
+  'fish_soup':       { name: 'Уха из таверны', icon: '🥣', slotType: 'potion', price: 10, level: 1, desc: 'Сытный перекус. Восстанавливает +40 HP.' },
+  'blessing_scroll': { name: 'Свиток Благословения', icon: '📜', slotType: 'scroll', price: 20, level: 1, desc: 'Древний свиток для будущих тактических бонусов.' },
    // === УРОВЕНЬ 1: СЕТ ПЛУТА ===
   'rogue_knife_1': { name: 'Нож Плута', icon: '🗡️', slotType: 'mainHand', price: 10, level: 1, req: { agility: 3 }, desc: 'Легкий нож для финтов.', bonus: { atk: 2, mf_antiinv: 10 } },
   'rogue_offknife_1': { name: 'Левый Нож Плута', icon: '🗡️', slotType: 'offHand', price: 10, level: 1, req: { agility: 3 }, desc: 'Нож в левую руку. Повышает Ловкость.', bonus: { atk: 1, stats: { agility: 1 } } },
