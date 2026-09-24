@@ -10,7 +10,28 @@ module.exports = function(io, socket, sb, activeRooms) {
 
   const getServerMaxHp = dbHelper.getServerMaxHp;
   const triggerLoadGameSuccess = dbHelper.triggerLoadGameSuccess;
+// 🔥 [НОВОЕ] ОБРАБОТЧИК: ОТДАЧА СТАТУСА КУЛДАУНА ИЗ ТАБЛИЦЫ ТАЙМЕРОВ С СЕРВЕРА
+  socket.on('check_tower_cooldown_request', async ({ userId }) => {
+    try {
+      const nUserId = Number(userId);
+      
+      const { data: timerRow } = await sb.from('player_timers')
+        .select('ends_at')
+        .eq('user_id', nUserId)
+        .eq('timer_type', 'tower_cooldown')
+        .maybeSingle();
 
+      if (timerRow && new Date(timerRow.ends_at) > new Date()) {
+        // Если КД найдено и оно еще тикает — шлем точное время клиенту
+        socket.emit('tower_cooldown_status', { active: true, ends_at: timerRow.ends_at });
+      } else {
+        // Если КД нет или оно уже истекло — обнуляем бан на фронтенде
+        socket.emit('tower_cooldown_status', { active: false });
+      }
+    } catch (err) {
+      console.error("🚨 Ошибка проверки КД в Башне:", err.message);
+    }
+  });
   // --- 🏰 ОБРАБОТЧИК А: СТАРТ PvP/PvE ЭТАЖА И ПРОВЕРКА ТАЙМЕРА ---
   socket.on('start_tower_battle_secure', async ({ userId, currentFloor }) => {
     try {
