@@ -875,7 +875,7 @@ module.exports = function(io, socket, sb, activeRooms) {
       
     if (correctLevel > oldLevel) {
         const levelsGained = correctLevel - oldLevel;
-        player.statpoints = Number(player.statpoints || player.statPoints || 0) + (levelsGained * 8);
+        player.statpoints = Number(player.statpoints || player.statPoints || 0) + (levelsGained * 5);
         player.level = correctLevel;
         player.currentHp = dbHelper.getServerMaxHp(player);
       }
@@ -984,7 +984,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         const correctLevelA = dbHelper.getServerCorrectLevelByXp(xpA);
         if (correctLevelA > levelA) {
-          statpointsA += (correctLevelA - levelA) * 8;
+          statpointsA += (correctLevelA - levelA) * 5;
           levelA = correctLevelA;
         }
 
@@ -999,7 +999,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
         if (correctLevelB > levelB) {
-          statpointsB += (correctLevelB - levelB) * 8;
+          statpointsB += (correctLevelB - levelB) * 5;
           levelB = correctLevelB;
         }
 
@@ -1014,7 +1014,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
         if (correctLevelB > levelB) {
-          statpointsB += (correctLevelB - levelB) * 8;
+          statpointsB += (correctLevelB - levelB) * 5;
           levelB = correctLevelB;
         }
 
