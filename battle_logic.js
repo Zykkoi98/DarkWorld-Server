@@ -1,3 +1,4 @@
+const towerFinisher = require('./tower/tower_battle_finisher');
 const dbHelper = require('./db_helper');
 const GAME_ITEMS_DATABASE = require('./shop/shop_items_config'); 
 
@@ -698,8 +699,18 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
       if (!isTeamADead && isTeamBDead) result = 'win';
       if (isTeamADead && !isTeamBDead) result = 'lose';
 
-      if (room.type === 'pve') finalizePveBattle(room, result, logs, room.turnCount, io);
-      else if (room.type === 'pvp') finalizePvpBattle(room, result, logs, room.turnCount, io);
+      if (room.type === 'pve') {
+        if (room.isTower) {
+          // Если игрок ушёл в АФК в Башне — вызываем новый файл Башни
+          towerFinisher.finalizeTowerBattleSecure(room, result, sb);
+        } else {
+          // Если обычный PvE-лес — стандартная функция
+          finalizePveBattle(room, result, logs, room.turnCount, io);
+        }
+      }
+      else if (room.type === 'pvp') {
+        finalizePvpBattle(room, result, logs, room.turnCount, io);
+      }
       return;
     }
 
@@ -971,12 +982,16 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
         });
       }
 
-        if (room.type === 'pve') {
-            finalizePveBattle(room, result, logs, currentRound, io);
-        } else if (room.type === 'pvp') {
-            finalizePvpBattle(room, result, logs, currentRound, io);
+      if (room.type === 'pve') {
+        if (room.isTower) {
+          // Вызов нового изолированного файла Башни
+          towerFinisher.finalizeTowerBattleSecure(room, result, sb);
+        } else {
+          finalizePveBattle(room, result, logs, currentRound, io);
         }
-      
+      } else if (room.type === 'pvp') {
+        finalizePvpBattle(room, result, logs, currentRound, io);
+      }
       setTimeout(() => {
         delete activeRooms[room.id];
         console.log(`🗑️ [ОЗУ] Комната ${room.id} полностью выгружена.`);
