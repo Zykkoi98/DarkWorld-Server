@@ -225,7 +225,7 @@ module.exports = function(io, socket, sb) {
     }
   });
    // --- ОБРАБОТЧИК В: НАВСЕГДА УНИЧТОЖИТЬ / ВЫБРОСИТЬ ПРЕДМЕТ ИЗ БД ---
-  socket.on('destroy_item_secure', async ({ userId, itemUuidOrId, isConsumable }) => {
+   socket.on('destroy_item_secure', async ({ userId, itemUuidOrId, isConsumable }) => {
     try {
       const nUserId = Number(userId);
       const { data: dbPlayer, error: fetchErr } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
@@ -236,37 +236,35 @@ module.exports = function(io, socket, sb) {
       if (!inventory[invTab]) inventory[invTab] = [];
       const inv = inventory[invTab];
 
-      // Ищем вещь в соответствующей вкладке рюкзака
+      // Ищем вещь в массиве по UUID или базовому ID
       const itemIdx = inv.findIndex(i => {
         if (isConsumable) return i.id === itemUuidOrId;
         return i.uuid === itemUuidOrId || i.id === itemUuidOrId;
       });
 
       if (itemIdx === -1) {
-        return socket.emit('error', 'У вас нет этого предмета в рюкзаке, невозможно выбросить!');
+        return socket.emit('error', 'Предмет не найден в вашем рюкзаке!');
       }
 
-      const itemName = inventory[invTab][itemIdx].name || inventory[invTab][itemIdx].id;
-
-      // 🔥 ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПРЕДМЕТА
+      // 🔥 ИСПРАВЛЕНО: Удалили сломанную строку с itemName, которая приводила к крашу бэкенда!
+      
+      // Удаляем предмет из массива инвентаря
       if (isConsumable) {
-        // Если это банка/свиток — уменьшаем стак на 1 штуку
         if (Number(inv[itemIdx].count || 1) > 1) {
           inv[itemIdx].count--;
         } else {
-          inv.splice(itemIdx, 1); // Если была последняя — вырезаем из массива
+          inv.splice(itemIdx, 1);
         }
       } else {
-        // Если это шмотка — вырезаем ее уникальный UUID полностью
-        inv.splice(itemIdx, 1);
+        inv.splice(itemIdx, 1); // Полностью вырезаем шмотку по её UUID
       }
 
-      // Синхронизируем очищенный инвентарь в Supabase
+      // Синхронизируем очищенный инвентарь обратно в Supabase
       await sb.from('players').update({ inventory }).eq('id', nUserId);
       
-      console.log(`🗑️ [БЭКЕНД] Игрок ${nUserId} успешно уничтожил предмет: ${itemUuidOrId}`);
+      console.log(`🗑️ [БЭКЕНД] Игрок ${nUserId} успешно выбросил предмет: ${itemUuidOrId}`);
       
-      // Отправляем игроку обновленный профиль города, рюкзак мгновенно перерисуется без этой вещи!
+      // Мгновенно пушим игроку обновленный профиль для перерисовки инвентаря в реальном времени
       await triggerLoadGameSuccess(nUserId, socket, sb);
 
     } catch (e) {
@@ -274,5 +272,4 @@ module.exports = function(io, socket, sb) {
       socket.emit('error', 'Ошибка сервера при попытке выбросить предмет.');
     }
   });
-
 };
