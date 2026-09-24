@@ -264,7 +264,7 @@ module.exports = function(io, socket, sb) {
       
       console.log(`🗑️ [БЭКЕНД] Игрок ${nUserId} успешно выбросил предмет: ${itemUuidOrId}`);
       
-      // Мгновенно пушим игроку обновленный профиль для перерисовки инвентаря в реальном времени
+      // Мгновенно пушим игроку обновленный профиль для перерисовки инвентаря в реальном времеи
       await triggerLoadGameSuccess(nUserId, socket, sb);
 
     } catch (e) {
