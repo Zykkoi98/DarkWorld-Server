@@ -104,7 +104,11 @@ module.exports = function(io, socket, sb, activeRooms) {
         const bossEnd = Math.floor(Number(bossTemplate.endurance || 5) * statMultiplier * 2.0);
         const bossLuck = Math.floor(Number(bossTemplate.luck || 5) * statMultiplier * 1.5);
 
-        const virtualBossForHp = { endurance: bossEnd, equipped: {} };
+        // 🔥 [ИСПРАВЛЕНО] Упаковываем статы во вложенный объект stats, чтобы db_helper не падал!
+        const virtualBossForHp = { 
+          stats: { endurance: bossEnd }, 
+          equipped: {} 
+        };
         const bossMaxHp = getServerMaxHp(virtualBossForHp) * 2;
 
         teamB.push({
@@ -133,7 +137,11 @@ module.exports = function(io, socket, sb, activeRooms) {
           const botEnd = Math.floor(Number(baseBot.endurance || 4) * statMultiplier);
           const botLuck = Math.floor(Number(baseBot.luck || 4) * statMultiplier);
 
-          const virtualBotForHp = { endurance: botEnd, equipped: {} };
+          // 🔥 [ИСПРАВЛЕНО] Упаковываем статы во вложенный объект stats, чтобы db_helper не падал!
+          const virtualBotForHp = { 
+            stats: { endurance: botEnd }, 
+            equipped: {} 
+          };
           const botMaxHp = getServerMaxHp(virtualBotForHp);
 
           teamB.push({
