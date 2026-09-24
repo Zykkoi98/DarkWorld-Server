@@ -41,7 +41,7 @@ module.exports = function(io, socket, sb) {
   const triggerLoadGameSuccess = dbHelper.triggerLoadGameSuccess;
   const safeReadField = dbHelper.safeReadField;
 
-  // --- ОБРАБОТЧИК А: ЭКИПИРОВАТЬ ПРЕДМЕТ ЧЕРЕЗ СЕРВЕР ---
+ // --- ОБРАБОТЧИК А: ЭКИПИРОВАТЬ ПРЕДМЕТ ЧЕРЕЗ СЕРВЕР ---
 socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
     try {
       const nUserId = Number(userId);
@@ -71,10 +71,7 @@ socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
       }
 
       if (currentItemConfig) {
-        // Автоматически определяем требуемый уровень из конфига магазина
         if (currentItemConfig.level) requiredLevel = currentItemConfig.level;
-
-        // Если в конфиге магазина (SERVER_SHOP_DATABASE) уже записан slotType — берем его!
         if (currentItemConfig.slotType) {
           slotType = currentItemConfig.slotType;
         } else {
@@ -91,7 +88,6 @@ socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
           if (id.includes('ring') || id.includes('loop') || id.includes('band') || id.includes('seal') || id.includes('coil') || id.includes('cyclone') || id.includes('signet')) slotType = 'ring';
         }
 
-        // Ручные старые перегрузки уровней для совместимости
         if (cleanItemId === 'iron_sword' || cleanItemId === 'leather_armor' || cleanItemId === 'leather_gloves') requiredLevel = 2;
         if (cleanItemId === 'steel_mace' || cleanItemId === 'wolf_amulet' || cleanItemId === 'lucky_ring') requiredLevel = 3;
         if (cleanItemId === 'heavy_halberd' || cleanItemId === 'ruby_ring') requiredLevel = 5;
@@ -104,15 +100,39 @@ socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
 
       const invTab = (slotType === 'potion' || slotType === 'scroll') ? 'consumables' : 'equipment';
       if (!inventory[invTab]) inventory[invTab] = [];
-      
-      const inv = inventory[invTab];
+      let inv = inventory[invTab];
 
-      // 🔥 ШАГ 3: Ищем предмет в рюкзаке по UUID, а если пришел старый сырой ID — ищем по ID
+      // 🔥 ШАГ 3: Ищем предмет в рюкзаке по UUID
       const itemIdx = inv.findIndex(i => i.uuid === itemUuidOrId || i.id === itemUuidOrId);
-
       if (itemIdx === -1) return socket.emit('error', 'У вас нет этого предмета в рюкзаке!');
 
-      // Логика расходников (зелья и свитки со стаком до 5 штук)
+      // Вспомогательная функция для безопасного возвращения старой вещи в рюкзак с UUID
+      const returnToInventorySecure = (oldId) => {
+        if (!oldId) return;
+        let name = oldId; let icon = '📦';
+        if (oldId === 'iron_sword') { name = 'Железный меч'; icon = '⚔️'; }
+        if (oldId === 'rusty_sword') { name = 'Ржавый меч'; icon = '🗡️'; }
+        if (oldId === 'leather_cap') { name = 'Кожаная шапка'; icon = '🪖'; }
+        if (oldId === 'leather_armor') { name = 'Кожаная куртка'; icon = '👕'; }
+        if (oldId === 'leather_boots') { name = 'Кожаные сапоги'; icon = '🥾'; }
+        if (oldId === 'leather_gloves') { name = 'Кожаные перчатки'; icon = '🧤'; }
+        if (oldId === 'wooden_shield') { name = 'Щит новичка'; icon = '🛡️'; }
+        if (oldId === 'copper_ring') { name = 'Медное кольцо'; icon = '💍'; }
+        if (oldId === 'wolf_amulet') { name = 'Амулет Волка'; icon = '📿'; }
+
+        // Ищем в базе магазина красивые данные, если их нет в старой таблице
+        const oldConfig = ITEMS_STAT_DB[oldId] || (global.SERVER_SHOP_DATABASE ? global.SERVER_SHOP_DATABASE[oldId] : null);
+
+        inventory.equipment.push({
+          uuid: `${oldId}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          id: oldId,
+          name: oldConfig?.name || name,
+          icon: oldConfig?.icon || icon,
+          count: 1
+        });
+      };
+
+      // Логика расходников (зелья и свитки)
       if (slotType === 'potion' || slotType === 'scroll') {
         const currentEquipped = equipped[slotType];
         const availableInInv = Number(inv[itemIdx].count || 1);
@@ -121,7 +141,7 @@ socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
         if (currentEquipped && typeof currentEquipped === 'object' && currentEquipped.id) {
           if (currentEquipped.id === cleanItemId) {
             alreadyEquippedCount = Number(currentEquipped.count || 0);
-            if (alreadyEquippedCount >= 5) return socket.emit('error', 'В этот слот уже взят maximal стак!');
+            if (alreadyEquippedCount >= 5) return socket.emit('error', 'В этот слот уже взят максимальный стак!');
           } else {
             const oldId = currentEquipped.id;
             const oldQty = Number(currentEquipped.count || 1);
@@ -133,7 +153,6 @@ socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
 
         const spaceLeft = 5 - alreadyEquippedCount;
         const countToEquip = Math.min(spaceLeft, availableInInv);
-
         equipped[slotType] = { id: cleanItemId, count: alreadyEquippedCount + countToEquip };
 
         if (availableInInv > countToEquip) inv[itemIdx].count -= countToEquip;
@@ -148,43 +167,33 @@ socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
           let ringIndex = equipped.rings.findIndex(r => r === null);
           if (ringIndex === -1) {
             ringIndex = 0;
-            const oldRingId = equipped.rings[0];
-            if (oldRingId) {
-              const existRing = inventory.equipment.find(i => i.id === oldRingId);
-              if (existRing) existRing.count = (existRing.count || 1) + 1;
-              else inventory.equipment.push({ id: oldRingId, count: 1 });
-            }
+            // Вытесняем первое кольцо
+            returnToInventorySecure(equipped.rings[0]);
           }
           equipped.rings[ringIndex] = cleanItemId;
         } else {
-          // Если вещь двуручная (mainHand + левая рука блокируется) или одевается в левую руку как леворучное оружие (offHand)
+          // Обработка двуручного оружия
           if (slotType === 'twoHanded') {
             if (equipped.offHand) {
-              const oldOff = equipped.offHand;
-              const existOff = inventory.equipment.find(i => i.id === oldOff);
-              if (existOff) existOff.count = (existOff.count || 1) + 1;
-              else inventory.equipment.push({ id: oldOff, count: 1 });
+              returnToInventorySecure(equipped.offHand);
               equipped.offHand = null;
             }
             targetSlot = 'mainHand';
           }
 
-          if (slotType === 'offHand' && (equipped.mainHand === 'heavy_halberd' || cleanItemId.includes('twoHanded'))) {
+          if (slotType === 'offHand' && (equipped.mainHand === 'heavy_halberd' || equipped.mainHand?.includes('twoHanded'))) {
             return socket.emit('error', '⚠️ Нельзя взять щит или второе оружие с двуручником!');
           }
 
-          const oldItemId = equipped[targetSlot];
-          if (oldItemId) {
-            const existOld = inventory.equipment.find(i => i.id === oldItemId);
-            if (existOld) existOld.count = (existOld.count || 1) + 1;
-            else inventory.equipment.push({ id: oldItemId, count: 1 });
+          // 🔥 ФИКС: Перед тем как записать новую вещь на куклу, отправляем старую вещь в инвентарь с генерацией UUID!
+          if (equipped[targetSlot]) {
+            returnToInventorySecure(equipped[targetSlot]);
           }
 
-          // Записываем чистый ID на куклу
           equipped[targetSlot] = cleanItemId;
         }
 
-        // Удаляем конкретный экземпляр шмотки из рюкзака по индексу UUID
+        // Удаляем экипированный экземпляр шмотки из рюкзака
         if (Number(inv[itemIdx].count || 1) > 1) inv[itemIdx].count--;
         else inv.splice(itemIdx, 1);
       }
@@ -196,7 +205,7 @@ socket.on('equip_item_secure', async ({ userId, itemId: itemUuidOrId }) => {
       console.error("❌ Критический сбой при экипировке:", e);
       socket.emit('error', 'Ошибка сервера при смене экипировки.');
     }
-  });
+});
   // --- ОБРАБОТЧИК Б: СНЯТЬ ПРЕДМЕТ ЧЕРЕЗ СЕРВЕР ---
   socket.on('unequip_item_secure', async ({ userId, slotKey, ringIndex }) => {
     try {
