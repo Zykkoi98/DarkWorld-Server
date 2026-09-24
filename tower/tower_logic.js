@@ -32,55 +32,36 @@ module.exports = function(io, socket, sb, activeRooms) {
       console.error("🚨 Ошибка проверки КД в Башне:", err.message);
     }
   });
-  // --- 🏰 ОБРАБОТЧИК А: СТАРТ PvP/PvE ЭТАЖА И ПРОВЕРКА ТАЙМЕРА ---
+   // --- 🏰 ОБРАБОТЧИК А: ПРОЦЕДУРНЫЙ СПАВН ЭТАЖА ИЗ SUPABASE ---
   socket.on('start_tower_battle_secure', async ({ userId, currentFloor }) => {
+    console.log(`\n📥 [БЭКЕНД] Получен эвент start_tower_battle_secure. ID пользователя: ${userId}, Выбранный этаж: ${currentFloor}`);
     try {
       const nUserId = Number(userId);
       const floor = Math.max(1, Number(currentFloor || 1));
 
+      console.log(`🔍 [СТАДИЯ 1] Чистим лобби Арены для игрока ID ${nUserId}...`);
       await sb.from('arena_lobby').delete().eq('id', nUserId);
       io.emit('arena_lobby_updated');
 
-      // 🕒 1. ЧЕСТНАЯ ПРОВЕРКА КУЛДАУНА ИЗ ТВОЕЙ НОВОЙ ТАБЛИЦЫ ТАЙМЕРОВ
-      const { data: timerRow } = await sb.from('player_timers')
-        .select('ends_at')
-        .eq('user_id', nUserId)
-        .eq('timer_type', 'tower_cooldown')
-        .maybeSingle();
-
-      if (timerRow) {
-        const cooldownDate = new Date(timerRow.ends_at);
-        const now = new Date();
-
-        if (cooldownDate > now) {
-          const timeLeftMs = cooldownDate - now;
-          const leftHours = Math.floor(timeLeftMs / (1000 * 60 * 60));
-          const leftMinutes = Math.ceil((timeLeftMs % (1000 * 60 * 60)) / (1000 * 60));
-          
-          let timeText = `${leftMinutes} мин.`;
-          if (leftHours > 0) timeText = `${leftHours} ч. ${leftMinutes} мин.`;
-
-          return socket.emit('error', `🏰 Башня закрыта! Доступ через: ${timeText}`);
-        }
-      }
-
-      // 2. Загружаем данные игрока и пула ботов из Supabase
+      console.log(`📡 [СТАДИЯ 2] Запрашиваем из Supabase профиль игрока и пул ботов...`);
       const { data: dbPlayer } = await sb.from('players').select('*').eq('id', nUserId).single();
-      const { data: allBots, error: botsErr } = await sb.from('bots')
-        .select('*')
-        .eq('category', 'tower'); // Жесткий античит-фильтр группы спавна
+      const { data: allBots, error: botsErr } = await sb.from('bots').select('*').eq('category', 'tower');
 
-      if (!dbPlayer || botsErr || !allBots || allBots.length === 0) {
-        return socket.emit('error', 'В базе данных Supabase не найдены шаблоны монстров с категорией "tower".');
+      if (botsErr) {
+        console.error("🚨 [Supabase Error] Сбой загрузки ботов башни:", botsErr.message);
       }
 
-      if (!dbPlayer || botsErr || !allBots || allBots.length === 0) {
-        return socket.emit('error', 'Ошибка загрузки данных Башни.');
+      console.log(`🤖 Проверка пула ботов. Найдено в базе: ${allBots ? allBots.length : 0} шт.`);
+      if (!dbPlayer || !allBots || allBots.length === 0) {
+        console.error("🚨 Инициализация прервана: dbPlayer или allBots пустые!");
+        return socket.emit('error', 'Ошибка загрузки данных Башни из Supabase.');
       }
 
       const roomId = `room_tower_${dbPlayer.id}_floor_${floor}_${Date.now()}`;
       const pMaxHp = getServerMaxHp(dbPlayer);
+      console.log(`⚔️ [СТАДИЯ 3] Создаем комнату: ${roomId}. Макс ХП игрока: ${pMaxHp}`);
 
+      // Инициализируем игрока в комнате Башни
       const teamA = [{
         uuid: `player_${dbPlayer.id}`, id: String(dbPlayer.id), name: dbPlayer.name, icon: '👤', isBot: false,
         level: Number(dbPlayer.level), strength: Number(dbPlayer.strength), agility: Number(dbPlayer.agility), endurance: Number(dbPlayer.endurance), luck: Number(dbPlayer.luck),
@@ -94,8 +75,8 @@ module.exports = function(io, socket, sb, activeRooms) {
       const statMultiplier = 1 + ((floor - 1) * 0.15);
       const rewardMultiplier = 1 + ((floor - 1) * 0.20);
 
-      // Рассчитываем Босса (С 5-го этажа, шанс 15%)
       const isBossFloor = floor >= 5 && rand(1, 100) <= 15;
+      console.log(`🎲 [СТАДИЯ 4] Проверка на босса. Это этаж босса? -> ${isBossFloor}`);
 
       if (isBossFloor) {
         let bossTemplate = allBots.find(b => b.id.includes('boss') || b.name.toLowerCase().includes('босс')) || allBots[0];
@@ -104,11 +85,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         const bossEnd = Math.floor(Number(bossTemplate.endurance || 5) * statMultiplier * 2.0);
         const bossLuck = Math.floor(Number(bossTemplate.luck || 5) * statMultiplier * 1.5);
 
-        // 🔥 [ИСПРАВЛЕНО] Упаковываем статы во вложенный объект stats, чтобы db_helper не падал!
-        const virtualBossForHp = { 
-          stats: { endurance: bossEnd }, 
-          equipped: {} 
-        };
+        const virtualBossForHp = { stats: { endurance: bossEnd }, equipped: {} };
         const bossMaxHp = getServerMaxHp(virtualBossForHp) * 2;
 
         teamB.push({
@@ -121,7 +98,6 @@ module.exports = function(io, socket, sb, activeRooms) {
           turn: null
         });
       } else {
-        // Рандомный пак обычных мобов (Танк, Уворот, Крит) до 5 штук
         let maxSpawnCount = 2;
         if (floor >= 4) maxSpawnCount = 3;
         if (floor >= 7) maxSpawnCount = 4;
@@ -129,6 +105,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         
         const finalSpawnCount = rand(1, maxSpawnCount);
         const regularPool = allBots.filter(b => !b.id.includes('boss') && !b.name.toLowerCase().includes('босс'));
+        console.log(`⚔️ Будет спавниться рядовых мобов: ${finalSpawnCount} шт.`);
 
         for (let i = 0; i < finalSpawnCount; i++) {
           const baseBot = regularPool[rand(0, regularPool.length - 1)] || allBots[0];
@@ -137,11 +114,7 @@ module.exports = function(io, socket, sb, activeRooms) {
           const botEnd = Math.floor(Number(baseBot.endurance || 4) * statMultiplier);
           const botLuck = Math.floor(Number(baseBot.luck || 4) * statMultiplier);
 
-          // 🔥 [ИСПРАВЛЕНО] Упаковываем статы во вложенный объект stats, чтобы db_helper не падал!
-          const virtualBotForHp = { 
-            stats: { endurance: botEnd }, 
-            equipped: {} 
-          };
+          const virtualBotForHp = { stats: { endurance: botEnd }, equipped: {} };
           const botMaxHp = getServerMaxHp(virtualBotForHp);
 
           teamB.push({
@@ -156,8 +129,10 @@ module.exports = function(io, socket, sb, activeRooms) {
         }
       }
 
+      console.log(`💾 [СТАДИЯ 5] Записываем комнату Башни в оперативную память activeRooms...`);
       activeRooms[roomId] = { id: roomId, type: 'pve', isTower: true, towerFloor: floor, teamA, teamB, turnCount: 1, timeoutRef: null };
 
+      console.log(`🔌 [СТАДИЯ 6] Добавляем игрока в комнату сокетов ${roomId} и шлем battle_init_data...`);
       socket.join(roomId);
       socket.emit('battle_init_data', {
         roomId, turnCount: 1, myUuid: `player_${dbPlayer.id}`,
@@ -165,14 +140,24 @@ module.exports = function(io, socket, sb, activeRooms) {
         teamB: teamB.map(f => ({ uuid: f.uuid, name: f.name, icon: f.icon, level: f.level, currentHp: f.currentHp, maxHp: f.maxHp, isBot: f.isBot, hasSubmitted: !!f.turn, equipped: f.equipped || null }))
       });
 
-      if (teamA.currentHp <= 0) {
+      if (teamA[0].currentHp <= 0) {
+        console.warn("⚠️ У игрока 0 ХП при входе. Запускаем экстренный финал раунда.");
         if (global.executeRoundCalculations) global.executeRoundCalculations(roomId, activeRooms, io);
         return;
       }
-     socket.emit('arena_redirect_to_battle', { roomId: roomId });
+
+      console.log(`📣 [СТАДИЯ 7] Пушим принудительный редирект в сокет игрока -> arena_redirect_to_battle!`);
+      socket.emit('arena_redirect_to_battle', { roomId: roomId });
+
+      console.log(`⏱️ [СТАДИЯ 8] Запускаем серверный таймер раунда.`);
       if (global.startServerTurnTimer) global.startServerTurnTimer(roomId, activeRooms, io);
 
-    } catch (err) { socket.emit('error', `Ошибка Башни: ${err.message}`); }
+      console.log(`✅ [УСПЕХ ВЫПОЛНЕНИЯ БАШНИ] Весь цикл генерации успешно пройден!\n`);
+
+    } catch (err) { 
+      console.error(`🚨 [ФАТАЛЬНЫЙ КРАШ БАШНИ СЕРВЕРА]: ${err.message}`, err.stack);
+      socket.emit('error', `Ошибка Башни: ${err.message}`); 
+    }
   });
 
   // --- ОБРАБОТЧИК Б: ЛАВКА БАШНИ ---
