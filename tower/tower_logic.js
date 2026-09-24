@@ -33,6 +33,24 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
   });
    // --- 🏰 ОБРАБОТЧИК А: ПРОЦЕДУРНЫЙ СПАВН ЭТАЖА ИЗ SUPABASE ---
+    // 🔥 [ЖЕЛЕЗНЫЙ ФИКС АВТОРИЗАЦИИ] Учим Башню узнавать сокет игрока при переходе с площади!
+  socket.on('load_game_secure', async ({ userId, username }) => {
+    console.log(`🔐 [БАШНЯ СЕТЬ] Сокет ${socket.id} успешно прошёл авторизацию Башни для игрока: ${username} (ID: ${userId})`);
+    try {
+      const nUserId = Number(userId);
+      const { data: dbPlayer } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+      
+      if (dbPlayer) {
+        // Успешно отправляем профиль обратно на фронтенд Башни
+        socket.emit('load_game_success', { player: dbPlayer });
+        console.log(`📤 [БАШНЯ СЕТЬ] Профиль Инквизитора ${username} успешно отправлен на экран Башни.`);
+      } else {
+        console.error(`🚨 [БАШНЯ СЕТЬ] Игрок ID ${nUserId} не найден в Supabase при авторизации Башни!`);
+      }
+    } catch (err) {
+      console.error("🚨 Ошибка экспресс-авторизации сокета Башни:", err.message);
+    }
+  });
   socket.on('start_tower_battle_secure', async ({ userId, currentFloor }) => {
     console.log(`\n📥 [БЭКЕНД] Получен эвент start_tower_battle_secure. ID пользователя: ${userId}, Выбранный этаж: ${currentFloor}`);
     try {
