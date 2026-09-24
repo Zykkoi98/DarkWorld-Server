@@ -48,7 +48,7 @@ function getEquipmentBonus(equipped, bonusKey) {
   if (equipped.rings && Array.isArray(equipped.rings)) {
     equipped.rings.forEach(itemId => {
       if (!itemId) return;
-      let item = ITEMS_STAT_DB[itemId] || GAME_ITEMS_DATABASE[itemId];
+      let item =  GAME_ITEMS_DATABASE[itemId];
       if (item) {
         if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
         if (item.bonus) {
@@ -131,7 +131,6 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
 
 // Экспортируем методы наружу для использования в других файлах бэкенда
 module.exports = {
- ITEMS_STAT_DB,
   getServerMaxHp,
   getServerDef,
   getServerCorrectLevelByXp,
