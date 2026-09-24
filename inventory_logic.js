@@ -30,12 +30,14 @@ module.exports = function(io, socket, sb) {
       const cloudLevel = safeReadField(dbPlayer, 'level', 1);
 
       // Извлекаем чистый ID предмета
-      let cleanItemId = itemUuidOrId;
-      if (itemUuidOrId && itemUuidOrId.includes('_') && !ITEMS_STAT_DB[itemUuidOrId]) {
-        const isRawConsumable = itemUuidOrId.includes('potion') || itemUuidOrId === 'fish_soup' || itemUuidOrId.includes('scroll');
-        if (!isRawConsumable) {
-          const parts = itemUuidOrId.split('_');
-          if (parts.length > 2) cleanItemId = parts.slice(0, -2).join('_');
+     let cleanItemId = itemUuidOrId;
+      if (itemUuidOrId && itemUuidOrId.includes('_')) {
+        const parts = itemUuidOrId.split('_');
+        // Уникальный UUID шмотки всегда состоит минимум из 3 частей (id + штамп времени + рандом)
+        // Если это системное имя банки (содержит potion, soup, scroll), то это обычный ID, не режем его!
+        const isRealUuid = parts.length > 2 && !itemUuidOrId.includes('potion') && !itemUuidOrId.includes('soup') && !itemUuidOrId.includes('scroll');
+        if (isRealUuid) {
+          cleanItemId = parts.slice(0, -2).join('_');
         }
       }
 
