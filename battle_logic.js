@@ -20,7 +20,7 @@ function isShield(itemId) {
   const id = itemId.toLowerCase();
   return id.includes('shield') || id.includes('buckler') || id.includes('aegis') || id.includes('screen') || id.includes('mirror') || id.includes('wall');
 }
-
+//ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ:
 // Вспомогательная функция сбора бонусов экипировки для расчета боя
 function getEquipmentBonus(equipped, bonusKey) {
   if (!equipped) return 0;
@@ -66,7 +66,46 @@ function getEquipmentBonus(equipped, bonusKey) {
   }
   return totalBonus;
 }
+// 🔥 ГЛОБАЛЬНАЯ СЕРВЕРНАЯ ФУНКЦИЯ АВТОДОПОЛНЕНИЯ БАНОК ПОСЛЕ ЛЮБОГО БОЯ (PvE и PvP)
+function autoRefillPotionsAfterBattle(playerRow) {
+  try {
+    if (playerRow && playerRow.equipped && playerRow.inventory && playerRow.inventory.consumables) {
+      let equipped = playerRow.equipped;
+      let consumables = playerRow.inventory.consumables;
+      const potionSlot = equipped.potion;
 
+      // Если в слоте банок что-то есть, но стак меньше максимальных 5 штук
+      if (potionSlot && typeof potionSlot === 'object' && potionSlot.id) {
+        let currentCount = Number(potionSlot.count || 0);
+        
+        if (currentCount < 5) {
+          const needQty = 5 - currentCount; // Сколько банок не хватает до фулла
+          
+          // Ищем такую же банку в инвентаре расходников игрока
+          const invPotionIdx = consumables.findIndex(c => c && c.id === potionSlot.id);
+          
+          if (invPotionIdx !== -1) {
+            const availableInInv = Number(consumables[invPotionIdx].count || 0);
+            const takeQty = Math.min(needQty, availableInInv); // Берем сколько нужно, но не больше, чем есть
+            
+            if (takeQty > 0) {
+              potionSlot.count = currentCount + takeQty; // Доливаем стак на кукле
+              
+              if (availableInInv > takeQty) {
+                consumables[invPotionIdx].count -= takeQty; // Уменьшаем запас в рюкзаке
+              } else {
+                consumables.splice(invPotionIdx, 1); // Вырезаем из сумки, если забрали последнюю
+              }
+              console.log(`🧪 [АВТОДОПОЛНЕНИЕ СЕРВЕРА] Игроку ID ${playerRow.id} доложено +${takeQty} шт. банок (${potionSlot.id})`);
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("🚨 Ошибка при автодополнении банок:", err.message);
+  }
+}
 // Честный серверный расчет боевых параметров персонажей
 function getServerAtk(fighter) {
   // Базовая сила + сила от вещей (например, Амулет Волка дает +2 к силе)
@@ -782,8 +821,8 @@ module.exports = function(io, socket, sb, activeRooms) {
       // 🏆 ВЕТВЬ Б: 🔥 ФИКС PvP ЛОГОВ НАГРАД (ДО ОТПРАВКИ ПАКЕТА НА ТЕЛЕФОН)
       // ============================================================================
       if (room.type === 'pvp') {
-        const playerA = room.teamA[0]; // Ян
-        const playerB = room.teamB[0]; // Evil
+        const playerA = room.teamA[0]; 
+        const playerB = room.teamB[0]; 
         const goldReward = 25;
 
         const calculatePvpXpLog = (winnerLvl, loserLvl) => {
@@ -865,6 +904,7 @@ module.exports = function(io, socket, sb, activeRooms) {
     let gainedXp = 0; 
     let gainedGold = 0;
     let dbHpPayload = Number(player.currentHp || 0);
+    autoRefillPotionsAfterBattle(player);
 
     if (result === 'win') {
       if (room.teamB && Array.isArray(room.teamB)) {
@@ -921,7 +961,7 @@ module.exports = function(io, socket, sb, activeRooms) {
   // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
   async function finalizePvpBattle(room, result, logs, finalRound, io) {
   const playerA = room.teamA[0]; // Напрямую берем первый элемент из массива заявки
-    const playerB = room.teamB[0]; 
+  const playerB = room.teamB[0]; 
     
     if (!playerA || !playerB) return;
 
@@ -956,7 +996,9 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       const rowA = dbDataA.data;
       const rowB = dbDataB.data;
-
+      // 🔥 ТРИГГЕРЫ АВТОДОПОЛНЕНИЯ ЗЕЛИЙ ДЛЯ ОБЛИКА ОБОИХ ИГРОКОВ PvP АРЕНЫ
+      autoRefillPotionsAfterBattle(rowA);
+      autoRefillPotionsAfterBattle(rowB);
       const safeRead = (row, field, def = 0) => {
         const low = field.toLowerCase();
         const up = field.toUpperCase();
