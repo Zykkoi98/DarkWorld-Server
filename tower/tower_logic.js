@@ -42,24 +42,29 @@ module.exports = function(io, socket, sb, activeRooms) {
         let pointsKey = dbPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
 
         const playerProfile = {
-          id: dbPlayer.id, name: dbPlayer.name, avatar: dbPlayer.avatar || "assets/avatars/hero1.png",
-          level: cloudLevel, gold: dbHelper.safeReadField(dbPlayer, 'gold', 0), xp: currentXp,
-          hp: dbHelper.safeReadField(dbPlayer, 'hp', 10), statPoints: dbHelper.safeReadField(dbPlayer, pointsKey, 0),
-          currentTownIndex: dbHelper.safeReadField(dbPlayer, 'currenttownindex', 0),
-          stats: {
-            strength: dbHelper.safeReadField(dbPlayer, 'strength', 1),
-            agility: dbHelper.safeReadField(dbPlayer, 'agility', 1),
-            endurance: dbHelper.safeReadField(dbPlayer, 'endurance', 1),
-            luck: dbHelper.safeReadField(dbPlayer, 'luck', 1)
-          },
-          inventory: dbPlayer.inventory || { equipment: [], resources: [], consumables: [] },
-          equipped: dbPlayer.equipped || { rings: [null, null, null] }
-        };
+                id: dbPlayer.id, name: dbPlayer.name, avatar: dbPlayer.avatar || "assets/avatars/hero1.png",
+                level: cloudLevel, gold: dbHelper.safeReadField(dbPlayer, 'gold', 0), xp: currentXp,
+                hp: dbHelper.safeReadField(dbPlayer, 'hp', 10), statPoints: dbHelper.safeReadField(dbPlayer, pointsKey, 0),
+                currentTownIndex: dbHelper.safeReadField(dbPlayer, 'currenttownindex', 0),
+                
+                // 🔥 [ФИНАЛЬНЫЙ ФИКС ЭТАЖА БАШНИ]
+                // Теперь сервер честно забирает двойку из Supabase и шлет её на телефон!
+                tower_floor: dbHelper.safeReadField(dbPlayer, 'tower_floor', 1),
 
-        socket.emit('tower_load_game_success', { player: playerProfile });
-      }
-    } catch (err) { console.error("🚨 Ошибка сокет-авторизации Башни:", err.message); }
-  });
+                stats: {
+                    strength: dbHelper.safeReadField(dbPlayer, 'strength', 1),
+                    agility: dbHelper.safeReadField(dbPlayer, 'agility', 1),
+                    endurance: dbHelper.safeReadField(dbPlayer, 'endurance', 1),
+                    luck: dbHelper.safeReadField(dbPlayer, 'luck', 1)
+                },
+                inventory: dbPlayer.inventory || { equipment: [], resources: [], consumables: [] },
+                equipped: dbPlayer.equipped || { rings: [null, null, null] }
+                };
+
+                socket.emit('tower_load_game_success', { player: playerProfile });
+            }
+            } catch (err) { console.error("🚨 Ошибка сокет-авторизации Башни:", err.message); }
+        });
 
   // --- ОБРАБОТЧИК Б: ЛАВКА БАШНИ ---
   socket.on('buy_tower_shop_item_secure', async ({ userId, itemId }) => {
