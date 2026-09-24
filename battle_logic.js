@@ -3,11 +3,6 @@ const GAME_ITEMS_DATABASE = require('./shop/shop_items_config');
 
 const ZONE_NAMES = { head: "Голову", breast: "Грудь", torso: "Торс", belt: "Пояс", legs: "Ноги" };
 
-const CONSUMABLE_DATABASE = {
-  'hp_potion_small': { name: 'Малое зелье HP', heal: 25 },
-  'hp_potion_big':   { name: 'Большое зелье HP', heal: 60 },
-  'fish_soup':       { name: 'Уха из таверны', heal: 40 }
-};
 // Умная проверка: является ли предмет в левой руке щитом по данным из shop_items_config
 function isShield(itemId) {
   if (!itemId) return false;
@@ -25,21 +20,6 @@ function isShield(itemId) {
   const id = itemId.toLowerCase();
   return id.includes('shield') || id.includes('buckler') || id.includes('aegis') || id.includes('screen') || id.includes('mirror') || id.includes('wall');
 }
-const ITEMS_STAT_DB = {
-  'rusty_sword':    { atk: 2 },
-  'iron_sword':     { atk: 7 },
-  'steel_mace':     { atk: 12 },
-  'heavy_halberd':  { atk: 22 },
-  'wooden_shield':  { def: 2 },
-  'leather_cap':    { def: 1, agility: 1 },
-  'leather_armor':  { def: 4 },
-  'leather_boots':  { def: 1, agility: 2 },
-  'leather_gloves': { def: 1, strength: 1 },
-  'copper_ring':    { endurance: 1 },
-  'wolf_amulet':    { strength: 2, luck: 1 },
-  'lucky_ring':     { luck: 3 },
-  'ruby_ring':      { strength: 3 }
-};
 
 // Вспомогательная функция сбора бонусов экипировки для расчета боя
 function getEquipmentBonus(equipped, bonusKey) {
