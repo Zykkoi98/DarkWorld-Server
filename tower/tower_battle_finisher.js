@@ -9,7 +9,9 @@ const dbHelper = require('../db_helper');
  */
 async function finalizeTowerBattleSecure(room, result, sb) {
   try {
-    const player = (room && room.teamA && Array.isArray(room.teamA)) ? room.teamA[0] : (room ? room.teamA : null);
+    // 🔥 [ЖЕЛЕЗНЫЙ ФИКС БУФЕРА] Извлекаем строго первый объект игрока из массива команды А
+    const player = (room && room.teamA && Array.isArray(room.teamA) && room.teamA.length > 0) ? room.teamA[0] : null;
+    
     if (!player) {
       console.error("🚨 [TOWER КРИТ] Профиль игрока в комнате Башни не найден!");
       return;
@@ -19,7 +21,7 @@ async function finalizeTowerBattleSecure(room, result, sb) {
     let gainedGold = 0;
     let dbHpPayload = Number(player.currentHp || 0);
 
-    // Подтягиваем из db_helper функцию автозаполнения баночек на кукле, если она есть
+    // Автодополнение банок на кукле
     if (global.autoRefillPotionsAfterBattle) {
       global.autoRefillPotionsAfterBattle(player);
     }
@@ -58,7 +60,7 @@ async function finalizeTowerBattleSecure(room, result, sb) {
       
       dbHpPayload = player.currentHp;
 
-      // НАЧИСЛЯЕМ СЛЕДУЮЩИЙ ЭТАЖ
+      // 🔥 НАЧИСЛЯЕМ СЛЕДУЮЩИЙ ЭТАЖ И ПИШЕМ В PAYLOAD
       updatePayload.tower_floor = Number(room.towerFloor || 1) + 1;
       console.log(`🏰 [БАШНЯ УСПЕХ] Игрок ${player.name} прошел этаж ${room.towerFloor}. Открыт этаж: ${updatePayload.tower_floor}`);
 
@@ -68,7 +70,7 @@ async function finalizeTowerBattleSecure(room, result, sb) {
       dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2)); // Воскрешаем на 20% ХП
 
       // ⏱️ ЗАПИСЫВАЕМ КД НА 3 ЧАСА В ТВОЮ НОВУЮ ТАБЛИЦУ ТАЙМЕРОВ
-      const cooldownTime = new Date(Date.now() + 3 * 60 * 60 * 1000); // +3 часа
+      const cooldownTime = new Date(Date.now() + 3 * 60 * 60 * 1000); 
       
       await sb.from('player_timers').upsert({
         user_id: Number(player.id),
@@ -79,16 +81,15 @@ async function finalizeTowerBattleSecure(room, result, sb) {
       console.log(`⏱️ [БД ТАЙМЕР] Записано поражение в Башне. КД повешено для ID ${player.id} до ${cooldownTime.toISOString()}`);
     }
 
-    // Записываем ХП и пушим апдейт игрока в Supabase
     updatePayload.hp = Number(dbHpPayload);
+    
+    // Записываем финальный результат штурма в облако Supabase
     await sb.from('players').update(updatePayload).eq('id', Number(player.id));
-    console.log(`☁️ [БД ТАШНЯ СИНХРОНИЗАЦИЯ] Все награды и КД зафиксированы в облаке.`);
+    console.log(`☁️ [БД БАШНЯ СИНХРОНИЗАЦИЯ] Все награды и КД зафиксированы в облаке.`);
 
   } catch (err) {
     console.error("❌ Фатальный сбой внутри tower_battle_finisher:", err.message);
   }
 }
 
-module.exports = {
-  finalizeTowerBattleSecure
-};
+module.exports = { finalizeTowerBattleSecure };

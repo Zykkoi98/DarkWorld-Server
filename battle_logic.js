@@ -678,7 +678,7 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
   }
 
   // --- 11. ВНУТРЕННЯЯ ФУНКЦИЯ: СЕРВЕРНЫЙ КАЛЬКУЛЯТОР БОЯ И ОБМЕНА УДАРАМИ ---
-  function executeRoundCalculations(roomId, activeRooms, io) {
+  async function executeRoundCalculations(roomId, activeRooms, io) {
     const room = activeRooms[roomId];
     if (!room) return;
 
@@ -982,14 +982,16 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
         });
       }
 
-      if (room.type === 'pve') {
-        if (room.isTower) {
-          // Вызов нового изолированного файла Башни
-          towerFinisher.finalizeTowerBattleSecure(room, result, sb);
-        } else {
-          finalizePveBattle(room, result, logs, currentRound, io);
-        }
-      } else if (room.type === 'pvp') {
+       // 🔥 [БРОНИРОВАННЫЙ ФИКС СИНХРОНИЗАЦИИ БАШНИ]
+      if (room.isTower) {
+        console.log(`🏰 [ДИСПЕТЧЕР БАШНИ] Передаем управление в асинхронный финишер...`);
+        // Сервер намертво заставит базу данных зафиксировать этаж/таймер КД до выгрузки комнат!
+        await towerFinisher.finalizeTowerBattleSecure(room, result, sb);
+      } 
+      else if (room.type === 'pve') {
+        finalizePveBattle(room, result, logs, currentRound, io);
+      } 
+      else if (room.type === 'pvp') {
         finalizePvpBattle(room, result, logs, currentRound, io);
       }
       setTimeout(() => {
