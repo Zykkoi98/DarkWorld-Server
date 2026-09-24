@@ -330,7 +330,7 @@ module.exports = function(io, socket, sb, activeRooms) {
                           (mainHand === 'heavy_halberd');
 
       if (isTwoHanded) {
-        serverMaxAttacks = 2; // Двуручник легально дает 2 удара
+        serverMaxAttacks = 1; // Двуручник легально дает 2 удара
       } else if (offHand && !isShield(offHand)) {
         serverMaxAttacks = 2; // 🔥 ДУАЛЫ: Если в левой руке оружие (не щит) — разрешаем 2 удара!
       } else {

@@ -8,22 +8,6 @@ const GAME_ITEMS_DATABASE = require('./shop/shop_items_config');
 const SERVER_XP_TABLE = [
   0, 0, 20, 70, 170, 370, 770, 1570, 3070, 5570, 9570
 ];
-// База характеристик предметов для честного расчёта боевых параметров на бэкенде
-const ITEMS_STAT_DB = {
-  'rusty_sword':    { atk: 2, mf_antiinv: 10 },
-  'iron_sword':     { atk: 7, mf_crit: 20 },
-  'wooden_shield':  { def: 3, mf_anticrit: 15 },
-  'steel_mace':     { atk: 12, mf_antiinv: 35 },
-  'heavy_halberd':  { atk: 22, mf_crit: 50 },
-  'leather_cap':    { def: 1, agility: 1, mf_inv: 15 },
-  'leather_armor':  { def: 4, endurance: 1, mf_anticrit: 20 },
-  'leather_boots':  { def: 1, agility: 2, mf_inv: 25 },
-  'leather_gloves': { def: 1, strength: 1, mf_antiinv: 15 },
-  'copper_ring':    { endurance: 1, mf_anticrit: 10 }, 
-  'wolf_amulet':    { strength: 2, luck: 1, mf_crit: 15 },
-  'lucky_ring':     { luck: 3, mf_crit: 30 },
-  'ruby_ring':      { strength: 3, mf_antiinv: 25 }
-};
 
 // Функция расчета серверного уровня по накопленному опыту
 function getServerCorrectLevelByXp(xp) {
@@ -44,7 +28,7 @@ function getEquipmentBonus(equipped, bonusKey) {
     if (!itemId) return;
 
     // 🔥 ФИКС: Ищем предмет сначала в старой базе, а затем в нашем новом глобальном конфиге
-    let item = ITEMS_STAT_DB[itemId] || GAME_ITEMS_DATABASE[itemId];
+    let item =  GAME_ITEMS_DATABASE[itemId];
 
     if (item) {
       // Проверяем старый формат (если статы лежат на верхнем уровне объекта)
