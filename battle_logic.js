@@ -526,7 +526,7 @@ module.exports = function(io, socket, sb, activeRooms) {
     const teamA = [{
       uuid: `player_${playerData.id}`, id: String(playerData.id), name: playerData.name, icon: '👤', isBot: false,
       level: Number(playerData.level ?? 1), strength: p1Stats.strength, agility: p1Stats.agility,
-      endurance: p1Stats.endurance, intellect: p1Stats.intellect, luck: p1Stats.luck,
+      endurance: p1Stats.endurance,  luck: p1Stats.luck,
       currentHp: Math.min(Number(p1Hp || p1MaxHp), p1MaxHp), maxHp: p1MaxHp, socketId: null, turn: null,
       equipped: playerData.equipped || {}, inventory: playerData.inventory || {}, afkTurns: 0
     }];
@@ -534,7 +534,7 @@ module.exports = function(io, socket, sb, activeRooms) {
     const teamB = [{
       uuid: `player_${p2Data.id}`, id: String(p2Data.id), name: p2Data.name, icon: '👤', isBot: false, 
       level: Number(p2Data.level ?? 1), strength: p2Stats.strength, agility: p2Stats.agility,
-      endurance: p2Stats.endurance, intellect: p2Stats.intellect, luck: p2Stats.luck,
+      endurance: p2Stats.endurance, luck: p2Stats.luck,
       currentHp: Math.min(Number(p2Data.hp || p2MaxHp), p2MaxHp), maxHp: p2MaxHp, socketId: null, turn: null,
       equipped: p2Data.equipped || {}, inventory: p2Data.inventory || {}, afkTurns: 0
     }];
