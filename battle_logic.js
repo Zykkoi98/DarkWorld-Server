@@ -942,6 +942,8 @@ module.exports = function(io, socket, sb, activeRooms) {
       xp: Number(player.xp), 
       hp: Number(dbHpPayload), 
       level: Number(player.level), 
+      inventory: player.inventory, // <-- Сохраняем рюкзак, откуда забрали банки
+      equipped: player.equipped,   // <-- Сохраняем куклу, куда доложили банки
       [pointsKey]: Number(player.statpoints || player.statPoints || 0) 
     }).eq('id', Number(player.id));
 
@@ -1074,14 +1076,18 @@ module.exports = function(io, socket, sb, activeRooms) {
         endHpB = Math.max(1, Math.floor(maxHpB * 0.2));
       }
 
-      await Promise.all([
+    await Promise.all([
         sb.from('players').update({
           gold: Number(goldA), xp: Number(xpA), level: Number(levelA),
+          inventory: rowA.inventory,
+          equipped: rowA.equipped,
           [pointsKeyA]: Number(statpointsA), hp: Number(endHpA)
         }).eq('id', Number(playerA.id)),
 
         sb.from('players').update({
           gold: Number(goldB), xp: Number(xpB), level: Number(levelB),
+          inventory: rowB.inventory,
+          equipped: rowB.equipped,
           [pointsKeyB]: Number(statpointsB), hp: Number(endHpB)
         }).eq('id', Number(playerB.id))
       ]);
