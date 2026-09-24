@@ -225,10 +225,24 @@ module.exports = function(io, socket, sb, activeRooms) {
     if (pFighter) {
       pFighter.socketId = socket.id;
       socket.join(roomId);
+      
+      // 1. Сначала отправляем базовый пакет инициализации на фронтенд
       socket.emit('battle_init_data', {
         roomId: roomId, turnCount: room.turnCount, myUuid: pFighter.uuid,
         teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB)
       });
+
+      // 🔥 [ЖЕЛЕЗНЫЙ ФИКС БОЯ С 0 HP] Если игрок зашел мертвым, 
+      // запускаем проверку финала через 300мс, когда сокет гарантированно прогрузился в комнату
+      const isTeamADead = room.teamA.every(f => f.currentHp <= 0);
+      const isTeamBDead = room.teamB.every(f => f.currentHp <= 0);
+
+      if (isTeamADead || isTeamBDead) {
+        console.log(`🏁 [СОКЕТНЫЙ ЭКСПРЕСС-ФИНАЛ] Обнаружен боец с 0 HP при реконнекте. Закрываем матч.`);
+        setTimeout(() => {
+          executeRoundCalculations(roomId, activeRooms, io);
+        }, 300);
+      }
     }
   });
 
@@ -921,29 +935,41 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
           logs.push(`🏁 <strong>НИЧЬЯ НА АРЕНЕ!</strong> Силы гладиаторов равны. Награды аннулированы.`);
         }
       }
-
+       // ============================================================================
+      // 📤 ОТПРАВКА СЕТЕВОГО ПАКЕТА ФИНАЛА (БРОДК АСТ ВО ВСЮ КОМНАТУ БОЯ)
       // ============================================================================
-      // 📤 ОТПРАВКА СЕТЕВОГО ПАКЕТА ФИНАЛА
-      // ============================================================================
-      [...room.teamA, ...room.teamB].forEach(p => {
-        if (p.socketId) {
-          let personalResult = result;
-          if (room.type === 'pvp') {
-            const isTargetInTeamA = room.teamA.some(f => f.uuid === p.uuid);
-            if (isTargetInTeamA) personalResult = result;
-            else personalResult = (result === 'win') ? 'lose' : (result === 'lose' ? 'win' : 'draw');
-          }
-
-          io.to(p.socketId).emit('round_result', { 
-            turnCount: currentRound, 
-            logs: logs, 
-            isOver: true, 
-            resultType: personalResult,
-            teamA: sanitizeTeam(room.teamA), 
-            teamB: sanitizeTeam(room.teamB) 
+      // 🔥 [ЖЕЛЕЗНЫЙ ФИКС РЕКОННЕКТА] Отправляем итоги раунда/финала СРАЗУ ВО ВСЮ КОМНАТУ БОЯ,
+      // чтобы новые переподключенные сокеты гарантированно поймали пакет!
+      
+      if (room.type === 'pvp') {
+        // Для PvP разделяем результаты персонально по сокетам с прямой проверкой из ОЗУ комнаты
+        const playerA = room.teamA[0];
+        const playerB = room.teamB[0];
+        
+        if (playerA && playerA.socketId) {
+          io.to(playerA.socketId).emit('round_result', { 
+            turnCount: currentRound, logs: logs, isOver: true, resultType: result,
+            teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) 
           });
         }
-      });
+        if (playerB && playerB.socketId) {
+          const resB = (result === 'win') ? 'lose' : (result === 'lose' ? 'win' : 'draw');
+          io.to(playerB.socketId).emit('round_result', { 
+            turnCount: currentRound, logs: logs, isOver: true, resultType: resB,
+            teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) 
+          });
+        }
+      } else {
+        // Для PvE шлем универсальный бродкаст в комнату, клиент сам подхватит resultType
+        io.to(roomId).emit('round_result', { 
+          turnCount: currentRound, 
+          logs: logs, 
+          isOver: true, 
+          resultType: result,
+          teamA: sanitizeTeam(room.teamA), 
+          teamB: sanitizeTeam(room.teamB) 
+        });
+      }
 
         if (room.type === 'pve') {
             finalizePveBattle(room, result, logs, currentRound, io);
