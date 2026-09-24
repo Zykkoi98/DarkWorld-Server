@@ -224,5 +224,55 @@ module.exports = function(io, socket, sb) {
       socket.emit('error', 'Ошибка сервера при снятии экипировки.');
     }
   });
+   // --- ОБРАБОТЧИК В: НАВСЕГДА УНИЧТОЖИТЬ / ВЫБРОСИТЬ ПРЕДМЕТ ИЗ БД ---
+  socket.on('destroy_item_secure', async ({ userId, itemUuidOrId, isConsumable }) => {
+    try {
+      const nUserId = Number(userId);
+      const { data: dbPlayer, error: fetchErr } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+      if (fetchErr || !dbPlayer) return socket.emit('error', 'Персонаж не найден в БД.');
+
+      let inventory = dbPlayer.inventory || { equipment: [], resources: [], consumables: [] };
+      const invTab = isConsumable ? 'consumables' : 'equipment';
+      if (!inventory[invTab]) inventory[invTab] = [];
+      const inv = inventory[invTab];
+
+      // Ищем вещь в соответствующей вкладке рюкзака
+      const itemIdx = inv.findIndex(i => {
+        if (isConsumable) return i.id === itemUuidOrId;
+        return i.uuid === itemUuidOrId || i.id === itemUuidOrId;
+      });
+
+      if (itemIdx === -1) {
+        return socket.emit('error', 'У вас нет этого предмета в рюкзаке, невозможно выбросить!');
+      }
+
+      const itemName = inventory[invTab][itemIdx].name || inventory[invTab][itemIdx].id;
+
+      // 🔥 ТОТАЛЬНОЕ УНИЧТОЖЕНИЕ ПРЕДМЕТА
+      if (isConsumable) {
+        // Если это банка/свиток — уменьшаем стак на 1 штуку
+        if (Number(inv[itemIdx].count || 1) > 1) {
+          inv[itemIdx].count--;
+        } else {
+          inv.splice(itemIdx, 1); // Если была последняя — вырезаем из массива
+        }
+      } else {
+        // Если это шмотка — вырезаем ее уникальный UUID полностью
+        inv.splice(itemIdx, 1);
+      }
+
+      // Синхронизируем очищенный инвентарь в Supabase
+      await sb.from('players').update({ inventory }).eq('id', nUserId);
+      
+      console.log(`🗑️ [БЭКЕНД] Игрок ${nUserId} успешно уничтожил предмет: ${itemUuidOrId}`);
+      
+      // Отправляем игроку обновленный профиль города, рюкзак мгновенно перерисуется без этой вещи!
+      await triggerLoadGameSuccess(nUserId, socket, sb);
+
+    } catch (e) {
+      console.error("❌ Критический сбой при уничтожении предмета:", e);
+      socket.emit('error', 'Ошибка сервера при попытке выбросить предмет.');
+    }
+  });
 
 };
