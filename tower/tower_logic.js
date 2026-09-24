@@ -33,22 +33,20 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
   });
    // --- 🏰 ОБРАБОТЧИК А: ПРОЦЕДУРНЫЙ СПАВН ЭТАЖА ИЗ SUPABASE ---
-    // 🔥 [ЖЕЛЕЗНЫЙ ФИКС АВТОРИЗАЦИИ] Учим Башню узнавать сокет игрока при переходе с площади!
-  socket.on('load_game_secure', async ({ userId, username }) => {
-    console.log(`🔐 [БАШНЯ СЕТЬ] Сокет ${socket.id} успешно прошёл авторизацию Башни для игрока: ${username} (ID: ${userId})`);
+  // 🔥 ЗАМЕНИЛИ ИМЯ НА load_tower_game_secure, чтобы город не перехватывал запрос!
+  socket.on('load_tower_game_secure', async ({ userId, username }) => {
+    console.log(`🔐 [🏰 БАШНЯ АВТОР ИЗАЦИЯ] Сокет ${socket.id} успешно пробит для Башни: ${username} (ID: ${userId})`);
     try {
       const nUserId = Number(userId);
       const { data: dbPlayer } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
       
       if (dbPlayer) {
-        // Успешно отправляем профиль обратно на фронтенд Башни
-        socket.emit('load_game_success', { player: dbPlayer });
-        console.log(`📤 [БАШНЯ СЕТЬ] Профиль Инквизитора ${username} успешно отправлен на экран Башни.`);
-      } else {
-        console.error(`🚨 [БАШНЯ СЕТЬ] Игрок ID ${nUserId} не найден в Supabase при авторизации Башни!`);
+        // Отправляем специальный пакет успеха именно для Башни
+        socket.emit('tower_load_game_success', { player: dbPlayer });
+        console.log(`📤 [🏰 БАШНЯ] Профиль игрока ${username} успешно отправлен на экран Башни.`);
       }
     } catch (err) {
-      console.error("🚨 Ошибка экспресс-авторизации сокета Башни:", err.message);
+      console.error("🚨 Ошибка сокет-авторизации Башни:", err.message);
     }
   });
   socket.on('start_tower_battle_secure', async ({ userId, currentFloor }) => {
