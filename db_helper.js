@@ -252,7 +252,8 @@ module.exports = {
           endurance: Number(player.stats?.endurance || 1),
           luck: Number(player.stats?.luck || 1),
           inventory: player.inventory || { equipment: [], resources: [], consumables: [] },
-          equipped: player.equipped || { rings: [null, null, null] }
+          equipped: player.equipped || { rings: [null, null, null] },
+          tower_floor: Number(player.tower_floor ?? player.stats?.tower_floor ?? 1)
         };
 
         // Делаем атомарный upsert (если нет строки — создаст, если есть — обновит)
