@@ -11,6 +11,7 @@ const dbHelper = require('./db_helper');
 const inventoryLogic = require('./inventory_logic');
 const battleLogic = require('./battle_logic');
 const shopLogic = require('./shop/shop_logic');
+const towerLogic = require('./tower/tower_logic'); 
 const app = express();
 app.get('/', (req, res) => res.send('⚔️ Боевое ядро Dark World активно на Render!'));
 
@@ -29,13 +30,12 @@ const io = new Server(server, {
     credentials: true
   } 
 });
-
 // Инициализация Supabase из переменных окружения Render
 const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // Глобальная память для активных боевых комнат
 let activeRooms = {}; 
-  global.activeRooms = activeRooms;
+global.activeRooms = activeRooms;
 
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
@@ -55,14 +55,16 @@ io.on('connection', (socket) => {
   // 3. Инициализируем боевой движок (PvE монстры, PvP Арена лобби и комнаты)
   if (typeof battleLogic === 'function') {
     battleLogic(io, socket, sb, activeRooms);
-    
   }
-   // 🏰 [ДОБАВЛЕНО] Инициализируем изолированное ядро Бесконечной Башни и её Лавки
+
+  // 🏰 [ИСПРАВЛЕНО] Инициализируем ядро Бесконечной Башни (Переменная теперь легально объявлена)
   if (typeof towerLogic === 'function') {
     towerLogic(io, socket, sb, activeRooms);
   }
+
+  // 4. Инициализируем магазин города
   if (typeof shopLogic === 'function') {
-  shopLogic(io, socket, sb);
+    shopLogic(io, socket, sb);
   }
 
   // Безопасное отключение: чистим socketId оффлайн-игроков в активных битвах
