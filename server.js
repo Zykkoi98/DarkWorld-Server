@@ -57,6 +57,10 @@ io.on('connection', (socket) => {
     battleLogic(io, socket, sb, activeRooms);
     
   }
+   // 🏰 [ДОБАВЛЕНО] Инициализируем изолированное ядро Бесконечной Башни и её Лавки
+  if (typeof towerLogic === 'function') {
+    towerLogic(io, socket, sb, activeRooms);
+  }
   if (typeof shopLogic === 'function') {
   shopLogic(io, socket, sb);
   }

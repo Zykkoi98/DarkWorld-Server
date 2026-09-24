@@ -169,6 +169,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         if (global.executeRoundCalculations) global.executeRoundCalculations(roomId, activeRooms, io);
         return;
       }
+     socket.emit('arena_redirect_to_battle', { roomId: roomId });
       if (global.startServerTurnTimer) global.startServerTurnTimer(roomId, activeRooms, io);
 
     } catch (err) { socket.emit('error', `Ошибка Башни: ${err.message}`); }
