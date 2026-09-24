@@ -41,11 +41,15 @@ module.exports = function(io, socket, sb) {
         }
       }
 
-      let slotType = getConsumableSlotType(cleanItemId);
+     let slotType = getConsumableSlotType(cleanItemId);
       let requiredLevel = 1;
 
+      // Если это не расходник — ищем СТРОГО в новом едином конфиге GAME_ITEMS_DATABASE
       if (!slotType) {
-        let currentItemConfig = ITEMS_STAT_DB[cleanItemId];
+        // 🔥 УЛЬТИМАТИВНЫЙ ФИКС: Читаем конфиг шмотки только из новой базы GAME_ITEMS_DATABASE
+        let currentItemConfig = GAME_ITEMS_DATABASE[cleanItemId];
+
+        // Запасная подстраховка: если вещи нет в конфиге, ищем в каталоге магазина
         if (!currentItemConfig && global.SERVER_SHOP_DATABASE && global.SERVER_SHOP_DATABASE[cleanItemId]) {
           currentItemConfig = global.SERVER_SHOP_DATABASE[cleanItemId];
         }

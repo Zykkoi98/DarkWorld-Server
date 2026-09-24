@@ -32,7 +32,7 @@ function getEquipmentBonus(equipped, bonusKey) {
     if (!itemId) return;
 
     // 🔥 ФИКС: Ищем предмет сначала в старой базе, а затем в нашем новом глобальном конфиге
-    let item = ITEMS_STAT_DB[itemId] || GAME_ITEMS_DATABASE[itemId];
+    let item =  GAME_ITEMS_DATABASE[itemId];
 
     if (item) {
       // Проверяем старый формат (если статы лежат на верхнем уровне объекта)
@@ -52,7 +52,7 @@ function getEquipmentBonus(equipped, bonusKey) {
   if (equipped.rings && Array.isArray(equipped.rings)) {
     equipped.rings.forEach(itemId => {
       if (!itemId) return;
-      let item = ITEMS_STAT_DB[itemId] || GAME_ITEMS_DATABASE[itemId];
+      let item =  GAME_ITEMS_DATABASE[itemId];
       if (item) {
         if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
         if (item.bonus) {
