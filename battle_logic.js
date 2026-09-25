@@ -991,31 +991,85 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
 
        // 🔥 [БРОНИРОВАННЫЙ ФИКС СИНХРОНИЗАЦИИ БАШНИ]
         if (room.isTower) {
-        console.log(`🏰 [ДИСПЕТЧЕР БАШНИ] Передаем управление в асинхронный финишер...`);
+        console.log(`🏰 [ДИСПЕТЧЕР БАШНИ] Запускаем расчет наград до отправки пакетов...`);
         
-        // 🎯 СИНХРОННАЯ СБОРКА ТЕКСТА ДО ОТ ПРАВКИ В СЕТЬ:
         const currentFloorLvl = Number(room.towerFloor || 1);
         
         if (result === 'win') {
-          // Считаем точный опыт по той же формуле: База 5 + 3 за уровень
           const calculatedXp = 5 + (currentFloorLvl * 3);
-          
-          // Пишем гарантированный лог победы, который улетит в бродкаст
           logs.push(`🏁 <strong>ПОБЕДА В БАШНЕ!</strong> Вы зачистили ${currentFloorLvl} этаж.`);
-          logs.push(`🎁 Награда зачислена в облако Supabase: ✨ +${calculatedXp} опыта и случайный шанс на золото и монеты Башни!`);
+          logs.push(`🎁 Награда отправлена в Supabase: ✨ +${calculatedXp} опыта и шанс на монеты Башни!`);
         } else {
           logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Башня сброшена на 1 этаж. Наложено КД на 3 часа.`);
         }
 
-        // Запускаем асинхронную запись в БД в фоновом режиме, сервер больше не ждет её для вывода текста
-        towerFinisher.finalizeTowerBattleSecure(room, result, sb);
-      } 
-      else if (room.type === 'pve') {
-        finalizePveBattle(room, result, logs, currentRound, io);
-      } 
-      else if (room.type === 'pvp') {
-        finalizePvpBattle(room, result, logs, currentRound, io);
+        // Запускаем асинхронное сохранение в Supabase (монеты, этаж, ХП)
+        await towerFinisher.finalizeTowerBattleSecure(room, result, sb);
       }
+      // ============================================================================
+
+      // Твоя стандартная логика для остальных PvE/PvP режимов
+      if (room.type === 'pvp') {
+        const playerA = room.teamA[0];
+        const playerB = room.teamB[0];
+        const goldReward = 25;
+        const calculatePvpXpLog = (winnerLvl, loserLvl) => {
+          let baseXp = Number(loserLvl || 1) * 15;
+          let multiplier = 1;
+          if (loserLvl > winnerLvl) multiplier = 1 + ((loserLvl - winnerLvl) * 0.25);
+          else if (loserLvl < winnerLvl) multiplier = Math.max(0.1, 1 - ((winnerLvl - loserLvl) * 0.20));
+          return Math.floor(baseXp * multiplier);
+        };
+
+        if (result === 'win' && playerA && playerB) {
+          const xpGained = calculatePvpXpLog(playerA.level, playerB.level);
+          logs.push(`🏁 <strong>ПОБЕДА НА АРЕНЕ!</strong> Гладиатор <strong>${playerA.name}</strong> поверг соперника! Награда: 💰 ${goldReward} монет, ✨ ${xpGained} опыта.`);
+        } else if (result === 'lose' && playerA && playerB) {
+          const xpGained = calculatePvpXpLog(playerB.level, playerA.level);
+          logs.push(`🏁 <strong>ПОБЕДА НА АРЕНЕ!</strong> Гладиатор <strong>${playerB.name}</strong> одержал верх! Награда: 💰 ${goldReward} монет, ✨ ${xpGained} опыта.`);
+        } else {
+          logs.push(`🏁 <strong>НИЧЬЯ НА АРЕНЕ!</strong> Силы гладиаторов равны. Награды аннулированы.`);
+        }
+      }
+
+      // 🔥 ТЕПЕРЬ СЕТЕВОЙ ПАКЕТ УЛЕТАЕТ В САМОМ КОНЦЕ С УЖЕ НАПОЛНЕННЫМ МАССИВОМ LOGS!
+      if (room.type === 'pvp') {
+        const playerA = room.teamA[0];
+        const playerB = room.teamB[0];
+        if (playerA && playerA.socketId) {
+          io.to(playerA.socketId).emit('round_result', { 
+            turnCount: currentRound, logs: logs, isOver: true, resultType: result,
+            teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) 
+          });
+        }
+        if (playerB && playerB.socketId) {
+          const resB = (result === 'win') ? 'lose' : (result === 'lose' ? 'win' : 'draw');
+          io.to(playerB.socketId).emit('round_result', { 
+            turnCount: currentRound, logs: logs, isOver: true, resultType: resB,
+            teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB) 
+          });
+        }
+      } else {
+        // ДЛЯ БАШНИ И ОБЫЧНОГО PvE ЛЕСА:
+        io.to(roomId).emit('round_result', { 
+          turnCount: currentRound, 
+          logs: logs, // Теперь здесь железно лежат строки наград!
+          isOver: true, 
+          resultType: result,
+          teamA: sanitizeTeam(room.teamA), 
+          teamB: sanitizeTeam(room.teamB) 
+        });
+      }
+
+      // Вызываем старые финишеры только для обычного леса/PvP (так как Башню мы обработали выше)
+      if (!room.isTower) {
+        if (room.type === 'pve') {
+          finalizePveBattle(room, result, logs, currentRound, io);
+        } else if (room.type === 'pvp') {
+          finalizePvpBattle(room, result, logs, currentRound, io);
+        }
+      }
+
       setTimeout(() => {
         delete activeRooms[room.id];
         console.log(`🗑️ [ОЗУ] Комната ${room.id} полностью выгружена.`);
