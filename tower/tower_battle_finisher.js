@@ -62,13 +62,23 @@ async function finalizeTowerBattleSecure(room, result, sb) {
         });
       }
       
-      let currentTowerCoins = Number(player.tower_coins ?? 0);
+   // 🔥 Запрашиваем из Supabase самый свежий баланс кошелька прямо в секунду триумфа!
+const { data: freshPlayerRow } = await sb.from('players')
+  .select('gold, xp, tower_coins')
+  .eq('id', Number(player.id))
+  .maybeSingle();
 
-      player.gold = Number(player.gold || 0) + gainedGold;
-      player.xp = Number(player.xp || 0) + gainedXp;
-      player.tower_coins = currentTowerCoins + gainedTowerCoins;
+    // Если база что-то вернула — берем оттуда, если нет — подстраховываемся ОЗУ
+    let baseGold = freshPlayerRow ? Number(freshPlayerRow.gold || 0) : Number(player.gold || 0);
+    let baseXp = freshPlayerRow ? Number(freshPlayerRow.xp || 0) : Number(player.xp || 0);
+    let baseTowerCoins = freshPlayerRow ? Number(freshPlayerRow.tower_coins || 0) : Number(player.tower_coins || 0);
 
-      console.log(`🎁 [БАШНЯ ИТОГ НАГРАД] Собрано динамически: +${gainedGold} золота, +${gainedTowerCoins} монет Башни, +${gainedXp} опыта`);
+    // Плюсуем заработанный в бою лут строго к СВЕЖИМ цифрам из базы данных
+    player.gold = baseGold + gainedGold;
+    player.xp = baseXp + gainedXp;
+    player.tower_coins = baseTowerCoins + gainedTowerCoins;
+
+    console.log(`🎁 [БАШНЯ ИТОГ НАГРАД] Успешный перерасчет. Свежая база: ${baseTowerCoins}. Награда: +${gainedTowerCoins}. Итог в БД: ${player.tower_coins}`);
       
       // 🔥 ФИКС: Безопасно пишем в room.logs вместо logs
       room.logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда этажа: 💰 +${gainedGold} золота, 🪙 +${gainedTowerCoins} монет Башни, ✨ +${gainedXp} опыта.`);
