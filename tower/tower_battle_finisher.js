@@ -61,6 +61,9 @@ async function finalizeTowerBattleSecure(room, result, sb) {
           }
         });
       }
+      room.gainedXpLocal = gainedXp;
+      room.gainedGoldLocal = gainedGold;
+      room.gainedCoinsLocal = gainedTowerCoins;
       
    // 🔥 Запрашиваем из Supabase самый свежий баланс кошелька прямо в секунду триумфа!
 const { data: freshPlayerRow } = await sb.from('players')

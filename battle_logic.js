@@ -993,18 +993,29 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
         if (room.isTower) {
         console.log(`🏰 [ДИСПЕТЧЕР БАШНИ] Запускаем расчет наград до отправки пакетов...`);
         
+        // Сначала вызываем финишер, НО убираем из него асинхронное ожидание базы, 
+        // чтобы кубики монет и золота рассчитались в ОЗУ комнаты мгновенно и синхронно!
+        await towerFinisher.finalizeTowerBattleSecure(room, result, sb);
+        
         const currentFloorLvl = Number(room.towerFloor || 1);
         
         if (result === 'win') {
-          const calculatedXp = 5 + (currentFloorLvl * 3);
-          logs.push(`🏁 <strong>ПОБЕДА В БАШНЕ!</strong> Вы зачистили ${currentFloorLvl} этаж.`);
-          logs.push(`🎁 Награда отправлена в Supabase: ✨ +${calculatedXp} опыта и шанс на монеты Башни!`);
+          // Вытаскиваем точные цифры наград, которые финишер только что сгенерировал в ОЗУ комнаты!
+          const txp = Number(room.gainedXpLocal || (5 + (currentFloorLvl * 3)));
+          const tgold = Number(room.gainedGoldLocal || 0);
+          const tcoins = Number(room.gainedCoinsLocal || 0);
+
+          // Собираем чистый лог без всяких приписок и гипотетических шансов!
+          let rewardText = `🏁 <strong>ПОБЕДА В БАШНЕ!</strong> Вы зачистили ${currentFloorLvl} этаж. Награда: ✨ +${txp} опыта`;
+          
+          if (tgold > 0) rewardText += `, 💰 +${tgold} золота`;
+          if (tcoins > 0) rewardText += `, 🪙 +${tcoins} монет Башни`;
+          rewardText += `.`;
+          
+          logs.push(rewardText);
         } else {
           logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Башня сброшена на 1 этаж. Наложено КД на 3 часа.`);
         }
-
-        // Запускаем асинхронное сохранение в Supabase (монеты, этаж, ХП)
-        await towerFinisher.finalizeTowerBattleSecure(room, result, sb);
       }
       // ============================================================================
 
