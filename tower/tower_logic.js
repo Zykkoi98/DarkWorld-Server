@@ -118,12 +118,29 @@ module.exports = function(io, socket, sb, activeRooms) {
       socket.emit('tower_shop_success', { message: "🎉 Успешно куплено!" });
     } catch (err) { socket.emit('tower_shop_error', { message: `🚨 Ошибка: ${err.message}` }); }
   });
-  // --- 🏰 ОБРАБОТЧИК: ПРОЦЕДУРНЫЙ СПАВН ЭТАЖА И РЕДИРЕКТ ---
+// --- 🏰 ОБРАБОТЧИК: ПРОЦЕДУРНЫЙ СПАВН ЭТАЖА И РЕДИРЕКТ С АНТИ-СПАМОМ КД ---
   socket.on('start_tower_battle_secure', async ({ userId, currentFloor }) => {
     console.log(`\n📥 [БЭКЕНД] Начат штурм этажа: ${currentFloor}`);
     try {
       const nUserId = Number(userId);
       const floor = Math.max(1, Number(currentFloor || 1));
+
+      // ============================================================================
+      // 🔥 [ЖЕЛЕЗНЫЙ АНТИЧИТ-БАРЬЕР БЭКЕНДА]: ПЕРЕПРОВЕРКА RACE CONDITION
+      // ============================================================================
+      // Перед тем как спавнить ботов, лезем в Supabase и проверяем таймер КД Башни
+      const { data: checkTimerRow } = await sb.from('player_timers')
+        .select('ends_at')
+        .eq('user_id', nUserId)
+        .eq('timer_type', 'tower_cooldown')
+        .maybeSingle();
+
+      // Если в базе висит активный таймер КД — рубим сессию штурма на корню!
+      if (checkTimerRow && new Date(checkTimerRow.ends_at) > new Date()) {
+        console.warn(`🚨 [АНТИЧИТ ПЕРЕХВАТ] Игрок ${nUserId} пытался обойти КД Башни быстрым кликом!`);
+        return socket.emit('error', '❌ Башня еще заблокирована! Дождитесь окончания кулдауна.');
+      }
+      // ============================================================================
 
       await sb.from('arena_lobby').delete().eq('id', nUserId);
       io.emit('arena_lobby_updated');
