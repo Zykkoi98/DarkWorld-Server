@@ -45,11 +45,13 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
   });
 
-  // --- 🔐 ОБРАБОТЧИК: ИЗОЛИРОВАННАЯ АВТОР ИЗАЦИЯ СОКЕТА БАШНИ ---
+    // --- 🔐 ОБРАБОТЧИК: ИЗОЛИРОВАННАЯ АВТОР ИЗАЦИЯ СОКЕТА БАШНИ С ПОЛНЫМИ БАНКАМИ ---
   socket.on('load_tower_game_secure', async ({ userId, username }) => {
     console.log(`🔐 [🏰 БАШНЯ АВТОР ИЗАЦИЯ] Сокет ${socket.id} пробит для Башни: ${username}`);
     try {
       const nUserId = Number(userId);
+      
+      // Запрашиваем абсолютно свежую строку игрока напрямую из Supabase
       const { data: dbPlayer } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
       
       if (dbPlayer) {
@@ -58,30 +60,38 @@ module.exports = function(io, socket, sb, activeRooms) {
         let pointsKey = dbPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
 
         const playerProfile = {
-                id: dbPlayer.id, name: dbPlayer.name, avatar: dbPlayer.avatar || "assets/avatars/hero1.png",
-                level: cloudLevel, gold: dbHelper.safeReadField(dbPlayer, 'gold', 0), xp: currentXp,
-                hp: dbHelper.safeReadField(dbPlayer, 'hp', 10), statPoints: dbHelper.safeReadField(dbPlayer, pointsKey, 0),
-                currentTownIndex: dbHelper.safeReadField(dbPlayer, 'currenttownindex', 0),
-                
-                // 🔥 [ФИНАЛЬНЫЙ ФИКС ЭТАЖА БАШНИ]
-                // Теперь сервер честно забирает двойку из Supabase и шлет её на телефон!
-                tower_floor: dbHelper.safeReadField(dbPlayer, 'tower_floor', 1),
-                tower_coins: dbHelper.safeReadField(dbPlayer, 'tower_coins', 0), 
+          id: dbPlayer.id, 
+          name: dbPlayer.name, 
+          avatar: dbPlayer.avatar || "assets/avatars/hero1.png",
+          level: cloudLevel, 
+          gold: dbHelper.safeReadField(dbPlayer, 'gold', 0), 
+          xp: currentXp,
+          hp: dbHelper.safeReadField(dbPlayer, 'hp', 10), 
+          statPoints: dbHelper.safeReadField(dbPlayer, pointsKey, 0),
+          currentTownIndex: dbHelper.safeReadField(dbPlayer, 'currenttownindex', 0),
+          
+          tower_floor: dbHelper.safeReadField(dbPlayer, 'tower_floor', 1),
+          tower_coins: dbHelper.safeReadField(dbPlayer, 'tower_coins', 0), 
 
-                stats: {
-                    strength: dbHelper.safeReadField(dbPlayer, 'strength', 1),
-                    agility: dbHelper.safeReadField(dbPlayer, 'agility', 1),
-                    endurance: dbHelper.safeReadField(dbPlayer, 'endurance', 1),
-                    luck: dbHelper.safeReadField(dbPlayer, 'luck', 1)
-                },
-                inventory: dbPlayer.inventory || { equipment: [], resources: [], consumables: [] },
-                equipped: dbPlayer.equipped || { rings: [null, null, null] }
-                };
+          stats: {
+            strength: dbHelper.safeReadField(dbPlayer, 'strength', 1),
+            agility: dbHelper.safeReadField(dbPlayer, 'agility', 1),
+            endurance: dbHelper.safeReadField(dbPlayer, 'endurance', 1),
+            luck: dbHelper.safeReadField(dbPlayer, 'luck', 1)
+          },
+          // 🔥 [ЖЕЛЕЗНЫЙ ФИКС БАНОК]: Насильно отдаем свежий рюкзак и куклу, 
+          // в которые финализатор секунду назад доложил банки!
+          inventory: dbPlayer.inventory || { equipment: [], resources: [], consumables: [] },
+          equipped: dbPlayer.equipped || { rings: [null, null, null] }
+        };
 
-                socket.emit('tower_load_game_success', { player: playerProfile });
-            }
-            } catch (err) { console.error("🚨 Ошибка сокет-авторизации Башни:", err.message); }
-        });
+        // Пушим на телефон игрока
+        socket.emit('tower_load_game_success', { player: playerProfile });
+      }
+    } catch (err) { 
+      console.error("🚨 Ошибка сокет-авторизации Башни:", err.message); 
+    }
+  });
 
   // --- ОБРАБОТЧИК Б: ЛАВКА БАШНИ ---
   socket.on('buy_tower_shop_item_secure', async ({ userId, itemId }) => {
