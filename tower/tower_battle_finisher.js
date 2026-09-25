@@ -81,7 +81,7 @@ const { data: freshPlayerRow } = await sb.from('players')
     console.log(`🎁 [БАШНЯ ИТОГ НАГРАД] Успешный перерасчет. Свежая база: ${baseTowerCoins}. Награда: +${gainedTowerCoins}. Итог в БД: ${player.tower_coins}`);
       
       // 🔥 ФИКС: Безопасно пишем в room.logs вместо logs
-      room.logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда этажа: 💰 +${gainedGold} золота, 🪙 +${gainedTowerCoins} монет Башни, ✨ +${gainedXp} опыта.`);
+      //room.logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда этажа: 💰 +${gainedGold} золота, 🪙 +${gainedTowerCoins} монет Башни, ✨ +${gainedXp} опыта.`);
 
       const oldLevel = Number(player.level || 1);
       const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp);

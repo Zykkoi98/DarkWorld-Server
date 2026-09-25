@@ -990,17 +990,26 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
       }
 
        // 🔥 [БРОНИРОВАННЫЙ ФИКС СИНХРОНИЗАЦИИ БАШНИ]
-       if (room.isTower) {
+        if (room.isTower) {
         console.log(`🏰 [ДИСПЕТЧЕР БАШНИ] Передаем управление в асинхронный финишер...`);
-        // Сервер дожидается окончания расчетов и записи в Supabase
-        await towerFinisher.finalizeTowerBattleSecure(room, result, sb);
         
-        // 🔥 СИНХРО-ФИКС ТЕКСТА: Забираем честный, сгенерированный финишером лог 
-        // из памяти комнаты и пушим его в общий поток отправки на экран телефона!
-        if (room.logs && room.logs.length > 0) {
-          room.logs.forEach(msg => logs.push(msg));
+        // 🎯 СИНХРОННАЯ СБОРКА ТЕКСТА ДО ОТ ПРАВКИ В СЕТЬ:
+        const currentFloorLvl = Number(room.towerFloor || 1);
+        
+        if (result === 'win') {
+          // Считаем точный опыт по той же формуле: База 5 + 3 за уровень
+          const calculatedXp = 5 + (currentFloorLvl * 3);
+          
+          // Пишем гарантированный лог победы, который улетит в бродкаст
+          logs.push(`🏁 <strong>ПОБЕДА В БАШНЕ!</strong> Вы зачистили ${currentFloorLvl} этаж.`);
+          logs.push(`🎁 Награда зачислена в облако Supabase: ✨ +${calculatedXp} опыта и случайный шанс на золото и монеты Башни!`);
+        } else {
+          logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Башня сброшена на 1 этаж. Наложено КД на 3 часа.`);
         }
-      }  
+
+        // Запускаем асинхронную запись в БД в фоновом режиме, сервер больше не ждет её для вывода текста
+        towerFinisher.finalizeTowerBattleSecure(room, result, sb);
+      } 
       else if (room.type === 'pve') {
         finalizePveBattle(room, result, logs, currentRound, io);
       } 
