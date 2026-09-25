@@ -36,8 +36,7 @@ function getEquipmentBonus(equipped, bonusKey) {
     let item =  GAME_ITEMS_DATABASE[itemId];
 
     if (item) {
-      // Проверяем старый формат (если статы лежат на верхнем уровне объекта)
-      if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
+      
       
       // 🔥 Проверяем новый формат (если статы лежат внутри объекта bonus, как на фронтенде)
       if (item.bonus) {
@@ -55,7 +54,6 @@ function getEquipmentBonus(equipped, bonusKey) {
       if (!itemId) return;
       let item =  GAME_ITEMS_DATABASE[itemId];
       if (item) {
-        if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
         if (item.bonus) {
           if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
           if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {

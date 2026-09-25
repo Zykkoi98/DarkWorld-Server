@@ -51,9 +51,6 @@ function getEquipmentBonus(equipped, bonusKey) {
     let item =  GAME_ITEMS_DATABASE[itemId];
 
     if (item) {
-      // Проверяем старый формат (если статы лежат на верхнем уровне объекта)
-      if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
-      
       // 🔥 Проверяем новый формат (если статы лежат внутри объекта bonus, как на фронтенде)
       if (item.bonus) {
         if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
@@ -375,7 +372,7 @@ module.exports = {
           name: player.name,
           avatar: player.avatar || "assets/avatars/hero1.png",
           level: Number(player.level || 1),
-          gold: Number(player.gold || 50),
+          gold: Number(player.gold || 200),
           xp: Number(player.xp || 0),
           hp: Number(player.hp || 10),
           statpoints: Number(player.statPoints || player.statpoints || 5),
