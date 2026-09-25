@@ -1,7 +1,3 @@
-// ============================================================================
-// ===== 🏰 ИСПРАВЛЕННЫЙ МОДУЛЬ ФИНАЛИЗАЦИИ БОЕВ БАШНИ (TOWER_BATTLE_FINISHER.JS) =====
-// ============================================================================
-
 const dbHelper = require('../db_helper');
 
 async function finalizeTowerBattleSecure(room, result, sb) {
@@ -13,7 +9,6 @@ async function finalizeTowerBattleSecure(room, result, sb) {
       return;
     }
 
-    // Подстраховка: если массива логов в комнате нет, создаем его, чтобы сервер не падал
     if (!room.logs) room.logs = [];
 
     let gainedXp = 0; 
@@ -23,116 +18,100 @@ async function finalizeTowerBattleSecure(room, result, sb) {
 
     const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-    // Автодополнение банок на кукле
+    // 1. 🔥 [ЖЕЛЕЗНЫЙ АНТИ-ОТКАТ]: Запрашиваем САМЫЙ свежий профиль игрока из Supabase
+    // прямо в секунду триумфа/поражения, чтобы не затереть покупки из Магазина!
+    const { data: freshDbPlayer, error: fetchErr } = await sb.from('players')
+      .select('*')
+      .eq('id', Number(player.id))
+      .maybeSingle();
+
+    if (fetchErr || !freshDbPlayer) {
+      console.error("🚨 [TOWER КРИТ] Не удалось прочитать свежий профиль из БД для синхронизации!");
+      return;
+    }
+
+    // Извлекаем актуальные на эту микросекунду данные кошелька и инвентаря
+    let baseGold = Number(freshDbPlayer.gold || 0);
+    let baseXp = Number(freshDbPlayer.xp || 0);
+    let baseTowerCoins = Number(freshDbPlayer.tower_coins || 0);
+    let currentDbLevel = Number(freshDbPlayer.level || 1);
+    
+    // Берем актуальный инвентарь и куклу из базы, а не из старого ОЗУ боя!
+    let liveInventory = freshDbPlayer.inventory || { equipment: [], resources: [], consumables: [] };
+    let liveEquipped = freshDbPlayer.equipped || { rings: [null, null, null] };
+
+    // Подменяем ссылки в ОЗУ комнаты, чтобы автодополнение банок работало с живой сумкой
+    player.inventory = liveInventory;
+    player.equipped = liveEquipped;
+    
     if (global.autoRefillPotionsAfterBattle) {
       global.autoRefillPotionsAfterBattle(player);
     }
 
-    // Собираем базовый пакет апдейта для таблицы игроков
-    let pointsKey = (player.statpoints !== undefined) ? 'statpoints' : 'statPoints';
-    let updatePayload = { 
-      gold: Number(player.gold), 
-      xp: Number(player.xp), 
-      level: Number(player.level), 
-      inventory: player.inventory, 
-      equipped: player.equipped,   
-      [pointsKey]: Number(player.statpoints || player.statPoints || 0) 
+    let pointsKey = (freshDbPlayer.statpoints !== undefined) ? 'statpoints' : 'statPoints';
+    let currentDbStatPoints = Number(freshDbPlayer[pointsKey] || 0);
+
+    // Готовим базовый пакет апдейта
+    let updatePayload = {
+      inventory: player.inventory, // Теперь тут легально дополненные банки без отката шмота!
+      equipped: player.equipped
     };
 
-if (result === 'win') {
-      // 🏆 ИГРОК ПОБЕДИЛ СТРАЖЕЙ БАШНИ
+    if (result === 'win') {
+      // 🏆 РАСЧЕТ НАГРАДЫ ПРИ ПОБЕДЕ
       if (room.teamB && Array.isArray(room.teamB)) {
         room.teamB.forEach(m => { 
           const monsterLevel = Number(m.level || 1);
-
-          // 🔥 ЖЕЛЕЗНЫЙ ФИКС БОССА: 
-          // Если у монстра есть индивидуальные rewardXp / rewardGold (это Босс), берем их!
-          // Если полей нет — считаем по стандартной формуле этажа для обычных мобов.
           const monsterXp = (m.rewardXp !== undefined) ? Number(m.rewardXp) : (5 + (monsterLevel * 3));
           gainedXp += monsterXp;
 
-          // Динамическое золото: для Босса берем его rewardGold, для моба — 10% шанс на уровень
           if (m.rewardGold !== undefined) {
-            // У Босса золото падает со 100% шансом, если оно прописано в его шаблоне
             gainedGold += Number(m.rewardGold);
           } else if (rand(1, 100) <= 10) {
             gainedGold += monsterLevel;
           }
 
-      // Монеты Башни: 30% шанс на выпадение с каждого моба
           if (rand(1, 100) <= 30) {
-            // 🔥 НОВАЯ СДЕРЖАННАЯ RPG ФОРМУЛА: 
-            // Стартуем с 1 монеты, и каждые полные 5 уровней этажа лимит увеличивается на +1 монету!
             let maxCoins = 1 + Math.floor((monsterLevel - 1) / 5);
-            
-            // Если это Босс — легально удваиваем лимит монет за его голову
-            const isBoss = (m.rewardXp !== undefined);
+            const isBoss = (m.rewardXp !== undefined && String(m.id).includes('boss'));
             if (isBoss) maxCoins = maxCoins * 2;
-
-            // Бросаем кубик от 1 до рассчитанного строгого максимума
             gainedTowerCoins += rand(1, Math.max(1, maxCoins));
           }
         });
       }
+
       room.gainedXpLocal = gainedXp;
       room.gainedGoldLocal = gainedGold;
       room.gainedCoinsLocal = gainedTowerCoins;
-      
-   // 🔥 Запрашиваем из Supabase самый свежий баланс кошелька прямо в секунду триумфа!
-const { data: freshPlayerRow } = await sb.from('players')
-  .select('gold, xp, tower_coins')
-  .eq('id', Number(player.id))
-  .maybeSingle();
 
-    // Если база что-то вернула — берем оттуда, если нет — подстраховываемся ОЗУ
-    let baseGold = freshPlayerRow ? Number(freshPlayerRow.gold || 0) : Number(player.gold || 0);
-    let baseXp = freshPlayerRow ? Number(freshPlayerRow.xp || 0) : Number(player.xp || 0);
-    let baseTowerCoins = freshPlayerRow ? Number(freshPlayerRow.tower_coins || 0) : Number(player.tower_coins || 0);
+      // Плюсуем лут строго к СВЕЖИМ цифрам из базы данных
+      updatePayload.gold = baseGold + gainedGold;
+      updatePayload.xp = baseXp + gainedXp;
+      updatePayload.tower_coins = baseTowerCoins + gainedTowerCoins;
 
-    // Плюсуем заработанный в бою лут строго к СВЕЖИМ цифрам из базы данных
-    player.gold = baseGold + gainedGold;
-    player.xp = baseXp + gainedXp;
-    player.tower_coins = baseTowerCoins + gainedTowerCoins;
-
-    console.log(`🎁 [БАШНЯ ИТОГ НАГРАД] Успешный перерасчет. Свежая база: ${baseTowerCoins}. Награда: +${gainedTowerCoins}. Итог в БД: ${player.tower_coins}`);
-      
-      // 🔥 ФИКС: Безопасно пишем в room.logs вместо logs
-      //room.logs.push(`🏁 <strong>ПОБЕДА!</strong> Награда этажа: 💰 +${gainedGold} золота, 🪙 +${gainedTowerCoins} монет Башни, ✨ +${gainedXp} опыта.`);
-
-      const oldLevel = Number(player.level || 1);
-      const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp);
-      
-      if (correctLevel > oldLevel) {
-        const levelsGained = correctLevel - oldLevel;
-        player[pointsKey] = Number(player[pointsKey] || 0) + (levelsGained * 5);
-        player.level = correctLevel;
-        player.currentHp = dbHelper.getServerMaxHp(player);
-        room.logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня!`);
-      }
-      
-      dbHpPayload = player.currentHp;
-
-      // НАЧИСЛЯЕМ СЛЕДУЮЩИЙ ЭТАЖ И ПИШЕМ В PAYLOAD
-      updatePayload.tower_floor = Number(room.towerFloor || 1) + 1;
-      console.log(`🏰 [БАШНЯ УСПЕХ] Игрок ${player.name} прошел этаж ${room.towerFloor}. Открыт этаж: ${updatePayload.tower_floor}`);
-
+      // Проверка левелапа по свежему опыту
+      const correctLevel = dbHelper.getServerCorrectLevelByXp(updatePayload.xp);
+      if (correctLevel > currentDbLevel) {
+        const levelsGained = correctLevel - currentDbLevel;
+        updatePayload[pointsKey] = currentDbStatPoints + (levelsGained * 5);
+        updatePayload.level = correctLevel;
+        
+        // Восстанавливаем ХП до фулла при левелапе
+        const virtualPlayer = { endurance: Number(freshDbPlayer.endurance || 1), equipped: player.equipped };
+        updatePayload.hp = dbHelper.getServerMaxHp(virtualPlayer);
       } else {
-      // 💀 ИГРОК ПРОИГРАЛ ИЛИ НИЧЬЯ
-      player.currentHp = 0;
-      dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2)); // Воскрешаем на 20% ХП
+        updatePayload.level = currentDbLevel;
+        updatePayload[pointsKey] = currentDbStatPoints;
+        updatePayload.hp = player.currentHp; // Игрок выжил, сохраняем остаток ХП
+      }
 
-      // 🔥 Запрашиваем из Supabase свежий баланс перед проигрышем, чтобы не списать монеты в NULL
-      const { data: freshPlayerRowLose } = await sb.from('players')
-        .select('gold, xp, tower_coins')
-        .eq('id', Number(player.id))
-        .maybeSingle();
+      // Начисляем следующий этаж Башни
+      updatePayload.tower_floor = Number(room.towerFloor || 1) + 1;
+      console.log(` Lancaster 🏰 [БАШНЯ УСПЕХ] Открыт новый этаж: ${updatePayload.tower_floor}`);
 
-      // Намертво фиксируем текущий кошелек, защищая от NULL и NaN
-      player.gold = freshPlayerRowLose ? Number(freshPlayerRowLose.gold || 0) : Number(player.gold || 0);
-      player.xp = freshPlayerRowLose ? Number(freshPlayerRowLose.xp || 0) : Number(player.xp || 0);
-      player.tower_coins = freshPlayerRowLose ? Number(freshPlayerRowLose.tower_coins || 0) : Number(player.tower_coins || 0);
-
-      // ⏱️ ЗАПИСЫВАЕМ КД НА 3 ЧАСА В ТАБЛИЦУ ТАЙМЕРОВ
+    } else {
+      // 💀 РАСЧЕТ ПРИ ПОРАЖЕНИИ
+      // Записываем КД на 3 часа в таблицу таймеров
       const cooldownTime = new Date(Date.now() + 3 * 60 * 60 * 1000); 
       await sb.from('player_timers').upsert({
         user_id: Number(player.id),
@@ -140,33 +119,32 @@ const { data: freshPlayerRow } = await sb.from('players')
         ends_at: cooldownTime.toISOString()
       }, { onConflict: 'user_id,timer_type' });
 
-      console.log(`⏱️ [БД ТАЙМЕР] Записано поражение в Башне. КД повешено для ID ${player.id} до ${cooldownTime.toISOString()}`);
-
-      updatePayload.tower_floor = 1; 
-      player.tower_floor = 1;
+      // Защищаем кошелек от откатов при проигрыше
+      updatePayload.gold = baseGold;
+      updatePayload.xp = baseXp;
+      updatePayload.tower_coins = baseTowerCoins;
+      updatePayload.level = currentDbLevel;
+      updatePayload[pointsKey] = currentDbStatPoints;
       
-      // Пишем лог поражения прямо в комнату
-      room.logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Башня сброшена на 1 этаж. Повешено КД на 3 часа.`);
+      // Воскрешаем на 20% ХП от свежего капа выносливости
+      const virtualPlayerLose = { endurance: Number(freshDbPlayer.endurance || 1), equipped: player.equipped };
+      updatePayload.hp = Math.max(1, Math.floor(dbHelper.getServerMaxHp(virtualPlayerLose) * 0.2));
+
+      // Башня сбрасывается на 1 этаж
+      updatePayload.tower_floor = 1; 
     }
-    // Собираем финальный пакет для Supabase со всеми свежими данными
-    updatePayload.gold = Number(player.gold);
-    updatePayload.xp = Number(player.xp);
-    updatePayload.level = Number(player.level);
-    updatePayload.hp = Number(dbHpPayload);
-    updatePayload.tower_coins = Number(player.tower_coins);
-    updatePayload[pointsKey] = Number(player[pointsKey] || 0);
-    
-    // Записываем финальный результат штурма в облако Supabase
+
+    // Записываем финальный бронированный пакет в облако Supabase
     const { error: dbUpdateErr } = await sb.from('players').update(updatePayload).eq('id', Number(player.id));
     
     if (dbUpdateErr) {
       console.error("🚨 [Supabase SQL Error при сохранении Башни]:", dbUpdateErr.message);
     } else {
-      console.log(`☁️ [БД БАШНЯ СИНХРОНИЗАЦИЯ] Все награды, КД и ХП (${dbHpPayload}) зафиксированы в облаке.`);
+      console.log(`☁️ [БД БАШНЯ СИНХРОНИЗАЦИЯ] Успешно сохранено без откатов Магазина.`);
     }
 
   } catch (err) {
-    console.error("❌ Фатальный сбой внутри tower_battle_finisher:", err.message);
+    console.error("❌ Фатальный сбой внутри файла tower_battle_finisher:", err.message);
   }
 }
 
