@@ -100,14 +100,24 @@ const { data: freshPlayerRow } = await sb.from('players')
       updatePayload.tower_floor = Number(room.towerFloor || 1) + 1;
       console.log(`🏰 [БАШНЯ УСПЕХ] Игрок ${player.name} прошел этаж ${room.towerFloor}. Открыт этаж: ${updatePayload.tower_floor}`);
 
-    } else {
+      } else {
       // 💀 ИГРОК ПРОИГРАЛ ИЛИ НИЧЬЯ
       player.currentHp = 0;
       dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp(player) * 0.2)); // Воскрешаем на 20% ХП
 
+      // 🔥 Запрашиваем из Supabase свежий баланс перед проигрышем, чтобы не списать монеты в NULL
+      const { data: freshPlayerRowLose } = await sb.from('players')
+        .select('gold, xp, tower_coins')
+        .eq('id', Number(player.id))
+        .maybeSingle();
+
+      // Намертво фиксируем текущий кошелек, защищая от NULL и NaN
+      player.gold = freshPlayerRowLose ? Number(freshPlayerRowLose.gold || 0) : Number(player.gold || 0);
+      player.xp = freshPlayerRowLose ? Number(freshPlayerRowLose.xp || 0) : Number(player.xp || 0);
+      player.tower_coins = freshPlayerRowLose ? Number(freshPlayerRowLose.tower_coins || 0) : Number(player.tower_coins || 0);
+
       // ⏱️ ЗАПИСЫВАЕМ КД НА 3 ЧАСА В ТАБЛИЦУ ТАЙМЕРОВ
       const cooldownTime = new Date(Date.now() + 3 * 60 * 60 * 1000); 
-      
       await sb.from('player_timers').upsert({
         user_id: Number(player.id),
         timer_type: 'tower_cooldown',
@@ -118,9 +128,10 @@ const { data: freshPlayerRow } = await sb.from('players')
 
       updatePayload.tower_floor = 1; 
       player.tower_floor = 1;
+      
+      // Пишем лог поражения прямо в комнату
       room.logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Башня сброшена на 1 этаж. Повешено КД на 3 часа.`);
     }
-
     // Собираем финальный пакет для Supabase со всеми свежими данными
     updatePayload.gold = Number(player.gold);
     updatePayload.xp = Number(player.xp);

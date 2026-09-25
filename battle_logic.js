@@ -895,12 +895,19 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
 
       console.log(`🏁 [ФИНАЛ МАТЧА] Тип комнаты: ${room.type}. Результат для TeamA: ${result}`);
 
-      // ============================================================================
+// ============================================================================
       // 🌲 ВЕТВЬ А: РАСЧЕТ ЛОГОВ НАГРАД СТРОГО ДЛЯ PvE (БИТВА С МОНСТРАМИ)
       // ============================================================================
       if (room.type === 'pve') {
         const player = room.teamA[0];
-        if (player && result === 'win') {
+        
+        // 🔥 ФИКС: Если это Башня — полностью блокируем лог лесного волка,
+        // чтобы на экране не рисовалось левое золото и опыт!
+        if (room.isTower) {
+          console.log("🏰 [ИНФО] Генерация текста логов наград передана асинхронному финишеру Башни.");
+        } 
+        // Обычный выход на природу (лес) — оставляем как было у тебя
+        else if (player && result === 'win') {
           let gainedXp = 0;
           let gainedGold = 0;
           room.teamB.forEach(m => {
@@ -983,11 +990,17 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
       }
 
        // 🔥 [БРОНИРОВАННЫЙ ФИКС СИНХРОНИЗАЦИИ БАШНИ]
-      if (room.isTower) {
+       if (room.isTower) {
         console.log(`🏰 [ДИСПЕТЧЕР БАШНИ] Передаем управление в асинхронный финишер...`);
-        // Сервер намертво заставит базу данных зафиксировать этаж/таймер КД до выгрузки комнат!
+        // Сервер дожидается окончания расчетов и записи в Supabase
         await towerFinisher.finalizeTowerBattleSecure(room, result, sb);
-      } 
+        
+        // 🔥 СИНХРО-ФИКС ТЕКСТА: Забираем честный, сгенерированный финишером лог 
+        // из памяти комнаты и пушим его в общий поток отправки на экран телефона!
+        if (room.logs && room.logs.length > 0) {
+          room.logs.forEach(msg => logs.push(msg));
+        }
+      }  
       else if (room.type === 'pve') {
         finalizePveBattle(room, result, logs, currentRound, io);
       } 
