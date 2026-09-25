@@ -140,7 +140,8 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
       },
       inventory: row.inventory || { equipment: [], resources: [], consumables: [] },
       equipped: row.equipped || { rings: [null, null, null] },
-      tower_coins: safeReadField(row, 'tower_coins', 0)
+      tower_coins: safeReadField(row, 'tower_coins', 0),
+      stat_resets: safeReadField(row, 'stat_resets', 3)
     };
 
     console.log(`📤 [УСПЕХ] Профиль отправлен клиенту: ${playerProfile.name} (Ур. ${playerProfile.level})`);
@@ -451,6 +452,55 @@ module.exports = {
       } catch (err) {
         console.error(err);
         socket.emit('stat_distribution_error', 'Внутренняя ошибка сервера.');
+      }
+    });
+    socket.on('request_stat_reset_secure', async ({ userId }) => {
+      try {
+        const nUserId = Number(userId);
+        
+        // 1. Извлекаем свежий профиль из базы данных
+        const { data: dbPlayer } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+        if (!dbPlayer) return socket.emit('stat_distribution_error', 'Персонаж не найден.');
+
+        // 2. Проверяем наличие попыток сброса
+        const resetsLeft = safeReadField(dbPlayer, 'stat_resets', 3);
+        if (resetsLeft <= 0) {
+          return socket.emit('stat_distribution_error', '❌ У вас закончились свитки сброса характеристик!');
+        }
+
+        // 3. Вычисляем текущий легальный лимит очков для этого уровня
+        const currentXp = safeReadField(dbPlayer, 'xp', 0);
+        const cloudLevel = getServerCorrectLevelByXp(currentXp);
+        
+        // Базовые 5 очков новичка + по 5 очков за каждый уровень выше первого
+        const maxLegalFreePoints = 5 + ((cloudLevel - 1) * 5);
+
+        // 4. Формируем пакет сброса (все базовые статы возвращаются на 1, Стойкость не трогаем, если она скрытая)
+        let pointsKey = dbPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
+        
+        const updatePayload = {
+          strength: 1,
+          agility: 1,
+          endurance: 1,
+          luck: 1,
+          [pointsKey]: maxLegalFreePoints, // Возвращаем абсолютно все очки раскачки гладиатору
+          stat_resets: resetsLeft - 1     // Списываем 1 попытку сброса
+        };
+
+        // 5. Пересчитываем базовое ХП для «голого» персонажа с 1 выносливости (с учётом его вещей)
+        updatePayload.hp = getServerMaxHp({ endurance: 1, equipped: dbPlayer.equipped || {} });
+
+        // Записываем чистый сброшенный профиль обратно в облако Supabase
+        await sb.from('players').update(updatePayload).eq('id', nUserId);
+        
+        console.log(`🧹 [БД СБРОС СТАТОВ] Игрок ${dbPlayer.name} выполнил сброс. Осталось попыток: ${resetsLeft - 1}`);
+        
+        // Перезагружаем игровой профиль на клиенте
+        await triggerLoadGameSuccess(nUserId, socket, sb);
+
+      } catch (err) {
+        console.error("🚨 Ошибка при сбросе характеристик:", err.message);
+        socket.emit('stat_distribution_error', 'Ошибка сервера при попытке сброса.');
       }
     });
   }
