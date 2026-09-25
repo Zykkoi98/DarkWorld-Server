@@ -26,12 +26,11 @@ module.exports = function(io, socket, sb) {
 
       let inventory = dbPlayer.inventory || { equipment: [], resources: [], consumables: [] };
       let equipped = dbPlayer.equipped || { rings: [null, null, null] };
-      const currentXp = safeReadField(dbPlayer, 'xp', 0);
-      const cloudLevel = dbHelper.getServerCorrectLevelByXp(currentXp);
       
-      console.log(`🛡️ [КОНТРОЛЬ НАДЕВАНИЯ] Игрок ${dbPlayer.name} (Опыт: ${currentXp} -> Расчетный Ур: ${cloudLevel}). Предмет: ${cleanItemId}`);
+      const currentXp = dbHelper.safeReadField(dbPlayer, 'xp', 0);
+      const cloudLevel = dbHelper.getServerCorrectLevelByXp(currentXp);
 
-      // Извлекаем базовый ID предмета из UUID
+      // 1. СНАЧАЛА ИЗВЛЕКАЕМ БАЗОВЫЙ ID ПРЕДМЕТА ИЗ UUID
       let cleanItemId = itemUuidOrId;
       if (itemUuidOrId && itemUuidOrId.includes('_')) {
         const parts = itemUuidOrId.split('_');
@@ -39,6 +38,9 @@ module.exports = function(io, socket, sb) {
           cleanItemId = parts.slice(0, -2).join('_');
         }
       }
+
+      // 2. ТЕПЕРЬ БЕЗОПАСНО ВЫВОДИМ ЛОГ КОНТРОЛЯ В КОНСОЛЬ (Переменная cleanItemId уже инициализирована!)
+      console.log(`🛡️ [КОНТРОЛЬ НАДЕВАНИЯ] Игрок ${dbPlayer.name} (Опыт: ${currentXp} -> Расчетный Ур: ${cloudLevel}). Предмет: ${cleanItemId}`);
 
       let slotType = getConsumableSlotType(cleanItemId);
       let requiredLevel = 1;
@@ -67,16 +69,15 @@ module.exports = function(io, socket, sb) {
 
       if (!slotType) return socket.emit('error', 'Этот предмет нельзя экипировать!');
       if (cloudLevel < requiredLevel) return socket.emit('error', `🔒 Требуется уровень: ${requiredLevel}`);
-      let itemConfig = GAME_ITEMS_DATABASE[cleanItemId] || (global.SERVER_SHOP_DATABASE ? global.SERVER_SHOP_DATABASE[cleanItemId] : null);
-      // Античит на надевание вещей
-      if (itemConfig && itemConfig.req) {
-        // Считываем чистые статы игрока из БД с помощью твоей утилиты safeReadField
-        const myStr = safeReadField(dbPlayer, 'strength', 1);
-        const myAgi = safeReadField(dbPlayer, 'agility', 1);
-        const myEnd = safeReadField(dbPlayer, 'endurance', 1);
-        const myLuck = safeReadField(dbPlayer, 'luck', 1);
 
-        // Вытаскиваем требования вещи, защищаясь от любого регистра
+      // 3. АНТИЧИТ ПРОВЕРКА ХАРАКТЕРИСТИК (СИЛА, ЛОВКОСТЬ, ВЫНОСЛИВОСТЬ, УДАЧА)
+      let itemConfig = GAME_ITEMS_DATABASE[cleanItemId] || (global.SERVER_SHOP_DATABASE ? global.SERVER_SHOP_DATABASE[cleanItemId] : null);
+      if (itemConfig && itemConfig.req) {
+        const myStr = dbHelper.safeReadField(dbPlayer, 'strength', 1);
+        const myAgi = dbHelper.safeReadField(dbPlayer, 'agility', 1);
+        const myEnd = dbHelper.safeReadField(dbPlayer, 'endurance', 1);
+        const myLuck = dbHelper.safeReadField(dbPlayer, 'luck', 1);
+
         const reqStr = itemConfig.req.strength ?? itemConfig.req.Strength ?? itemConfig.reqStrength ?? 0;
         const reqAgi = itemConfig.req.agility ?? itemConfig.req.Agility ?? itemConfig.reqAgility ?? 0;
         const reqEnd = itemConfig.req.endurance ?? itemConfig.req.Endurance ?? itemConfig.reqEndurance ?? 0;
@@ -90,24 +91,25 @@ module.exports = function(io, socket, sb) {
         if (reqEnd > 0 && myEnd < Number(reqEnd)) { isLegal = false; failReason = `Не хватает Выносливости! Нужно ${reqEnd} (у вас ${myEnd})`; }
         if (reqLuck > 0 && myLuck < Number(reqLuck)) { isLegal = false; failReason = `Не хватает Удачи! Нужно ${reqLuck} (у вас ${myLuck})`; }
 
-        // Если статы не подходят — намертво рубим выполнение функции!
         if (!isLegal) {
-          console.warn(`🚨 [АНТИЧИТ НАДЕВАНИЯ] Игрок ${dbPlayer.name} пытался обойти требования для "${itemConfig.name || cleanItemId}".`);
+          console.warn(`🚨 [АНТИЧИТ НАДЕВАНИЯ] Игрок ${dbPlayer.name} остановлен при попытке надеть "${itemConfig.name || cleanItemId}". Reason: ${failReason}`);
           return socket.emit('error', `🔒 ${failReason}`);
         }
       }
+
       const invTab = (slotType === 'potion' || slotType === 'scroll') ? 'consumables' : 'equipment';
       if (!inventory[invTab]) inventory[invTab] = [];
       const inv = inventory[invTab];
 
-      // Защищенный поиск индекса
+      // Зачетный поиск индекса в рюкзаке
       const itemIdx = inv.findIndex(i => {
         if (invTab === 'consumables') return i.id === cleanItemId;
         return i.uuid === itemUuidOrId || i.id === itemUuidOrId;
       });
 
       if (itemIdx === -1) return socket.emit('error', 'У вас нет этого предмета в рюкзаке!');
-            // Обработка расходников (зелья и свитки) со стаком до 5 штук
+
+      // Обработка расходников (зелья и свитки) со стаком до 5 штук
       if (slotType === 'potion' || slotType === 'scroll') {
         const currentEquipped = equipped[slotType];
         const availableInInv = Number(inv[itemIdx].count || 1);
@@ -171,7 +173,7 @@ module.exports = function(io, socket, sb) {
             return socket.emit('error', '⚠️ Нельзя взять щит или второе оружие с двуручником!');
           }
 
-          // 🔥 БЕЗОПАСНОЕ ВЫТЕСНЕНИЕ СТАРЫХ ВЕЩЕЙ ИЗ СЛОТА
+          // БЕЗОПАСНОЕ ВЫТЕСНЕНИЕ СТАРЫХ ВЕЩЕЙ ИЗ СЛОТА В СУМКУ
           const oldItemId = equipped[targetSlot];
           if (oldItemId) {
             inventory.equipment.push({
