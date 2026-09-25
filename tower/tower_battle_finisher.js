@@ -39,24 +39,31 @@ async function finalizeTowerBattleSecure(room, result, sb) {
       [pointsKey]: Number(player.statpoints || player.statPoints || 0) 
     };
 
-    if (result === 'win') {
-      // 🏆 ИГРОК ПОБЕДИЛ СТРАЖА
+if (result === 'win') {
+      // 🏆 ИГРОК ПОБЕДИЛ СТРАЖЕЙ БАШНИ
       if (room.teamB && Array.isArray(room.teamB)) {
         room.teamB.forEach(m => { 
           const monsterLevel = Number(m.level || 1);
 
-          // 1. Динамический опыт: База 5 + 3 за уровень
-          const monsterXp = 5 + (monsterLevel * 3);
+          // 🔥 ЖЕЛЕЗНЫЙ ФИКС БОССА: 
+          // Если у монстра есть индивидуальные rewardXp / rewardGold (это Босс), берем их!
+          // Если полей нет — считаем по стандартной формуле этажа для обычных мобов.
+          const monsterXp = (m.rewardXp !== undefined) ? Number(m.rewardXp) : (5 + (monsterLevel * 3));
           gainedXp += monsterXp;
 
-          // 2. Динамическое золото: 10% шанс
-          if (rand(1, 100) <= 10) {
+          // Динамическое золото: для Босса берем его rewardGold, для моба — 10% шанс на уровень
+          if (m.rewardGold !== undefined) {
+            // У Босса золото падает со 100% шансом, если оно прописано в его шаблоне
+            gainedGold += Number(m.rewardGold);
+          } else if (rand(1, 100) <= 10) {
             gainedGold += monsterLevel;
           }
 
-          // 3. Монеты башни: 30% шанс
+          // Монеты Башни: Босс гарантированно дает больше монет!
           if (rand(1, 100) <= 30) {
-            const maxCoins = Math.max(1, Math.ceil(monsterLevel / 2));
+            // Если это Босс, увеличиваем лимит выпадаемых монет Башни в 2 раза!
+            const isBoss = (m.rewardXp !== undefined);
+            const maxCoins = Math.max(1, Math.ceil(monsterLevel / (isBoss ? 1 : 2)));
             gainedTowerCoins += rand(1, maxCoins);
           }
         });
