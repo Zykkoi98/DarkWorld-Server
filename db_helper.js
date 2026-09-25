@@ -311,9 +311,14 @@ module.exports = {
               updatePayload[key] = 1;
             });
 
-            updatePayload[cloudPlayer.level !== undefined ? 'level' : 'level'] = correctLevel;
+            updatePayload['level'] = correctLevel;
             updatePayload[pointsKey] = maxLegalPoints - 5; 
             updatePayload['hp'] = getServerMaxHp({ endurance: 1, equipped: cloudPlayer.equipped || {} });
+
+            // 🔥 [ЖЕЛЕЗНАЯ ЗАЩИТА ЭТАЖА]:
+            // Насильно удерживаем твой текущий этаж Башни из базы данных, 
+            // чтобы античит никогда больше не сбрасывал его в единицу при перерасчете статов!
+            updatePayload['tower_floor'] = safeReadField(cloudPlayer, 'tower_floor', 1);
 
             needsDbSync = true;
           }
