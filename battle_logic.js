@@ -526,7 +526,11 @@ module.exports = function(io, socket, sb, activeRooms) {
       console.log(`⚠️ [ХОД ОТКЛОНЕН] Комната ${roomId} не найдена в ОЗУ.`);
       return;
     }
-
+      // 🔥 [АНТИ-СПАМ БАРЬЕР СЕРВЕРА] Если раунд уже в процессе финализации, игнорируем дубли
+    if (room.isCalculating || room.isOver) {
+      console.log(`🚫 [СЕРВЕРНЫЙ ПЕРЕХВАТ СПАМА] Игнорируем дубликат хода для комнаты ${roomId}`);
+      return;
+    }
     const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
     if (!fighter) {
       console.log(`⚠️ [ХОД ОТКЛОНЕН] Боец с сокетом ${socket.id} не найден в комнате ${roomId}.`);
@@ -626,10 +630,13 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
 
     if (canExecuteRound) {
-      console.log(`🔔 [УДАР В КОЛОКОЛ] Все ходы проверены и собраны! Запускаем executeRoundCalculations...`);
-      clearTimeout(room.timeoutRef);
-      executeRoundCalculations(roomId, activeRooms, io); 
-    }
+          console.log(`🔔 [УДАР В КОЛОКОЛ] Все ходы проверены и собраны! Запускаем executeRoundCalculations...`);
+          clearTimeout(room.timeoutRef);
+          
+          // 🔥 Включаем флаг расчета, защищая комнату от повторных вызовов в эту миллисекунду
+          room.isCalculating = true; 
+          executeRoundCalculations(roomId, activeRooms, io); 
+        }
   });
 
   // --- 8. ОБРАБОТЧИК: ИСПОЛЬЗОВАНИЕ ЗЕЛИЙ В БОЮ ---
@@ -1135,6 +1142,8 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
           });
         }
       });
+      // 🔥 [ДОБАВЛЕНО] Снимаем блокировку расчёта комнаты, открывая приём ходов для НОВОГО раунда
+      room.isCalculating = false;
       startServerTurnTimer(roomId, activeRooms, io);
     }
   }
