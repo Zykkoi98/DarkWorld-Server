@@ -26,7 +26,10 @@ module.exports = function(io, socket, sb) {
 
       let inventory = dbPlayer.inventory || { equipment: [], resources: [], consumables: [] };
       let equipped = dbPlayer.equipped || { rings: [null, null, null] };
-      const cloudLevel = safeReadField(dbPlayer, 'level', 1);
+      const currentXp = safeReadField(dbPlayer, 'xp', 0);
+      const cloudLevel = getServerCorrectLevelByXp(currentXp); 
+      
+      console.log(`🛡️ [КОНТРОЛЬ НАДЕВАНИЯ] Игрок ${dbPlayer.name} (Опыт: ${currentXp} -> Расчетный Ур: ${cloudLevel}). Предмет: ${cleanItemId}`);
 
       // Извлекаем базовый ID предмета из UUID
       let cleanItemId = itemUuidOrId;
