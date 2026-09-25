@@ -11,7 +11,7 @@ module.exports = function(io, socket, sb, activeRooms) {
   const getServerMaxHp = dbHelper.getServerMaxHp;
   const triggerLoadGameSuccess = dbHelper.triggerLoadGameSuccess;
 
-   // --- 🕒 ОБРАБОТЧИК: ОТДАЧА СТАТУСА КУЛДАУНА И СБРОС ПРОГРЕССА ---
+    // --- 🕒 ОБРАБОТЧИК: ОТДАЧА СТАТУСА КУЛДАУНА БЕЗ ЛОЖНЫХ СБРОСОВ ЭТАЖЕЙ ---
   socket.on('check_tower_cooldown_request', async ({ userId }) => {
     try {
       const nUserId = Number(userId);
@@ -21,20 +21,28 @@ module.exports = function(io, socket, sb, activeRooms) {
         .eq('timer_type', 'tower_cooldown')
         .maybeSingle();
 
+      // Проверяем, активен ли таймер прямо сейчас
       if (timerRow && new Date(timerRow.ends_at) > new Date()) {
         socket.emit('tower_cooldown_status', { active: true, ends_at: timerRow.ends_at });
       } else {
-        // 🟢 Кулдаун отсутствует или истек! 
-        // На всякий случай проверяем: если КД кончилось, а этаж в БД не 1, обнуляем его
-        const { data: dbPlayer } = await sb.from('players').select('tower_floor').eq('id', nUserId).maybeSingle();
-        if (dbPlayer && Number(dbPlayer.tower_floor || 1) > 1) {
-          await sb.from('players').update({ tower_floor: 1 }).eq('id', nUserId);
-          console.log(`🏰 [АВТО-СБРОС] КД вышло, этаж для ID ${nUserId} принудительно возвращен на 1.`);
+        // 🟢 Кулдаун отсутствует, истек или это старая запись в БД!
+        if (timerRow) {
+          // Если старая просроченная строчка КД до сих пор пылится в базе, 
+          // просто тихо стираем её, чтобы не засорять таблицу таймеров
+          await sb.from('player_timers')
+            .delete()
+            .eq('user_id', nUserId)
+            .eq('timer_type', 'tower_cooldown');
+          console.log(`🧹 [БД ТАЙМЕР] Просроченная строка КД удалена для ID ${nUserId}.`);
         }
 
+        // 🔥 ЖЕЛЕЗНЫЙ ФИКС: Больше НИКАКИХ принудительных сбросов tower_floor на 1 здесь!
+        // Прогресс теперь сбрасывается только физически в момент экрана поражения.
         socket.emit('tower_cooldown_status', { active: false });
       }
-    } catch (err) { console.error("🚨 Ошибка проверки КД в Башне:", err.message); }
+    } catch (err) { 
+      console.error("🚨 Ошибка проверки КД в Башне:", err.message); 
+    }
   });
 
   // --- 🔐 ОБРАБОТЧИК: ИЗОЛИРОВАННАЯ АВТОР ИЗАЦИЯ СОКЕТА БАШНИ ---
