@@ -154,17 +154,17 @@ function enforceEquipmentRequirements(cloudPlayer) {
   if (!cloudPlayer || !cloudPlayer.equipped) return false;
 
   let equipped = cloudPlayer.equipped;
-  // Если рюкзака нет в БД, создаем правильную структуру
   if (!cloudPlayer.inventory) cloudPlayer.inventory = { equipment: [], resources: [], consumables: [] };
   let inventory = cloudPlayer.inventory;
   if (!Array.isArray(inventory.equipment)) inventory.equipment = [];
 
-  // 1. Сначала считываем ЧИСТЫЕ (базовые) статы игрока из БД без учета шмоток
-  const myStr = Number(cloudPlayer.strength || 1);
-  const myAgi = Number(cloudPlayer.agility || 1);
-  const myEnd = Number(cloudPlayer.endurance || 1);
-  const myLuck = Number(cloudPlayer.luck || 1);
-  const myLvl = Number(cloudPlayer.level || 1);
+  // 🔥 ЖЕЛЕЗНЫЙ ФИКС ЧТЕНИЯ: Вызываем твою безопасную утилиту safeReadField!
+  // Теперь статы гарантированно прочитаются из Supabase как точные числа, без undefined!
+  const myStr = safeReadField(cloudPlayer, 'strength', 1);
+  const myAgi = safeReadField(cloudPlayer, 'agility', 1);
+  const myEnd = safeReadField(cloudPlayer, 'endurance', 1);
+  const myLuck = safeReadField(cloudPlayer, 'luck', 1);
+  const myLvl = safeReadField(cloudPlayer, 'level', 1);
 
   const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand', 'extra'];
   let wasAnythingUnequipped = false;
@@ -173,37 +173,36 @@ function enforceEquipmentRequirements(cloudPlayer) {
     const itemId = equipped[slot];
     if (!itemId) return;
 
-    // Ищем вещь в базе данных предметов
     const itemData = GAME_ITEMS_DATABASE[itemId];
     if (!itemData) return;
 
     let isItemLegal = true;
 
-    // Проверяем требование по уровню
+    // 1. Проверяем требование по уровню
     if (itemData.level && myLvl < Number(itemData.level)) isItemLegal = false;
 
-    // Проверяем требования по характеристикам
-    if (itemData.req) {
-      if (itemData.req.strength && myStr < Number(itemData.req.strength)) isItemLegal = false;
-      if (itemData.req.agility && myAgi < Number(itemData.req.agility)) isItemLegal = false;
-      if (itemData.req.endurance && myEnd < Number(itemData.req.endurance)) isItemLegal = false;
-      if (itemData.req.luck && myLuck < Number(itemData.req.luck)) isItemLegal = false;
-    }
+    // 2. 🔥 БРОНИРОВАННАЯ ПРОВЕРА СТАТОВ: Считываем требования и из объекта req, 
+    // и по старым плоским ключам (reqAgility, reqEndurance) из конфигов магазина!
+    const reqStr = itemData.req?.strength ?? itemData.reqStrength ?? 0;
+    const reqAgi = itemData.req?.agility ?? itemData.reqAgility ?? 0;
+    const reqEnd = itemData.req?.endurance ?? itemData.reqEndurance ?? 0;
+    const reqLuck = itemData.req?.luck ?? itemData.reqLuck ?? 0;
 
-    // 🚨 Если вещь больше не подходит — принудительно раздеваем персонажа!
+    if (reqStr > 0 && myStr < Number(reqStr)) isItemLegal = false;
+    if (reqAgi > 0 && myAgi < Number(reqAgi)) isItemLegal = false;
+    if (reqEnd > 0 && myEnd < Number(reqEnd)) isItemLegal = false;
+    if (reqLuck > 0 && myLuck < Number(reqLuck)) isItemLegal = false;
+
+    // Если вещь не подходит по характеристикам — принудительно снимаем
     if (!isItemLegal) {
-      console.warn(`🚨 [АНТИЧИТ КУКЛЫ] У игрока ${cloudPlayer.name} недостаточно статов для "${itemData.name}" в слоте ${slot}. Снимаем в рюкзак.`);
-      
-      // Возвращаем вещь в инвентарь (генерируем UUID, если его не было)
+      console.warn(`🚨 [АНТИЧИТ КУКЛЫ] Снимаем "${itemData.name}" из слота ${slot}. Статы: 💪${myStr} 🏹${myAgi} 🛡️${myEnd} 🍀${myLuck}`);
       inventory.equipment.push({ uuid: `${itemId}_force_${Date.now()}`, id: itemId });
-      
-      // Полностью очищаем слот на кукле
       equipped[slot] = null;
       wasAnythingUnequipped = true;
     }
   });
 
-  // Отдельно обсчитываем 3 слота колец
+  // Проверка 3 слотов колец
   if (equipped.rings && Array.isArray(equipped.rings)) {
     for (let i = 0; i < equipped.rings.length; i++) {
       const itemId = equipped.rings[i];
@@ -213,12 +212,16 @@ function enforceEquipmentRequirements(cloudPlayer) {
       if (itemData) {
         let isRingLegal = true;
         if (itemData.level && myLvl < Number(itemData.level)) isRingLegal = false;
-        if (itemData.req) {
-          if (itemData.req.strength && myStr < Number(itemData.req.strength)) isRingLegal = false;
-          if (itemData.req.agility && myAgi < Number(itemData.req.agility)) isRingLegal = false;
-          if (itemData.req.endurance && myEnd < Number(itemData.req.endurance)) isRingLegal = false;
-          if (itemData.req.luck && myLuck < Number(itemData.req.luck)) isRingLegal = false;
-        }
+        
+        const reqStr = itemData.req?.strength ?? itemData.reqStrength ?? 0;
+        const reqAgi = itemData.req?.agility ?? itemData.reqAgility ?? 0;
+        const reqEnd = itemData.req?.endurance ?? itemData.reqEndurance ?? 0;
+        const reqLuck = itemData.req?.luck ?? itemData.reqLuck ?? 0;
+
+        if (reqStr > 0 && myStr < Number(reqStr)) isRingLegal = false;
+        if (reqAgi > 0 && myAgi < Number(reqAgi)) isRingLegal = false;
+        if (reqEnd > 0 && myEnd < Number(reqEnd)) isRingLegal = false;
+        if (reqLuck > 0 && myLuck < Number(reqLuck)) isRingLegal = false;
 
         if (!isRingLegal) {
           console.warn(`🚨 [АНТИЧИТ КУКЛЫ] Снято кольцо "${itemData.name}" из слота №${i}`);
