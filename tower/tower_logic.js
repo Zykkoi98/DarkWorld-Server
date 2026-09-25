@@ -218,7 +218,13 @@ module.exports = function(io, socket, sb, activeRooms) {
         return;
       }
 
+      // 🔥 ЖЕСТКИЙ ФИКС РЕДИРЕКТА: Отправляем лично в сокет и дублируем во всю комнату,
+      // чтобы корень города (telegram_supabase.js) гарантированно поймал переход!
       socket.emit('arena_redirect_to_battle', { roomId: roomId });
+      io.to(roomId).emit('arena_redirect_to_battle', { roomId: roomId });
+
+      console.log(`🚀 [БАШНЯ СТАРТ] Редирект в комнату ${roomId} успешно отправлен в сеть.`);
+
       if (global.startServerTurnTimer) global.startServerTurnTimer(roomId, activeRooms, io);
 
     } catch (err) { socket.emit('error', `Ошибка Башни: ${err.message}`); }
