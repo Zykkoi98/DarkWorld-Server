@@ -171,23 +171,21 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       const isBossFloor = floor >= 5 && rand(1, 100) <= 15;
 
-      if (isBossFloor) {
+  if (isBossFloor) {
         let bossTemplate = allBots.find(b => b.id.includes('boss') || b.name.toLowerCase().includes('босс')) || allBots[0];
         const bossStr = Math.floor(Number(bossTemplate.strength || 5) * statMultiplier * 1.5);
         const bossAgi = Math.floor(Number(bossTemplate.agility || 5) * statMultiplier * 1.5);
         const bossEnd = Math.floor(Number(bossTemplate.endurance || 5) * statMultiplier * 2.0);
         const bossLuck = Math.floor(Number(bossTemplate.luck || 5) * statMultiplier * 1.5);
 
-        // Прописываем endurance и на верхний уровень, и внутрь stats для db_helper и калькулятора боя
-        const virtualBossForHp = { endurance: bossEnd, stats: { endurance: bossEnd }, equipped: {} };
-        const bossMaxHp = getServerMaxHp(virtualBossForHp) * 2;
+        // 🔥 ИСПРАВЛЕНО: чистая структура для getServerMaxHp
+        const bossMaxHp = getServerMaxHp({ endurance: bossEnd, equipped: {} }) * 2;
 
         teamB.push({
           uuid: `bot_tower_boss_${bossTemplate.id}_${Date.now()}`, id: bossTemplate.id,
           name: `👑 ${bossTemplate.name} [БОСС]`, icon: "👹", isBot: true,
           level: floor, 
           strength: bossStr, agility: bossAgi, endurance: bossEnd, luck: bossLuck,
-          stats: { strength: bossStr, agility: bossAgi, endurance: bossEnd, luck: bossLuck },
           currentHp: bossMaxHp, maxHp: bossMaxHp,
           rewardXp: Math.floor(Number(bossTemplate.reward_xp || 20) * rewardMultiplier * 2),
           rewardGold: Math.floor(Number(bossTemplate.reward_gold || 10) * rewardMultiplier * 2),
@@ -209,15 +207,14 @@ module.exports = function(io, socket, sb, activeRooms) {
           const botEnd = Math.floor(Number(baseBot.endurance || 4) * statMultiplier);
           const botLuck = Math.floor(Number(baseBot.luck || 4) * statMultiplier);
 
-          const virtualBotForHp = { endurance: botEnd, stats: { endurance: botEnd }, equipped: {} };
-          const botMaxHp = getServerMaxHp(virtualBotForHp);
+          // 🔥 ИСПРАВЛЕНО: чистая структура
+          const botMaxHp = getServerMaxHp({ endurance: botEnd, equipped: {} });
 
           teamB.push({
             uuid: `bot_tower_floor_${floor}_slot_${i}_${Date.now()}`, id: baseBot.id,
             name: `${baseBot.name} #${i + 1}`, icon: baseBot.icon, isBot: true,
             level: floor, 
             strength: botStr, agility: botAgi, endurance: botEnd, luck: botLuck,
-            stats: { strength: botStr, agility: botAgi, endurance: botEnd, luck: botLuck },
             currentHp: botMaxHp, maxHp: botMaxHp,
             rewardXp: Math.floor(Number(baseBot.reward_xp || 10) * rewardMultiplier),
             rewardGold: Math.floor(Number(baseBot.reward_gold || 5) * rewardMultiplier),

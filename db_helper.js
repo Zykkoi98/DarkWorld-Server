@@ -3,8 +3,9 @@
 // ===== ЧАСТЬ 1 ИЗ 2: БАЗЫ ДАННЫХ, МАТЕМАТИКА И СИНХРОНИЗАЦИЯ ПРОФИЛЯ =====
 // ============================================================================
 
-// Глобальная серверная таблица порогов опыта (XP_TABLE)
 const GAME_ITEMS_DATABASE = require('./shop/shop_items_config');
+
+// Глобальная серверная таблица порогов опыта (XP_TABLE)
 const SERVER_XP_TABLE = [
   0, 
   0,     // 1 ур
@@ -37,7 +38,16 @@ function getServerCorrectLevelByXp(xp) {
   return 1;
 }
 
-// Вспомогательная утилита для сбора бонусов характеристик со всей экипировки куклы
+// 🔥 УНИВЕРСАЛЬНЫЙ ПОИСК ПРЕДМЕТА В ОБЕИХ БАЗАХ
+function findItemInAnyDatabase(itemId) {
+  if (!itemId) return null;
+  return GAME_ITEMS_DATABASE[itemId] 
+      || (global.SERVER_SHOP_DATABASE ? global.SERVER_SHOP_DATABASE[itemId] : null) 
+      || null;
+}
+
+// 🔥 ИСПРАВЛЕНО: Вспомогательная утилита для сбора бонусов характеристик
+// Теперь ищет предметы и в старой базе, и в новой глобальной SERVER_SHOP_DATABASE
 function getEquipmentBonus(equipped, bonusKey) {
   if (!equipped) return 0;
   let totalBonus = 0;
@@ -47,16 +57,11 @@ function getEquipmentBonus(equipped, bonusKey) {
     const itemId = equipped[slot];
     if (!itemId) return;
 
-    // 🔥 ФИКС: Ищем предмет сначала в старой базе, а затем в нашем новом глобальном конфиге
-    let item =  GAME_ITEMS_DATABASE[itemId];
-
-    if (item) {
-      // 🔥 Проверяем новый формат (если статы лежат внутри объекта bonus, как на фронтенде)
-      if (item.bonus) {
-        if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
-        if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
-          totalBonus += item.bonus.stats[bonusKey];
-        }
+    const item = findItemInAnyDatabase(itemId);
+    if (item && item.bonus) {
+      if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
+      if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
+        totalBonus += item.bonus.stats[bonusKey];
       }
     }
   });
@@ -65,14 +70,11 @@ function getEquipmentBonus(equipped, bonusKey) {
   if (equipped.rings && Array.isArray(equipped.rings)) {
     equipped.rings.forEach(itemId => {
       if (!itemId) return;
-      let item =  GAME_ITEMS_DATABASE[itemId];
-      if (item) {
-        if (item[bonusKey] !== undefined) totalBonus += item[bonusKey];
-        if (item.bonus) {
-          if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
-          if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
-            totalBonus += item.bonus.stats[bonusKey];
-          }
+      const item = findItemInAnyDatabase(itemId);
+      if (item && item.bonus) {
+        if (item.bonus[bonusKey] !== undefined) totalBonus += item.bonus[bonusKey];
+        if (item.bonus.stats && item.bonus.stats[bonusKey] !== undefined) {
+          totalBonus += item.bonus.stats[bonusKey];
         }
       }
     });
@@ -80,21 +82,47 @@ function getEquipmentBonus(equipped, bonusKey) {
   return totalBonus;
 }
 
-// 🔥 ФИКС ВЫНОСЛИВОСТИ: Рассчитывает ТОЛЬКО чистые очки здоровья (HP), без влияния на защиту
+// 🔥 ИСПРАВЛЕНО: getServerMaxHp теперь корректно читает endurance
+// и с верхнего уровня объекта, и из вложенного объекта stats
 function getServerMaxHp(fighter) {
-  const baseEndurance = Number(fighter.endurance || 1);
-  return ((baseEndurance + getEquipmentBonus(fighter.equipped, 'endurance')) * 10) + (getEquipmentBonus(fighter.equipped, 'hp') || 0);
+  if (!fighter) return 10;
+  
+  // Читаем выносливость с любого уровня: fighter.endurance или fighter.stats.endurance
+  const rawEndurance = fighter.endurance 
+                    ?? (fighter.stats && fighter.stats.endurance) 
+                    ?? 1;
+  const baseEndurance = Number(rawEndurance);
+  
+  const gearEnduranceBonus = getEquipmentBonus(fighter.equipped, 'endurance');
+  const flatHpBonus = getEquipmentBonus(fighter.equipped, 'hp') || 0;
+  
+  return ((baseEndurance + gearEnduranceBonus) * 10) + flatHpBonus;
 }
 
 function getServerDef(fighter) {
-  const baseEndurance = Number(fighter.endurance || 1);
-  return Math.floor((baseEndurance + getEquipmentBonus(fighter.equipped, 'endurance')) * 0.5) + (getEquipmentBonus(fighter.equipped, 'def') || 0);
+  const rawEndurance = fighter.endurance ?? (fighter.stats && fighter.stats.endurance) ?? 1;
+  const baseEndurance = Number(rawEndurance);
+  return Math.floor((baseEndurance + getEquipmentBonus(fighter.equipped, 'endurance')) * 0.5) 
+       + (getEquipmentBonus(fighter.equipped, 'def') || 0);
 }
-// Новые функции сбора скрытых боевых модификаторов (статы + шмот)
-function getServerMfInv(fighter) { return (Number(fighter.agility || 1) * 10) + getEquipmentBonus(fighter.equipped, 'mf_inv'); }
-function getServerMfAntiInv(fighter) { return (Number(fighter.agility || 1) * 4) + getEquipmentBonus(fighter.equipped, 'mf_antiinv'); }
-function getServerMfCrit(fighter) { return (Number(fighter.luck || 1) * 10) + getEquipmentBonus(fighter.equipped, 'mf_crit'); }
-function getServerMfAntiCrit(fighter) { return (Number(fighter.luck || 1) * 4) + getEquipmentBonus(fighter.equipped, 'mf_anticrit'); }
+
+// Новые функции сбора скрытых боевых модификаторов
+function getServerMfInv(fighter) { 
+  const agi = Number(fighter.agility ?? (fighter.stats && fighter.stats.agility) ?? 1);
+  return (agi * 10) + getEquipmentBonus(fighter.equipped, 'mf_inv'); 
+}
+function getServerMfAntiInv(fighter) { 
+  const agi = Number(fighter.agility ?? (fighter.stats && fighter.stats.agility) ?? 1);
+  return (agi * 4) + getEquipmentBonus(fighter.equipped, 'mf_antiinv'); 
+}
+function getServerMfCrit(fighter) { 
+  const luck = Number(fighter.luck ?? (fighter.stats && fighter.stats.luck) ?? 1);
+  return (luck * 10) + getEquipmentBonus(fighter.equipped, 'mf_crit'); 
+}
+function getServerMfAntiCrit(fighter) { 
+  const luck = Number(fighter.luck ?? (fighter.stats && fighter.stats.luck) ?? 1);
+  return (luck * 4) + getEquipmentBonus(fighter.equipped, 'mf_anticrit'); 
+}
 
 // Робот-сканер для безопасного чтения полей Supabase в любом регистре букв
 const safeReadField = (dbRow, fieldName, defaultValue = 0) => {
@@ -104,6 +132,7 @@ const safeReadField = (dbRow, fieldName, defaultValue = 0) => {
   const capitalizedName = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
   return Number(dbRow[lowerName] ?? dbRow[upperName] ?? dbRow[capitalizedName] ?? dbRow[fieldName] ?? defaultValue);
 };
+
 // Функция-сборщик легального профиля для отправки на игровой клиент
 async function triggerLoadGameSuccess(nUserId, socket, sb) {
   try {
@@ -113,7 +142,7 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
       return;
     }
 
-    const row = data[0]; // Исправлено: читаем первый элемент массива
+    const row = data[0];
     const currentXp = safeReadField(row, 'xp', 0);
     const cloudLevel = getServerCorrectLevelByXp(currentXp);
     let pointsKey = row.statpoints !== undefined ? 'statpoints' : 'statPoints';
@@ -128,17 +157,18 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
       hp: safeReadField(row, 'hp', 10),
       statPoints: safeReadField(row, pointsKey, 0),
       currentTownIndex: safeReadField(row, 'currenttownindex', 0),
+      tower_floor: safeReadField(row, 'tower_floor', 1),
+      tower_coins: safeReadField(row, 'tower_coins', 0),
+      stat_resets: safeReadField(row, 'stat_resets', 3),
       stats: {
         strength: safeReadField(row, 'strength', 1),
         agility: safeReadField(row, 'agility', 1),
         endurance: safeReadField(row, 'endurance', 1),
-        toughness: safeReadField(row, 'toughness', 1), // Чистая стойкость
+        toughness: safeReadField(row, 'toughness', 1),
         luck: safeReadField(row, 'luck', 1)
       },
       inventory: row.inventory || { equipment: [], resources: [], consumables: [] },
-      equipped: row.equipped || { rings: [null, null, null] },
-      tower_coins: safeReadField(row, 'tower_coins', 0),
-      stat_resets: safeReadField(row, 'stat_resets', 3)
+      equipped: row.equipped || { rings: [null, null, null] }
     };
 
     console.log(`📤 [УСПЕХ] Профиль отправлен клиенту: ${playerProfile.name} (Ур. ${playerProfile.level})`);
@@ -147,6 +177,7 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
     console.error("❌ Критический сбой внутри триггера load_game_success:", err);
   }
 }
+
 // 🔥 [АНТИЧИТ-ФИКС]: Серверная проверка куклы. Снимает вещи в рюкзак, если статы игрока упали!
 function enforceEquipmentRequirements(cloudPlayer) {
   if (!cloudPlayer || !cloudPlayer.equipped) return false;
@@ -156,8 +187,6 @@ function enforceEquipmentRequirements(cloudPlayer) {
   let inventory = cloudPlayer.inventory;
   if (!Array.isArray(inventory.equipment)) inventory.equipment = [];
 
-  // 🔥 ЖЕЛЕЗНЫЙ ФИКС ЧТЕНИЯ: Вызываем твою безопасную утилиту safeReadField!
-  // Теперь статы гарантированно прочитаются из Supabase как точные числа, без undefined!
   const myStr = safeReadField(cloudPlayer, 'strength', 1);
   const myAgi = safeReadField(cloudPlayer, 'agility', 1);
   const myEnd = safeReadField(cloudPlayer, 'endurance', 1);
@@ -167,20 +196,14 @@ function enforceEquipmentRequirements(cloudPlayer) {
   const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand', 'extra'];
   let wasAnythingUnequipped = false;
 
-  slots.forEach(slot => {
-    const itemId = equipped[slot];
+  const checkAndUnequip = (itemId, assignNullFn, slotLabel) => {
     if (!itemId) return;
-
-    const itemData = GAME_ITEMS_DATABASE[itemId];
+    const itemData = findItemInAnyDatabase(itemId);
     if (!itemData) return;
 
     let isItemLegal = true;
-
-    // 1. Проверяем требование по уровню
     if (itemData.level && myLvl < Number(itemData.level)) isItemLegal = false;
 
-    // 2. 🔥 БРОНИРОВАННАЯ ПРОВЕРА СТАТОВ: Считываем требования и из объекта req, 
-    // и по старым плоским ключам (reqAgility, reqEndurance) из конфигов магазина!
     const reqStr = itemData.req?.strength ?? itemData.reqStrength ?? 0;
     const reqAgi = itemData.req?.agility ?? itemData.reqAgility ?? 0;
     const reqEnd = itemData.req?.endurance ?? itemData.reqEndurance ?? 0;
@@ -191,51 +214,30 @@ function enforceEquipmentRequirements(cloudPlayer) {
     if (reqEnd > 0 && myEnd < Number(reqEnd)) isItemLegal = false;
     if (reqLuck > 0 && myLuck < Number(reqLuck)) isItemLegal = false;
 
-    // Если вещь не подходит по характеристикам — принудительно снимаем
     if (!isItemLegal) {
-      console.warn(`🚨 [АНТИЧИТ КУКЛЫ] Снимаем "${itemData.name}" из слота ${slot}. Статы: 💪${myStr} 🏹${myAgi} 🛡️${myEnd} 🍀${myLuck}`);
-      inventory.equipment.push({ uuid: `${itemId}_force_${Date.now()}`, id: itemId });
-      equipped[slot] = null;
+      console.warn(`🚨 [АНТИЧИТ КУКЛЫ] Снимаем "${itemData.name}" из слота ${slotLabel}. Статы: 💪${myStr} 🏹${myAgi} 🛡️${myEnd} 🍀${myLuck}`);
+      inventory.equipment.push({ uuid: `${itemId}_force_${Date.now()}`, id: itemId, count: 1 });
+      assignNullFn();
       wasAnythingUnequipped = true;
     }
+  };
+
+  slots.forEach(slot => {
+    const itemId = equipped[slot];
+    checkAndUnequip(itemId, () => { equipped[slot] = null; }, slot);
   });
 
-  // Проверка 3 слотов колец
   if (equipped.rings && Array.isArray(equipped.rings)) {
     for (let i = 0; i < equipped.rings.length; i++) {
       const itemId = equipped.rings[i];
-      if (!itemId) continue;
-
-      const itemData = GAME_ITEMS_DATABASE[itemId];
-      if (itemData) {
-        let isRingLegal = true;
-        if (itemData.level && myLvl < Number(itemData.level)) isRingLegal = false;
-        
-        const reqStr = itemData.req?.strength ?? itemData.reqStrength ?? 0;
-        const reqAgi = itemData.req?.agility ?? itemData.reqAgility ?? 0;
-        const reqEnd = itemData.req?.endurance ?? itemData.reqEndurance ?? 0;
-        const reqLuck = itemData.req?.luck ?? itemData.reqLuck ?? 0;
-
-        if (reqStr > 0 && myStr < Number(reqStr)) isRingLegal = false;
-        if (reqAgi > 0 && myAgi < Number(reqAgi)) isRingLegal = false;
-        if (reqEnd > 0 && myEnd < Number(reqEnd)) isRingLegal = false;
-        if (reqLuck > 0 && myLuck < Number(reqLuck)) isRingLegal = false;
-
-        if (!isRingLegal) {
-          console.warn(`🚨 [АНТИЧИТ КУКЛЫ] Снято кольцо "${itemData.name}" из слота №${i}`);
-          inventory.equipment.push({ uuid: `${itemId}_force_${Date.now()}`, id: itemId });
-          equipped.rings[i] = null;
-          wasAnythingUnequipped = true;
-        }
-      }
+      checkAndUnequip(itemId, () => { equipped.rings[i] = null; }, `ring[${i}]`);
     }
   }
 
   return wasAnythingUnequipped;
 }
 
-
-// 🔥 СЕРВЕРНЫЙ КАЛЬКУЛЯТОР АВТОДОПОЛНЕНИЯ БАНОК ДЛЯ ВСЕХ МОДУЛЕЙ ИГРЫ
+// 🔥 СЕРВЕРНЫЙ КАЛЬКУЛЯТОР АВТОДОПОЛНЕНИЯ БАНОК (ЕДИНАЯ ВЕРСИЯ)
 function autoRefillPotionsAfterBattle(playerRow) {
   try {
     if (!playerRow || !playerRow.equipped || !playerRow.inventory) return;
@@ -248,7 +250,7 @@ function autoRefillPotionsAfterBattle(playerRow) {
 
     const validPotions = ['hp_potion_big', 'hp_potion_small', 'fish_soup'];
 
-    // СЦЕНАРИЙ А: Слот банок полностью пустой (игрок выпил всё в ноль во время боя)
+    // СЦЕНАРИЙ А: Слот банок полностью пустой
     if (!equipped.potion || equipped.potion === null || typeof equipped.potion !== 'object') {
       let foundPotionId = null;
       let invIdx = -1;
@@ -277,7 +279,7 @@ function autoRefillPotionsAfterBattle(playerRow) {
       }
     }
 
-    // СЦЕНАРИЙ Б: На кукле уже есть объект банки, но стак не полный (меньше 5 штук)
+    // СЦЕНАРИЙ Б: На кукле уже есть стак, но он не полный
     if (equipped.potion && typeof equipped.potion === 'object' && equipped.potion.id) {
       let potionSlot = equipped.potion;
       let currentCount = Number(potionSlot.count || 0);
@@ -306,8 +308,10 @@ function autoRefillPotionsAfterBattle(playerRow) {
     console.error("🚨 Фатальный сбой при автодополнении банок:", err.message);
   }
 }
-// Экспортируем методы наружу для использования в других файлах бэкенда
+
+// Экспортируем методы наружу
 module.exports = {
+  // Математика и расчеты
   getServerMaxHp,
   getServerDef,
   getServerCorrectLevelByXp,
@@ -315,30 +319,32 @@ module.exports = {
   getServerMfAntiInv,
   getServerMfCrit,
   getServerMfAntiCrit,
+  getEquipmentBonus,          // 🔥 ЭКСПОРТИРУЕМ для battle_logic
+  findItemInAnyDatabase,      // 🔥 НОВАЯ утилита
   safeReadField,
   triggerLoadGameSuccess,
   autoRefillPotionsAfterBattle,
+  enforceEquipmentRequirements, // 🔥 ЭКСПОРТИРУЕМ для переиспользования
   
   // Главный инициализатор сокет-обработчиков
   init: function(io, socket, sb) {
 
-  // --- 1. ЗАЩИЩЕННАЯ ЗАГРУЗКА И АНТИЧИТ-АУДИТ ПРИ ВХОДЕ ---
+    // --- 1. ЗАЩИЩЕННАЯ ЗАГРУЗКА И АНТИЧИТ-АУДИТ ПРИ ВХОДЕ ---
     socket.on('load_game_secure', async ({ userId, username }) => {
       try {
         const nUserId = Number(userId);
         const sUserId = String(userId);
         console.log(`🔍 [АУДИТ ВХОДА] Проверка игрока ID: ${nUserId} (${username})...`);
 
-        // 🔥 ФИКС РЕКОННЕКТА В ГОРОДЕ: Если игрок переподключился, и у него поменялся сокет,
-        // мы пробегаемся по ОЗУ сервера и принудительно прописываем ему НОВЫЙ живой ID сокета в активных комнатах!
+        // 🔥 ФИКС РЕКОННЕКТА В ГОРОДЕ
         if (global.activeRooms) {
           Object.keys(global.activeRooms).forEach(roomId => {
             const room = global.activeRooms[roomId];
             const fighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
             if (fighter) {
-              console.log(`🔄 [РЕКОННЕКТ ФИКС] Боец ${fighter.name} переподключился в бою. Новый сокет: ${socket.id}`);
+              console.log(`🔄 [РЕКОННЕКТ ФИКС] Боец ${fighter.name} переподключился. Новый сокет: ${socket.id}`);
               fighter.socketId = socket.id;
-              socket.join(roomId); // Автоматически возвращаем его сокет в комнату Socket.io
+              socket.join(roomId);
             }
           });
         }
@@ -353,9 +359,7 @@ module.exports = {
           return socket.emit('load_game_failed', { message: error.message });
         }
 
-        // Если нашли персонажа в базе — загружаем и проверяем античитом
         if (cloudPlayer) {
-          
           const currentXp = safeReadField(cloudPlayer, 'xp', 0);
           const correctLevel = getServerCorrectLevelByXp(currentXp);
           const dbLevel = safeReadField(cloudPlayer, 'level', 1);
@@ -377,43 +381,31 @@ module.exports = {
           if (dbLevel !== correctLevel || totalFighterPoints > maxLegalPoints) {
             console.warn(`🚨 [АНТИЧИТ] Сброс на легальную норму уровня ${correctLevel}`);
             const statsKeys = ['strength', 'agility', 'endurance', 'luck'];
-            
-            statsKeys.forEach(key => {
-              updatePayload[key] = 1;
-            });
+            statsKeys.forEach(key => { updatePayload[key] = 1; });
 
             updatePayload['level'] = correctLevel;
             updatePayload[pointsKey] = maxLegalPoints - 5; 
             updatePayload['hp'] = getServerMaxHp({ endurance: 1, equipped: cloudPlayer.equipped || {} });
-
-            // 🔥 [ЖЕЛЕЗНАЯ ЗАЩИТА ЭТАЖА]:
-            // Насильно удерживаем твой текущий этаж Башни из базы данных, 
-            // чтобы античит никогда больше не сбрасывал его в единицу при перерасчете статов!
             updatePayload['tower_floor'] = safeReadField(cloudPlayer, 'tower_floor', 1);
 
             needsDbSync = true;
           }
-          // Если статы были сброшены в БД, функция сама очистит куклу в памяти cloudPlayer!
+          
           const unequippedDone = enforceEquipmentRequirements(cloudPlayer);
           if (unequippedDone) {
             updatePayload.equipped = cloudPlayer.equipped;
             updatePayload.inventory = cloudPlayer.inventory;
             
-            // Если вещи слетели, на всякий случай пересчитываем текущее ХП, чтобы оно не превышало новый кап куклы
             const maxHpWithNewGear = getServerMaxHp(cloudPlayer);
             if (Number(cloudPlayer.hp) > maxHpWithNewGear) {
               updatePayload.hp = maxHpWithNewGear;
             }
             needsDbSync = true;
           }
-          // ============================================================================
 
           if (needsDbSync) {
-            // Отправляем атомарный апдейт со сброшенными шмотками в Supabase
             await sb.from('players').update(updatePayload).eq('id', nUserId);
             
-            // Важно: Перезаписываем поля в объекте cloudPlayer, чтобы triggerLoadGameSuccess 
-            // отправил на клиент уже чистую куклу без багов!
             if (updatePayload.equipped) cloudPlayer.equipped = updatePayload.equipped;
             if (updatePayload.inventory) cloudPlayer.inventory = updatePayload.inventory;
             if (updatePayload.hp) cloudPlayer.hp = updatePayload.hp;
@@ -422,16 +414,16 @@ module.exports = {
           await triggerLoadGameSuccess(nUserId, socket, sb);
 
         } else {
-          // 🔥 ТЕПЕРЬ СРАБОТАЕТ СЮДА: Если записей в БД вообще нет, шлём клиенту сигнал создать новичка!
-          console.log(`🆕 Игрок не найден в базе. Отправляем сигнал 'player_not_found'...`);
+          console.log(`🆕 Игрок не найден. Отправляем сигнал 'player_not_found'...`);
           socket.emit('player_not_found', { userId: nUserId, username: username });
         }
 
       } catch (err) {
-        console.error("❌ Критическая ошибка при загрузке игры на сервере:", err);
+        console.error("❌ Критическая ошибка при загрузке игры:", err);
         socket.emit('load_game_failed', { message: err.message });
       }
     });
+
     // ОБРАБОТЧИК: БЕЗОПАСНОЕ СОХРАНЕНИЕ / СОЗДАНИЕ ПЕРСОНАЖА В БД
     socket.on('save_game_secure', async ({ player }) => {
       try {
@@ -440,7 +432,6 @@ module.exports = {
         
         console.log(`💾 [БД СОХРАНЕНИЕ] Запись профиля игрока ID: ${nUserId} (${player.name})...`);
 
-        // Готовим чистый пакет для вставки/обновления в Supabase
         const payload = {
           id: nUserId,
           name: player.name,
@@ -456,7 +447,7 @@ module.exports = {
           endurance: Number(player.stats?.endurance || 1),
           luck: Number(player.stats?.luck || 1),
           inventory: player.inventory || { equipment: [], resources: [], consumables: [] },
-           equipped: player.equipped || { 
+          equipped: player.equipped || { 
             head: null, body: null, legs: null, neck: null, gloves: null,
             mainHand: null, offHand: null, potion: null, scroll: null,
             rings: [null, null, null] 
@@ -464,16 +455,15 @@ module.exports = {
           tower_floor: Number(player.tower_floor ?? player.stats?.tower_floor ?? 1)
         };
 
-        // Делаем атомарный upsert (если нет строки — создаст, если есть — обновит)
         const { error } = await sb.from('players').upsert(payload).eq('id', nUserId);
         
         if (error) {
           console.error(`🚨 Ошибка сохранения в Supabase для ID ${nUserId}:`, error.message);
         } else {
-          console.log(`✨ [БД УСПЕХ] Персонаж ${player.name} успешно сохранен/создан в Supabase.`);
+          console.log(`✨ [БД УСПЕХ] Персонаж ${player.name} сохранен/создан.`);
         }
       } catch (err) {
-        console.error("❌ Критический сбой при обработке save_game_secure:", err);
+        console.error("❌ Критический сбой в save_game_secure:", err);
       }
     });
 
@@ -516,15 +506,13 @@ module.exports = {
         statsKeys.forEach(key => {
           let finalKey = dbPlayer[key] !== undefined ? key : key.toLowerCase();
           let spent = Number(distribution[key]) || 0;
-          
           const currentVal = safeReadField(dbPlayer, key, 1);
           updatePayload[finalKey] = currentVal + spent;
         });
 
         const addedEnd = Number(distribution.endurance) || 0;
         if (addedEnd > 0) {
-          let hpKey = dbPlayer.hp !== undefined ? 'hp' : 'hp';
-          updatePayload[hpKey] = safeReadField(dbPlayer, 'hp', 10) + (addedEnd * 10);
+          updatePayload['hp'] = safeReadField(dbPlayer, 'hp', 10) + (addedEnd * 10);
         }
 
         await sb.from('players').update(updatePayload).eq('id', nUserId);
@@ -534,28 +522,23 @@ module.exports = {
         socket.emit('stat_distribution_error', 'Внутренняя ошибка сервера.');
       }
     });
+
+    // --- 3. СБРОС ХАРАКТЕРИСТИК ---
     socket.on('request_stat_reset_secure', async ({ userId }) => {
       try {
         const nUserId = Number(userId);
-        
-        // 1. Извлекаем свежий профиль из базы данных
         const { data: dbPlayer } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
         if (!dbPlayer) return socket.emit('stat_distribution_error', 'Персонаж не найден.');
 
-        // 2. Проверяем наличие попыток сброса
         const resetsLeft = safeReadField(dbPlayer, 'stat_resets', 3);
         if (resetsLeft <= 0) {
           return socket.emit('stat_distribution_error', '❌ У вас закончились свитки сброса характеристик!');
         }
 
-        // 3. Вычисляем текущий легальный лимит очков для этого уровня
         const currentXp = safeReadField(dbPlayer, 'xp', 0);
         const cloudLevel = getServerCorrectLevelByXp(currentXp);
-        
-        // Базовые 5 очков новичка + по 5 очков за каждый уровень выше первого
         const maxLegalFreePoints = 5 + ((cloudLevel - 1) * 5);
 
-// 4. Формируем пакет сброса (все базовые статы возвращаются на 1)
         let pointsKey = dbPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
         
         const updatePayload = {
@@ -563,40 +546,27 @@ module.exports = {
           agility: 1,
           endurance: 1,
           luck: 1,
-          [pointsKey]: maxLegalFreePoints, // Возвращаем абсолютно все очки раскачки гладиатору
-          stat_resets: resetsLeft - 1     // Списываем 1 попытку сброса
+          [pointsKey]: maxLegalFreePoints,
+          stat_resets: resetsLeft - 1
         };
 
-        // Записываем «голые» статы прямо в объект памяти dbPlayer, 
-        // чтобы функция авто-стриптиза ниже увидела, что статы стали равны 1!
         dbPlayer.strength = 1;
         dbPlayer.agility = 1;
         dbPlayer.endurance = 1;
         dbPlayer.luck = 1;
         dbPlayer.level = cloudLevel;
 
-        // ============================================================================
-        // 🔥 [СИНХРО-ФИКС ДЛЯ МГНОВЕННОГО СНЯТИЯ]:
-        // Запускаем античит куклы прямо здесь! Он увидит статы 1, мгновенно сорвет 
-        // Рогатый Шлем и Тесаки с куклы dbPlayer и перекинет их в рюкзак в памяти ОЗУ!
-        // ============================================================================
-        enforceEquipmentRequirements(dbPlayer, 1, 1, 1, 1, cloudLevel);
+        // 🔥 ИСПРАВЛЕНО: используем общую функцию из db_helper
+        enforceEquipmentRequirements(dbPlayer);
 
-        // Упаковываем уже ОЧИЩЕННУЮ куклу и рюкзак в пакет сохранения для Supabase!
         updatePayload.equipped = dbPlayer.equipped;
         updatePayload.inventory = dbPlayer.inventory;
-        // ============================================================================
-
-        // Пересчитываем базовое ХП для «голого» персонажа (учитывая, что вещи уже могли слететь!)
         updatePayload.hp = getServerMaxHp(dbPlayer);
 
-        // Записываем чистый сброшенный профиль с пустой куклой обратно в облако Supabase
         await sb.from('players').update(updatePayload).eq('id', nUserId);
         
-        console.log(`🧹 [БД СБРОС СТАТОВ С УСПЕШНЫМ СНЯТИЕМ] Игрок ${dbPlayer.name} сброшен. Вещи отправлены в рюкзак.`);
+        console.log(`🧹 [БД СБРОС СТАТОВ] Игрок ${dbPlayer.name} сброшен. Вещи в рюкзаке.`);
         
-        // Насильно триггерим отправку профиля — теперь на телефон полетит 
-        // абсолютно пустая кукла и наполненный рюкзак шмоток!
         await triggerLoadGameSuccess(nUserId, socket, sb);
 
       } catch (err) {
