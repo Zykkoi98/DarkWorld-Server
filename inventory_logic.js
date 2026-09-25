@@ -27,7 +27,7 @@ module.exports = function(io, socket, sb) {
       let inventory = dbPlayer.inventory || { equipment: [], resources: [], consumables: [] };
       let equipped = dbPlayer.equipped || { rings: [null, null, null] };
       const currentXp = safeReadField(dbPlayer, 'xp', 0);
-      const cloudLevel = getServerCorrectLevelByXp(currentXp); 
+      const cloudLevel = dbHelper.getServerCorrectLevelByXp(currentXp);
       
       console.log(`🛡️ [КОНТРОЛЬ НАДЕВАНИЯ] Игрок ${dbPlayer.name} (Опыт: ${currentXp} -> Расчетный Ур: ${cloudLevel}). Предмет: ${cleanItemId}`);
 
