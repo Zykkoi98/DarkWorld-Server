@@ -463,7 +463,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         .eq('timer_type', 'forest_cooldown');
 
       // Генерируем время окончания КД: текущее время + 3 минуты
-      const cooldownTime = new Date(Date.now() + 3 * 60 * 1000); 
+      const cooldownTime = new Date(Date.now() + 1 * 60 * 1000); 
       
       // Вставляем свежий таймер КД в облако Supabase
       await sb.from('player_timers').insert({
