@@ -233,6 +233,79 @@ function enforceEquipmentRequirements(cloudPlayer) {
 
   return wasAnythingUnequipped;
 }
+
+
+// 🔥 СЕРВЕРНЫЙ КАЛЬКУЛЯТОР АВТОДОПОЛНЕНИЯ БАНОК ДЛЯ ВСЕХ МОДУЛЕЙ ИГРЫ
+function autoRefillPotionsAfterBattle(playerRow) {
+  try {
+    if (!playerRow || !playerRow.equipped || !playerRow.inventory) return;
+
+    let equipped = playerRow.equipped;
+    let inventory = playerRow.inventory;
+    
+    if (!inventory.consumables) inventory.consumables = [];
+    let consumables = inventory.consumables;
+
+    const validPotions = ['hp_potion_big', 'hp_potion_small', 'fish_soup'];
+
+    // СЦЕНАРИЙ А: Слот банок полностью пустой (игрок выпил всё в ноль во время боя)
+    if (!equipped.potion || equipped.potion === null || typeof equipped.potion !== 'object') {
+      let foundPotionId = null;
+      let invIdx = -1;
+
+      for (const pId of validPotions) {
+        invIdx = consumables.findIndex(c => c && c.id === pId && Number(c.count || 0) > 0);
+        if (invIdx !== -1) {
+          foundPotionId = pId;
+          break;
+        }
+      }
+
+      if (foundPotionId && invIdx !== -1) {
+        const availableInInv = Number(consumables[invIdx].count || 0);
+        const takeQty = Math.min(5, availableInInv);
+
+        equipped.potion = { id: foundPotionId, count: takeQty };
+
+        if (availableInInv > takeQty) {
+          consumables[invIdx].count -= takeQty;
+        } else {
+          consumables.splice(invIdx, 1);
+        }
+        console.log(`🧪 [БД АВТОДОПОЛНЕНИЕ] Слот банок был пуст. Взято из рюкзака ${takeQty} шт. (${foundPotionId})`);
+        return;
+      }
+    }
+
+    // СЦЕНАРИЙ Б: На кукле уже есть объект банки, но стак не полный (меньше 5 штук)
+    if (equipped.potion && typeof equipped.potion === 'object' && equipped.potion.id) {
+      let potionSlot = equipped.potion;
+      let currentCount = Number(potionSlot.count || 0);
+      
+      if (currentCount < 5) {
+        const needQty = 5 - currentCount;
+        const invPotionIdx = consumables.findIndex(c => c && c.id === potionSlot.id);
+        
+        if (invPotionIdx !== -1) {
+          const availableInInv = Number(consumables[invPotionIdx].count || 0);
+          const takeQty = Math.min(needQty, availableInInv);
+          
+          if (takeQty > 0) {
+            potionSlot.count = currentCount + takeQty;
+            if (availableInInv > takeQty) {
+              consumables[invPotionIdx].count -= takeQty;
+            } else {
+              consumables.splice(invPotionIdx, 1);
+            }
+            console.log(`🧪 [БД АВТОДОПОЛНЕНИЕ] К стаку на кукле доложено +${takeQty} шт. банок (${potionSlot.id})`);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("🚨 Фатальный сбой при автодополнении банок:", err.message);
+  }
+}
 // Экспортируем методы наружу для использования в других файлах бэкенда
 module.exports = {
   getServerMaxHp,
@@ -244,6 +317,7 @@ module.exports = {
   getServerMfAntiCrit,
   safeReadField,
   triggerLoadGameSuccess,
+  autoRefillPotionsAfterBattle,
   
   // Главный инициализатор сокет-обработчиков
   init: function(io, socket, sb) {

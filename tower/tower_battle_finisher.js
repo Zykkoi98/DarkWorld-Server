@@ -44,9 +44,7 @@ async function finalizeTowerBattleSecure(room, result, sb) {
     player.inventory = liveInventory;
     player.equipped = liveEquipped;
     
-    if (global.autoRefillPotionsAfterBattle) {
-      global.autoRefillPotionsAfterBattle(player);
-    }
+   dbHelper.autoRefillPotionsAfterBattle(player); 
 
     let pointsKey = (freshDbPlayer.statpoints !== undefined) ? 'statpoints' : 'statPoints';
     let currentDbStatPoints = Number(freshDbPlayer[pointsKey] || 0);
