@@ -216,34 +216,100 @@ module.exports = function(io, socket, sb, activeRooms) {
     callback({ activeRoomId: activeRoomId || null });
   });
 
-  socket.on('reconnect_to_battle', ({ roomId, userId }) => {
-    const room = activeRooms[roomId];
-    if (!room) return socket.emit('error', 'Бой уже завершился.');
+   socket.on('reconnect_to_battle', async ({ roomId, userId }) => {
+    try {
+      const room = activeRooms[roomId];
+      if (!room) return socket.emit('error', 'Бой уже завершился.');
 
-    const sUserId = String(userId);
-    const pFighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
+      const sUserId = String(userId);
+      const nUserId = Number(userId);
+      const pFighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
 
-    if (pFighter) {
-      pFighter.socketId = socket.id;
-      socket.join(roomId);
-      
-      // 1. Сначала отправляем базовый пакет инициализации на фронтенд
-      socket.emit('battle_init_data', {
-        roomId: roomId, turnCount: room.turnCount, myUuid: pFighter.uuid,
-        teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB)
-      });
+      if (pFighter) {
+        pFighter.socketId = socket.id;
+        socket.join(roomId);
 
-      // 🔥 [ЖЕЛЕЗНЫЙ ФИКС БОЯ С 0 HP] Если игрок зашел мертвым, 
-      // запускаем проверку финала через 300мс, когда сокет гарантированно прогрузился в комнату
-      const isTeamADead = room.teamA.every(f => f.currentHp <= 0);
-      const isTeamBDead = room.teamB.every(f => f.currentHp <= 0);
+        // 🔥 [АНТИЧИТ-ПЕРЕХВАТ ПРИ F5]
+        // Делаем экспресс-запрос в Supabase, чтобы узнать РЕАЛЬНЫЕ текущие статы игрока
+        const { data: cloudPlayer } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+        
+        if (cloudPlayer) {
+          // Вызываем ту же самую функцию авто-стриптиза из db_helper!
+          // Так как db_helper импортирован вверху файла как const dbHelper = require('./db_helper');
+          // Мы можем вызвать её через контекст или скопировать её логику проверки требований.
+          
+          let wasAnythingUnequipped = false;
+          let equipped = cloudPlayer.equipped || {};
+          let inventory = cloudPlayer.inventory || { equipment: [] };
+          if (!Array.isArray(inventory.equipment)) inventory.equipment = [];
 
-      if (isTeamADead || isTeamBDead) {
-        console.log(`🏁 [СОКЕТНЫЙ ЭКСПРЕСС-ФИНАЛ] Обнаружен боец с 0 HP при реконнекте. Закрываем матч.`);
-        setTimeout(() => {
-          executeRoundCalculations(roomId, activeRooms, io);
-        }, 300);
+          const myStr = Number(cloudPlayer.strength || 1);
+          const myAgi = Number(cloudPlayer.agility || 1);
+          const myEnd = Number(cloudPlayer.endurance || 1);
+          const myLuck = Number(cloudPlayer.luck || 1);
+          const myLvl = Number(cloudPlayer.level || 1);
+
+          const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand', 'extra'];
+
+          slots.forEach(slot => {
+            const itemId = equipped[slot];
+            if (!itemId) return;
+
+            const itemData = GAME_ITEMS_DATABASE[itemId];
+            if (!itemData) return;
+
+            let isItemLegal = true;
+            if (itemData.level && myLvl < Number(itemData.level)) isItemLegal = false;
+            if (itemData.req) {
+              if (itemData.req.strength && myStr < Number(itemData.req.strength)) isItemLegal = false;
+              if (itemData.req.agility && myAgi < Number(itemData.req.agility)) isItemLegal = false;
+              if (itemData.req.endurance && myEnd < Number(itemData.req.endurance)) isItemLegal = false;
+              if (itemData.req.luck && myLuck < Number(itemData.req.luck)) isItemLegal = false;
+            }
+
+            // 🚨 Если при F5 обнаружилось, что шмотка нелегальна — выбиваем её из ОЗУ комнаты боя намертво!
+            if (!isItemLegal) {
+              console.warn(`🚨 [АНТИЧИТ F5 БОЯ] Снимаем нелегальный "${itemData.name}" из слота ${slot} прямо во время боя!`);
+              inventory.equipment.push({ uuid: `${itemId}_f5_${Date.now()}`, id: itemId });
+              equipped[slot] = null;
+              wasAnythingUnequipped = true;
+            }
+          });
+
+          // Если на F5 поймали читера, обновляем и базу данных, и текущего бойца в ОЗУ комнаты!
+          if (wasAnythingUnequipped) {
+            await sb.from('players').update({ equipped, inventory }).eq('id', nUserId);
+            
+            // Насильно затираем шмотки в памяти запущенного боя, чтобы обнулить читерские статы
+            pFighter.equipped = equipped;
+            pFighter.inventory = inventory;
+            
+            // Корректируем боевые характеристики в ОЗУ раунда
+            pFighter.strength = myStr;
+            pFighter.agility = myAgi;
+            pFighter.endurance = myEnd;
+            pFighter.luck = myLuck;
+            
+            console.log(`✨ [АНТИЧИТ F5 УСПЕХ] Характеристики и кукла бойца ${pFighter.name} в ОЗУ комнаты зачищены.`);
+          }
+        }
+
+        // 1. Отправляем базовый пакет инициализации (уже без читерских шмоток!)
+        socket.emit('battle_init_data', {
+          roomId: roomId, turnCount: room.turnCount, myUuid: pFighter.uuid,
+          teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB)
+        });
+
+        // [ЖЕЛЕЗНЫЙ ФИКС БОЯ С 0 HP]
+        const isTeamADead = room.teamA.every(f => f.currentHp <= 0);
+        const isTeamBDead = room.teamB.every(f => f.currentHp <= 0);
+        if (isTeamADead || isTeamBDead) {
+          console.log(`🏁 [СОКЕТНЫЙ ЭКСПРЕСС-ФИНАЛ] Закрываем матч.`);
+          setTimeout(() => { executeRoundCalculations(roomId, activeRooms, io); }, 300);
+        }
       }
+    } catch (err) {
+      console.error("🚨 Сбой античита при реконнекте:", err.message);
     }
   });
 
