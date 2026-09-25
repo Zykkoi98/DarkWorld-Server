@@ -139,7 +139,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       const teamB = [];
       const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-      const statMultiplier = 1 + ((floor - 1) * 0.15);
+      const statMultiplier = 1 + ((floor - 1) * 0.20);
       const rewardMultiplier = 1 + ((floor - 1) * 0.20);
 
       const isBossFloor = floor >= 5 && rand(1, 100) <= 15;

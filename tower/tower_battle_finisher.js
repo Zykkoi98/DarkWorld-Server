@@ -59,12 +59,18 @@ if (result === 'win') {
             gainedGold += monsterLevel;
           }
 
-          // Монеты Башни: Босс гарантированно дает больше монет!
+      // Монеты Башни: 30% шанс на выпадение с каждого моба
           if (rand(1, 100) <= 30) {
-            // Если это Босс, увеличиваем лимит выпадаемых монет Башни в 2 раза!
+            // 🔥 НОВАЯ СДЕРЖАННАЯ RPG ФОРМУЛА: 
+            // Стартуем с 1 монеты, и каждые полные 5 уровней этажа лимит увеличивается на +1 монету!
+            let maxCoins = 1 + Math.floor((monsterLevel - 1) / 5);
+            
+            // Если это Босс — легально удваиваем лимит монет за его голову
             const isBoss = (m.rewardXp !== undefined);
-            const maxCoins = Math.max(1, Math.ceil(monsterLevel / (isBoss ? 1 : 2)));
-            gainedTowerCoins += rand(1, maxCoins);
+            if (isBoss) maxCoins = maxCoins * 2;
+
+            // Бросаем кубик от 1 до рассчитанного строгого максимума
+            gainedTowerCoins += rand(1, Math.max(1, maxCoins));
           }
         });
       }
