@@ -1151,6 +1151,7 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
           logs: logs, // Тут теперь лежит идеальный чистый массив строк
           isOver: true, 
           resultType: result,
+          isTower: !!room.isTower, // 🔥 [ДОБАВЛЕНО] Сервер сообщает клиенту, что это была Башня!
           teamA: sanitizeTeam(room.teamA), 
           teamB: sanitizeTeam(room.teamB) 
         });
