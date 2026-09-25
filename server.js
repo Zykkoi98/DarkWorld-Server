@@ -36,95 +36,82 @@ const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 // Глобальная память для активных боевых комнат
 let activeRooms = {}; 
 global.activeRooms = activeRooms;
+
 // ============================================================================
-// 🔥 [АВТОНОМНАЯ РЕГЕНЕРАЦИЯ HP] — Полный код без конфликтов с другими файлами
+// 🔥 [АВТОНОМНАЯ РЕГЕНЕРАЦИЯ HP] — Память онлайн-сессий города
 // ============================================================================
 const activeOnlinePlayers = {}; 
 
-// Локальный чистый сборщик бонусов выносливости со шмоток для защиты от Build Failed
-function getLocalEnduranceBonus(equipped) {
-  if (!equipped) return 0;
-  let bonus = 0;
-  const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand', 'extra'];
-  
-  slots.forEach(slot => {
-    const itemId = equipped[slot];
-    if (!itemId) return;
-    // Безопасно ищем предмет в глобальной базе, которую подключил server.js
-    const item = GAME_ITEMS_DATABASE ? GAME_ITEMS_DATABASE[itemId] : null;
-    if (item && item.bonus) {
-      if (item.bonus.endurance !== undefined) bonus += item.bonus.endurance;
-      if (item.bonus.stats && item.bonus.stats.endurance !== undefined) bonus += item.bonus.stats.endurance;
-    }
-  });
+// 1. Ежесекундное плавное лечение в городе
+setInterval(() => {
+  try {
+    const socketIds = Object.keys(activeOnlinePlayers);
+    if (socketIds.length === 0) return;
 
-  if (equipped.rings && Array.isArray(equipped.rings)) {
-    equipped.rings.forEach(itemId => {
-      if (!itemId) return;
-      const item = GAME_ITEMS_DATABASE ? GAME_ITEMS_DATABASE[itemId] : null;
-      if (item && item.bonus) {
-        if (item.bonus.endurance !== undefined) bonus += item.bonus.endurance;
-        if (item.bonus.stats && item.bonus.stats.endurance !== undefined) bonus += item.bonus.stats.endurance;
+    socketIds.forEach(sId => {
+      const p = activeOnlinePlayers[sId];
+      if (!p || !p.id) return; // Защита от пустых сокетов
+
+      // Заморозка лечения, если гладиатор ушел в бой
+      const isInBattle = Object.keys(activeRooms || {}).some(roomId => {
+        const room = activeRooms[roomId];
+        return room && room.teamA && room.teamA.some(f => f && String(f.id) === String(p.id));
+      });
+
+      if (isInBattle) return;
+
+      // 🔥 [ИСПРАВЛЕНО]: Больше никаких ReferenceError! Безопасно вызываем твой 
+      // рабочий dbHelper. Если он занят, включается резервный автономный расчет.
+      let maxHp = 100;
+      if (dbHelper && typeof dbHelper.getServerMaxHp === 'function') {
+        maxHp = dbHelper.getServerMaxHp(p);
+      } else {
+        maxHp = (Number(p.endurance || 1) * 10); 
+      }
+      
+      if (p.hp < maxHp) {
+        const regenAmount = Math.max(1, Math.floor(maxHp * 0.01)); // 1% в сек
+        p.hp = Math.min(maxHp, p.hp + regenAmount);
+        p.needsSave = true;
+
+        // Отправляем эвент регенерации на телефон игрока
+        io.to(sId).emit('town_hp_regen_update', { 
+          currentHp: p.hp, 
+          maxHp: maxHp 
+        });
       }
     });
+  } catch (globalLoopErr) {
+    console.error("🚨 Сбой тикера регенерации:", globalLoopErr.message);
   }
-  return bonus;
-}
-
-// 1. Ежесекундное лечение
-setInterval(async () => {
-  const socketIds = Object.keys(activeOnlinePlayers);
-  if (socketIds.length === 0) return;
-
-  socketIds.forEach(sId => {
-    const p = activeOnlinePlayers[sId];
-    
-    // Заморозка в бою
-    const isInBattle = Object.keys(global.activeRooms || {}).some(roomId => {
-      const room = global.activeRooms[roomId];
-      return room.teamA.some(f => String(f.id) === String(p.id)) || 
-             room.teamB.some(f => String(f.id) === String(p.id));
-    });
-
-    if (isInBattle) return;
-
-    // 🔥 Чистый автономный расчет ХП: (Базовая выносливость + Выносливость шмоток) * 10
-    const totalEndurance = Number(p.endurance || 1) + getLocalEnduranceBonus(p.equipped);
-    const maxHp = totalEndurance * 10;
-    
-    if (p.hp < maxHp) {
-      const regenAmount = Math.max(1, Math.floor(maxHp * 0.01)); // 1% в секунду
-      p.hp = Math.min(maxHp, p.hp + regenAmount);
-      p.needsSave = true;
-
-      io.to(sId).emit('town_hp_regen_update', { 
-        currentHp: p.hp, 
-        maxHp: maxHp 
-      });
-    }
-  });
 }, 1000);
 
-// 2. Сброс в Supabase раз в 15 секунд
+// 2. Безопасный фоновый сброс накопленного ХП в Supabase раз в 15 секунд
 setInterval(async () => {
-  const socketIds = Object.keys(activeOnlinePlayers);
-  for (const sId of socketIds) {
-    const p = activeOnlinePlayers[sId];
-    if (p && p.needsSave) {
-      p.needsSave = false;
-      try {
+  try {
+    const socketIds = Object.keys(activeOnlinePlayers);
+    if (socketIds.length === 0) return;
+
+    for (const sId of socketIds) {
+      const p = activeOnlinePlayers[sId];
+      if (p && p.needsSave && p.id) {
+        p.needsSave = false;
+        // Апдейтим строго одну колонку здоровья
         await sb.from('players').update({ hp: Number(p.hp) }).eq('id', Number(p.id));
-        console.log(`☁️ [БД РЕГЕНЕРАЦИЯ] Здоровье ${p.name} синхронизировано: ${p.hp} HP.`);
-      } catch (err) {
-        console.error("🚨 Ошибка сохранения ХП:", err.message);
+        console.log(`☁️ [БД РЕГЕНЕРАЦИЯ] Здоровье ${p.name} сохранено: ${p.hp} HP.`);
       }
     }
+  } catch (dbSaveErr) {
+    console.error("🚨 Сбой базы при сохранении регенерации:", dbSaveErr.message);
   }
 }, 15000);
+// ============================================================================
+
+// ГЛАВНЫЙ СЛУШАТЕЛЬ СОКЕТ-ПОДКЛЮЧЕНИЙ
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
-   // 1. ТРИГГЕР ВХОДА (Запоминаем игрока в ОЗУ регенерации)
-  // Регистрация в тикер регенерации
+
+  // Регистрация сокета в ОЗУ тикера лечения при успешном входе в город
   socket.on('load_game_secure', async (payload) => {
     try {
       const nUserId = Number(payload?.userId || payload?.id || 0);
@@ -132,7 +119,7 @@ io.on('connection', (socket) => {
 
       const { data: row } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
       if (row) {
-        // Защита регистров полей из Supabase
+        // Сканируем регистры выносливости из Supabase
         const dbEndurance = row.endurance ?? row.Endurance ?? row.stats?.endurance ?? 1;
         
         activeOnlinePlayers[socket.id] = {
@@ -143,10 +130,13 @@ io.on('connection', (socket) => {
           equipped: row.equipped || {},
           needsSave: false
         };
-        console.log(`✅ [РЕГЕНЕРАЦИЯ] Игрок ${row.name} добавлен в список лечения.`);
+        console.log(`✅ [РЕГЕНЕРАЦИЯ ВХОД] Гладиатор ${row.name} добавлен в очередь лечения.`);
       }
-    } catch (e) { console.error("🚨 Ошибка тикера:", e.message); }
+    } catch (e) { 
+      console.error("🚨 Ошибка авторизации тикера:", e.message); 
+    }
   });
+
   // 1. Инициализируем модуль базы данных и античита (Передаем io, socket, sb)
   if (dbHelper && typeof dbHelper.init === 'function') {
     dbHelper.init(io, socket, sb);
@@ -164,17 +154,17 @@ io.on('connection', (socket) => {
     battleLogic(io, socket, sb, activeRooms);
   }
 
-  // 🏰 [ИСПРАВЛЕНО] Инициализируем ядро Бесконечной Башни (Переменная теперь легально объявлена)
+  // 4. Инициализируем ядро Бесконечной Башни
   if (typeof towerLogic === 'function') {
     towerLogic(io, socket, sb, activeRooms);
   }
 
-  // 4. Инициализируем магазин города
+  // 5. Инициализируем магазин города
   if (typeof shopLogic === 'function') {
     shopLogic(io, socket, sb);
   }
 
-  // 2. ТРИГГЕР ОТКЛЮЧЕНИЯ (Убираем из списка лечения, чтобы не тратить ОЗУ)
+  // Безопасное отключение: чистим socketId оффлайн-игроков и убираем из тикера регенерации
   socket.on('disconnect', () => {
     const p = activeOnlinePlayers[socket.id];
     if (p) {
@@ -182,12 +172,19 @@ io.on('connection', (socket) => {
       console.log(`🧹 [РЕГЕНЕРАЦИЯ] Игрок ${p.name} отключился, сессия лечения закрыта.`);
     }
 
-    // Твой старый код дисконнекта комнат (очистка сокетов в activeRooms) оставляй без изменений:
     Object.keys(activeRooms).forEach(roomId => {
       const room = activeRooms[roomId];
-      const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
-      if (fighter) fighter.socketId = null;
+      if (room && room.teamA) {
+        const fighter = [...room.teamA, ...room.teamB].find(f => f && f.socketId === socket.id);
+        if (fighter) fighter.socketId = null;
+      }
     });
     console.log(`❌ Сокет отключен: ${socket.id}`);
   });
+});
+
+// Запуск сервера на порту Render
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`🚀 Сервер Dark World запущен по правилам Стойкости на порту ${PORT}`);
 });
