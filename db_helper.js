@@ -149,7 +149,89 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
     console.error("❌ Критический сбой внутри триггера load_game_success:", err);
   }
 }
+// 🔥 [АНТИЧИТ-ФИКС]: Серверная проверка куклы. Снимает вещи в рюкзак, если статы игрока упали!
+function enforceEquipmentRequirements(cloudPlayer) {
+  if (!cloudPlayer || !cloudPlayer.equipped) return false;
 
+  let equipped = cloudPlayer.equipped;
+  // Если рюкзака нет в БД, создаем правильную структуру
+  if (!cloudPlayer.inventory) cloudPlayer.inventory = { equipment: [], resources: [], consumables: [] };
+  let inventory = cloudPlayer.inventory;
+  if (!Array.isArray(inventory.equipment)) inventory.equipment = [];
+
+  // 1. Сначала считываем ЧИСТЫЕ (базовые) статы игрока из БД без учета шмоток
+  const myStr = Number(cloudPlayer.strength || 1);
+  const myAgi = Number(cloudPlayer.agility || 1);
+  const myEnd = Number(cloudPlayer.endurance || 1);
+  const myLuck = Number(cloudPlayer.luck || 1);
+  const myLvl = Number(cloudPlayer.level || 1);
+
+  const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand', 'extra'];
+  let wasAnythingUnequipped = false;
+
+  slots.forEach(slot => {
+    const itemId = equipped[slot];
+    if (!itemId) return;
+
+    // Ищем вещь в базе данных предметов
+    const itemData = GAME_ITEMS_DATABASE[itemId];
+    if (!itemData) return;
+
+    let isItemLegal = true;
+
+    // Проверяем требование по уровню
+    if (itemData.level && myLvl < Number(itemData.level)) isItemLegal = false;
+
+    // Проверяем требования по характеристикам
+    if (itemData.req) {
+      if (itemData.req.strength && myStr < Number(itemData.req.strength)) isItemLegal = false;
+      if (itemData.req.agility && myAgi < Number(itemData.req.agility)) isItemLegal = false;
+      if (itemData.req.endurance && myEnd < Number(itemData.req.endurance)) isItemLegal = false;
+      if (itemData.req.luck && myLuck < Number(itemData.req.luck)) isItemLegal = false;
+    }
+
+    // 🚨 Если вещь больше не подходит — принудительно раздеваем персонажа!
+    if (!isItemLegal) {
+      console.warn(`🚨 [АНТИЧИТ КУКЛЫ] У игрока ${cloudPlayer.name} недостаточно статов для "${itemData.name}" в слоте ${slot}. Снимаем в рюкзак.`);
+      
+      // Возвращаем вещь в инвентарь (генерируем UUID, если его не было)
+      inventory.equipment.push({ uuid: `${itemId}_force_${Date.now()}`, id: itemId });
+      
+      // Полностью очищаем слот на кукле
+      equipped[slot] = null;
+      wasAnythingUnequipped = true;
+    }
+  });
+
+  // Отдельно обсчитываем 3 слота колец
+  if (equipped.rings && Array.isArray(equipped.rings)) {
+    for (let i = 0; i < equipped.rings.length; i++) {
+      const itemId = equipped.rings[i];
+      if (!itemId) continue;
+
+      const itemData = GAME_ITEMS_DATABASE[itemId];
+      if (itemData) {
+        let isRingLegal = true;
+        if (itemData.level && myLvl < Number(itemData.level)) isRingLegal = false;
+        if (itemData.req) {
+          if (itemData.req.strength && myStr < Number(itemData.req.strength)) isRingLegal = false;
+          if (itemData.req.agility && myAgi < Number(itemData.req.agility)) isRingLegal = false;
+          if (itemData.req.endurance && myEnd < Number(itemData.req.endurance)) isRingLegal = false;
+          if (itemData.req.luck && myLuck < Number(itemData.req.luck)) isRingLegal = false;
+        }
+
+        if (!isRingLegal) {
+          console.warn(`🚨 [АНТИЧИТ КУКЛЫ] Снято кольцо "${itemData.name}" из слота №${i}`);
+          inventory.equipment.push({ uuid: `${itemId}_force_${Date.now()}`, id: itemId });
+          equipped.rings[i] = null;
+          wasAnythingUnequipped = true;
+        }
+      }
+    }
+  }
+
+  return wasAnythingUnequipped;
+}
 // Экспортируем методы наружу для использования в других файлах бэкенда
 module.exports = {
   getServerMaxHp,
@@ -231,9 +313,30 @@ module.exports = {
 
             needsDbSync = true;
           }
+          // Если статы были сброшены в БД, функция сама очистит куклу в памяти cloudPlayer!
+          const unequippedDone = enforceEquipmentRequirements(cloudPlayer);
+          if (unequippedDone) {
+            updatePayload.equipped = cloudPlayer.equipped;
+            updatePayload.inventory = cloudPlayer.inventory;
+            
+            // Если вещи слетели, на всякий случай пересчитываем текущее ХП, чтобы оно не превышало новый кап куклы
+            const maxHpWithNewGear = getServerMaxHp(cloudPlayer);
+            if (Number(cloudPlayer.hp) > maxHpWithNewGear) {
+              updatePayload.hp = maxHpWithNewGear;
+            }
+            needsDbSync = true;
+          }
+          // ============================================================================
 
           if (needsDbSync) {
+            // Отправляем атомарный апдейт со сброшенными шмотками в Supabase
             await sb.from('players').update(updatePayload).eq('id', nUserId);
+            
+            // Важно: Перезаписываем поля в объекте cloudPlayer, чтобы triggerLoadGameSuccess 
+            // отправил на клиент уже чистую куклу без багов!
+            if (updatePayload.equipped) cloudPlayer.equipped = updatePayload.equipped;
+            if (updatePayload.inventory) cloudPlayer.inventory = updatePayload.inventory;
+            if (updatePayload.hp) cloudPlayer.hp = updatePayload.hp;
           }
 
           await triggerLoadGameSuccess(nUserId, socket, sb);
