@@ -363,10 +363,31 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
   });
   // --- 6. ОБРАБОТЧИК: ЗАПУСК PvE БОЯ (ВЫХОД НА ПРИРОДУ) ---
+   // --- 6. ОБРАБОТЧИК: ЗАПУСК PvE БОЯ (ВЫХОД НА ПРИРОДУ С КУЛДАУНОМ) ---
   socket.on('search_pve_match', async ({ playerData, monsterKey, count }) => {
     try {
       const sPlayerId = String(playerData.id);
       const nPlayerId = Number(playerData.id);
+
+      // ============================================================================
+      // 🔥 [ШАГ 1]: АНТИ-СПАМ БАРЬЕР КУЛДАУНА ЛЕСА ИЗ ТАБЛИЦЫ ТАЙМЕРОВ Supabase
+      // ============================================================================
+      // Запрашиваем из Supabase, не ходил ли игрок в лес совсем недавно
+      const { data: forestTimer } = await sb.from('player_timers')
+        .select('ends_at')
+        .eq('user_id', nPlayerId)
+        .eq('timer_type', 'forest_cooldown')
+        .maybeSingle();
+
+      // Если таймер активен (время окончания еще в будущем) — намертво блокируем вход!
+      if (forestTimer && new Date(forestTimer.ends_at) > new Date()) {
+        const msLeft = new Date(forestTimer.ends_at) - new Date();
+        const minLeft = Math.ceil(msLeft / 60000);
+        
+        // Отправляем ошибку на фронтенд. client_battle.js поймает её и выведет на экран!
+        return socket.emit('error', `🌲 Лес восстанавливается после похода! Доступ через: ${minLeft} мин.`);
+      }
+      // ============================================================================
 
       // Аннулируем вызов на Арене, так как игрок ушел в PvE лес
       await sb.from('arena_lobby').delete().eq('id', nPlayerId);
@@ -393,8 +414,30 @@ module.exports = function(io, socket, sb, activeRooms) {
       const { data: dbMonster } = await sb.from('bots').select('*').eq('id', monsterKey).maybeSingle();
       const { data: dbPlayer } = await sb.from('players').select('*').eq('id', nPlayerId).single();
 
-      if (!dbMonster || !dbPlayer) return socket.emit('error', 'Ошибка инициализации данных PvE.');
+      if (!dbMonster || !dbPlayer) return socket.emit('error', 'Ошибка初始化 данных PvE.');
 
+      // ============================================================================
+      // 🔥 [ШАГ 2]: ОБНОВЛЯЕМ ТАЙМЕР ЛЕСА НА 3 МИНУТЫ ПРИ УСПЕШНОМ СТАРТЕ БОЯ
+      // ============================================================================
+      // Стираем старую запись, чтобы избежать конфликтов уникальных индексов PostgreSQL
+      await sb.from('player_timers')
+        .delete()
+        .eq('user_id', nPlayerId)
+        .eq('timer_type', 'forest_cooldown');
+
+      // Генерируем время окончания КД: текущее время + 3 минуты
+      const cooldownTime = new Date(Date.now() + 3 * 60 * 1000); 
+      
+      // Вставляем свежий таймер КД в облако Supabase
+      await sb.from('player_timers').insert({
+        user_id: nPlayerId,
+        timer_type: 'forest_cooldown',
+        ends_at: cooldownTime.toISOString()
+      });
+      console.log(`🌲 [БД ТАЙМЕР] Игрок ID ${nPlayerId} успешно зашел в лес. КД повешено до ${cooldownTime.toISOString()}`);
+      // ============================================================================
+
+      // Дальше идет твой родной код сборки комнат:
       const roomId = `room_pve_${dbPlayer.id}_${Date.now()}`;
       const pMaxHp = getServerMaxHp(dbPlayer);
 
