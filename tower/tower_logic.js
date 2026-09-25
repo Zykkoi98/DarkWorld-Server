@@ -58,6 +58,7 @@ module.exports = function(io, socket, sb, activeRooms) {
                 // 🔥 [ФИНАЛЬНЫЙ ФИКС ЭТАЖА БАШНИ]
                 // Теперь сервер честно забирает двойку из Supabase и шлет её на телефон!
                 tower_floor: dbHelper.safeReadField(dbPlayer, 'tower_floor', 1),
+                tower_coins: dbHelper.safeReadField(dbPlayer, 'tower_coins', 0), 
 
                 stats: {
                     strength: dbHelper.safeReadField(dbPlayer, 'strength', 1),

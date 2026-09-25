@@ -119,7 +119,8 @@ async function triggerLoadGameSuccess(nUserId, socket, sb) {
         luck: safeReadField(row, 'luck', 1)
       },
       inventory: row.inventory || { equipment: [], resources: [], consumables: [] },
-      equipped: row.equipped || { rings: [null, null, null] }
+      equipped: row.equipped || { rings: [null, null, null] },
+      tower_coins: safeReadField(row, 'tower_coins', 0)
     };
 
     console.log(`📤 [УСПЕХ] Профиль отправлен клиенту: ${playerProfile.name} (Ур. ${playerProfile.level})`);
