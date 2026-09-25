@@ -37,38 +37,66 @@ const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 let activeRooms = {}; 
 global.activeRooms = activeRooms;
 // ============================================================================
-// 🔥 [РЕГЕНЕРАЦИЯ HP В ГОРОДЕ] — Восстановление 1% ХП в секунду онлайн-игрокам
+// 🔥 [АВТОНОМНАЯ РЕГЕНЕРАЦИЯ HP] — Полный код без конфликтов с другими файлами
 // ============================================================================
-const activeOnlinePlayers = {}; // Временное ОЗУ-хранилище для живых сессий города
+const activeOnlinePlayers = {}; 
 
-// 1. Ежесекундный тикер лечения
+// Локальный чистый сборщик бонусов выносливости со шмоток для защиты от Build Failed
+function getLocalEnduranceBonus(equipped) {
+  if (!equipped) return 0;
+  let bonus = 0;
+  const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand', 'extra'];
+  
+  slots.forEach(slot => {
+    const itemId = equipped[slot];
+    if (!itemId) return;
+    // Безопасно ищем предмет в глобальной базе, которую подключил server.js
+    const item = GAME_ITEMS_DATABASE ? GAME_ITEMS_DATABASE[itemId] : null;
+    if (item && item.bonus) {
+      if (item.bonus.endurance !== undefined) bonus += item.bonus.endurance;
+      if (item.bonus.stats && item.bonus.stats.endurance !== undefined) bonus += item.bonus.stats.endurance;
+    }
+  });
+
+  if (equipped.rings && Array.isArray(equipped.rings)) {
+    equipped.rings.forEach(itemId => {
+      if (!itemId) return;
+      const item = GAME_ITEMS_DATABASE ? GAME_ITEMS_DATABASE[itemId] : null;
+      if (item && item.bonus) {
+        if (item.bonus.endurance !== undefined) bonus += item.bonus.endurance;
+        if (item.bonus.stats && item.bonus.stats.endurance !== undefined) bonus += item.bonus.stats.endurance;
+      }
+    });
+  }
+  return bonus;
+}
+
+// 1. Ежесекундное лечение
 setInterval(async () => {
   const socketIds = Object.keys(activeOnlinePlayers);
-  // 🔥 ДОБАВЛЯЕМ ЛОГ ДЛЯ ДЕБАГА СЕРВЕРА:
-  console.log(`⏱️ [ТИК РЕГЕНЕРАЦИИ] Сейчас онлайн в тикере: ${socketIds.length} игроков. Активные сокеты:`, socketIds);
   if (socketIds.length === 0) return;
 
   socketIds.forEach(sId => {
     const p = activeOnlinePlayers[sId];
     
-    // 🛡️ Защита: Если игрок зашел в бой (Лес, Башня, Арена), замораживаем регенерацию города!
+    // Заморозка в бою
     const isInBattle = Object.keys(global.activeRooms || {}).some(roomId => {
       const room = global.activeRooms[roomId];
       return room.teamA.some(f => String(f.id) === String(p.id)) || 
              room.teamB.some(f => String(f.id) === String(p.id));
     });
 
-    if (isInBattle) return; 
+    if (isInBattle) return;
 
-    // Считаем точный серверный кап здоровья с куклой шмоток
-    const maxHp = dbHelper.getServerMaxHp(p);
+    // 🔥 Чистый автономный расчет ХП: (Базовая выносливость + Выносливость шмоток) * 10
+    const totalEndurance = Number(p.endurance || 1) + getLocalEnduranceBonus(p.equipped);
+    const maxHp = totalEndurance * 10;
     
     if (p.hp < maxHp) {
-      const regenAmount = Math.max(1, Math.floor(maxHp * 0.01)); // 1% в сек (минимум 1 HP)
+      const regenAmount = Math.max(1, Math.floor(maxHp * 0.01)); // 1% в секунду
       p.hp = Math.min(maxHp, p.hp + regenAmount);
-      p.needsSave = true; // Флаг для фонового сброса в БД
+      p.needsSave = true;
 
-      // Шлем пакет на телефон игрока для плавной анимации
       io.to(sId).emit('town_hp_regen_update', { 
         currentHp: p.hp, 
         maxHp: maxHp 
@@ -77,7 +105,7 @@ setInterval(async () => {
   });
 }, 1000);
 
-// 2. Фоновый сброс в Supabase раз в 15 секунд (чтобы не спамить базу тяжелыми запросами)
+// 2. Сброс в Supabase раз в 15 секунд
 setInterval(async () => {
   const socketIds = Object.keys(activeOnlinePlayers);
   for (const sId of socketIds) {
@@ -86,9 +114,9 @@ setInterval(async () => {
       p.needsSave = false;
       try {
         await sb.from('players').update({ hp: Number(p.hp) }).eq('id', Number(p.id));
-        console.log(`☁️ [БД РЕГЕНЕРАЦИЯ] Здоровье гладиатора ${p.name} синхронизировано: ${p.hp} HP.`);
+        console.log(`☁️ [БД РЕГЕНЕРАЦИЯ] Здоровье ${p.name} синхронизировано: ${p.hp} HP.`);
       } catch (err) {
-        console.error("🚨 Ошибка сохранения ХП регенерации:", err.message);
+        console.error("🚨 Ошибка сохранения ХП:", err.message);
       }
     }
   }
@@ -96,23 +124,28 @@ setInterval(async () => {
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
    // 1. ТРИГГЕР ВХОДА (Запоминаем игрока в ОЗУ регенерации)
-  socket.on('load_game_secure', async ({ userId }) => {
-    // Мягкое ожидание 150мс, пока db_helper загрузит профиль из базы
-    setTimeout(async () => {
-      try {
-        const { data: row } = await sb.from('players').select('*').eq('id', Number(userId)).maybeSingle();
-        if (row) {
-          activeOnlinePlayers[socket.id] = {
-            id: row.id,
-            name: row.name,
-            hp: Number(row.hp || 10),
-            endurance: Number(row.endurance || 1),
-            equipped: row.equipped || {},
-            needsSave: false
-          };
-        }
-      } catch (e) {}
-    }, 150);
+  // Регистрация в тикер регенерации
+  socket.on('load_game_secure', async (payload) => {
+    try {
+      const nUserId = Number(payload?.userId || payload?.id || 0);
+      if (!nUserId) return;
+
+      const { data: row } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+      if (row) {
+        // Защита регистров полей из Supabase
+        const dbEndurance = row.endurance ?? row.Endurance ?? row.stats?.endurance ?? 1;
+        
+        activeOnlinePlayers[socket.id] = {
+          id: row.id,
+          name: row.name,
+          hp: Number(row.hp || 10),
+          endurance: Number(dbEndurance),
+          equipped: row.equipped || {},
+          needsSave: false
+        };
+        console.log(`✅ [РЕГЕНЕРАЦИЯ] Игрок ${row.name} добавлен в список лечения.`);
+      }
+    } catch (e) { console.error("🚨 Ошибка тикера:", e.message); }
   });
   // 1. Инициализируем модуль базы данных и античита (Передаем io, socket, sb)
   if (dbHelper && typeof dbHelper.init === 'function') {
