@@ -1208,20 +1208,15 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
   }
 }
 
-  // --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
-  async function finalizePvpBattle(room, result, logs, finalRound, io) {
-  const playerA = room.teamA[0]; // Напрямую берем первый элемент из массива заявки
-  const playerB = room.teamB[0]; 
+// --- 13. ВНУТРЕННЯЯ ФУНКЦИЯ: ФИНАЛИЗАЦИЯ PvP ДУЭЛЕЙ ГЛАДИАТОРОВ ---
+async function finalizePvpBattle(room, result, logs, finalRound, io) {
+  try {
+    const playerA = room.teamA[0]; 
+    const playerB = room.teamB[0]; 
     
     if (!playerA || !playerB) return;
 
-    const [dbDataA, dbDataB] = await Promise.all([
-      sb.from('players').select('*').eq('id', Number(playerA.id)).maybeSingle(),
-      sb.from('players').select('*').eq('id', Number(playerB.id)).maybeSingle()
-    ]);
-    
-    console.log(`
-🏁 [PvP ФИНАЛИЗАЦИЯ] Начинаем защищенную транзакцию наград. Исход для TeamA: ${result}`);
+    console.log(`\n🏁 [PvP ФИНАЛИЗАЦИЯ] Начинаем защищенную транзакцию наград. Исход для TeamA: ${result}`);
 
     const goldReward = 25; 
 
@@ -1233,118 +1228,107 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
       return Math.floor(baseXp * multiplier);
     };
 
-    try {
-      const [dbDataA, dbDataB] = await Promise.all([
-        sb.from('players').select('*').eq('id', Number(playerA.id)).maybeSingle(),
-        sb.from('players').select('*').eq('id', Number(playerB.id)).maybeSingle()
-      ]);
+    // 1. Делаем ровно ОДИН защищенный запрос к базе Supabase
+    const [resA, resB] = await Promise.all([
+      sb.from('players').select('*').eq('id', Number(playerA.id)).maybeSingle(),
+      sb.from('players').select('*').eq('id', Number(playerB.id)).maybeSingle()
+    ]);
 
-      if (!dbDataA.data || !dbDataB.data) {
-        console.error("🚨 [КРИТ] Не удалось прочитать профили из БД перед выдачей PvP наград!");
-        return;
-      }
-
-      const rowA = dbDataA.data;
-      const rowB = dbDataB.data;
-      // 🔥 ТРИГГЕРЫ АВТОДОПОЛНЕНИЯ ЗЕЛИЙ ДЛЯ ОБЛИКА ОБОИХ ИГРОКОВ PvP АРЕНЫ
-      autoRefillPotionsAfterBattle(rowA);
-      autoRefillPotionsAfterBattle(rowB);
-      const safeRead = (row, field, def = 0) => {
-        const low = field.toLowerCase();
-        const up = field.toUpperCase();
-        const cap = field.charAt(0).toUpperCase() + field.slice(1);
-        return Number(row[low] ?? row[up] ?? row[cap] ?? row[field] ?? def);
-      };
-
-      let pointsKeyA = rowA.statpoints !== undefined ? 'statpoints' : 'statPoints';
-      let pointsKeyB = rowB.statpoints !== undefined ? 'statpoints' : 'statPoints';
-
-      let goldA = safeRead(rowA, 'gold', 0);
-      let xpA = safeRead(rowA, 'xp', 0);
-      let levelA = safeRead(rowA, 'level', 1);
-      let statpointsA = safeRead(rowA, pointsKeyA, 0);
-
-      let goldB = safeRead(rowB, 'gold', 0);
-      let xpB = safeRead(rowB, 'xp', 0);
-      let levelB = safeRead(rowB, 'level', 1);
-      let statpointsB = safeRead(rowB, pointsKeyB, 0);
-
-      const maxHpA = dbHelper.getServerMaxHp({ endurance: safeRead(rowA, 'endurance', 1), equipped: rowA.equipped || {} });
-      const maxHpB = dbHelper.getServerMaxHp({ endurance: safeRead(rowB, 'endurance', 1), equipped: rowB.equipped || {} });
-
-      let endHpA = maxHpA;
-      let endHpB = maxHpB;
-
-      if (result === 'win') {
-        const pvpXp = calculatePvpXp(levelA, levelB);
-        goldA += goldReward;
-        xpA += pvpXp;
-
-        const correctLevelA = dbHelper.getServerCorrectLevelByXp(xpA);
-        if (correctLevelA > levelA) {
-          statpointsA += (correctLevelA - levelA) * 5;
-          levelA = correctLevelA;
-        }
-
-        // 🔥 ИСПРАВЛЕНО: Победитель сохраняет остаток своего ХП из боя (но не меньше 1)
-        endHpA = Math.max(1, Number(playerA.currentHp));
-        endHpB = Math.max(1, Math.floor(maxHpB * 0.2)); // Проигравшему Evil пишем легальные 20%
-      } 
-      else if (result === 'lose') {
-        const pvpXp = calculatePvpXp(levelB, levelA);
-        goldB += goldReward;
-        xpB += pvpXp;
-
-        const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
-        if (correctLevelB > levelB) {
-          statpointsB += (correctLevelB - levelB) * 5;
-          levelB = correctLevelB;
-        }
-
-        endHpA = Math.max(1, Math.floor(maxHpA * 0.2)); // Проигравшему Яну пишем легальные 20%
-        // 🔥 ИСПРАВЛЕНО: Победитель сохраняет остаток своего ХП из боя (но не меньше 1)
-        endHpB = Math.max(1, Number(playerB.currentHp));
-      }
-      else if (result === 'lose') {
-        const pvpXp = calculatePvpXp(levelB, levelA);
-        goldB += goldReward;
-        xpB += pvpXp;
-
-        const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
-        if (correctLevelB > levelB) {
-          statpointsB += (correctLevelB - levelB) * 5;
-          levelB = correctLevelB;
-        }
-
-        endHpA = Math.max(1, Math.floor(maxHpA * 0.2));
-        endHpB = maxHpB;
-      } 
-      else {
-        endHpA = Math.max(1, Math.floor(maxHpA * 0.2));
-        endHpB = Math.max(1, Math.floor(maxHpB * 0.2));
-      }
-
-    await Promise.all([
-        sb.from('players').update({
-          gold: Number(goldA), xp: Number(xpA), level: Number(levelA),
-          inventory: rowA.inventory,
-          equipped: rowA.equipped,
-          [pointsKeyA]: Number(statpointsA), hp: Number(endHpA)
-        }).eq('id', Number(playerA.id)),
-
-        sb.from('players').update({
-          gold: Number(goldB), xp: Number(xpB), level: Number(levelB),
-          inventory: rowB.inventory,
-          equipped: rowB.equipped,
-          [pointsKeyB]: Number(statpointsB), hp: Number(endHpB)
-        }).eq('id', Number(playerB.id))
-      ]);
-
-      console.log("☁️ [БД PvP УСПЕХ] Данные успешно сохранены.");
-
-    } catch (err) {
-      console.error("❌ Фатальная ошибка транзакции PvP наград:", err);
+    if (!resA || !resB || !resA.data || !resB.data) {
+      console.error("🚨 [КРИТ] Не удалось прочитать профили из БД перед выдачей PvP наград!");
+      return;
     }
+
+    const rowA = resA.data;
+    const rowB = resB.data;
+
+    // 2. Автодополнение банок на куклах гладиаторов
+    autoRefillPotionsAfterBattle(rowA);
+    autoRefillPotionsAfterBattle(rowB);
+
+    const safeRead = (row, field, def = 0) => {
+      const low = field.toLowerCase();
+      const up = field.toUpperCase();
+      const cap = field.charAt(0).toUpperCase() + field.slice(1);
+      return Number(row[low] ?? row[up] ?? row[cap] ?? row[field] ?? def);
+    };
+
+    let pointsKeyA = rowA.statpoints !== undefined ? 'statpoints' : 'statPoints';
+    let pointsKeyB = rowB.statpoints !== undefined ? 'statpoints' : 'statPoints';
+
+    let goldA = safeRead(rowA, 'gold', 0);
+    let xpA = safeRead(rowA, 'xp', 0);
+    let levelA = safeRead(rowA, 'level', 1);
+    let statpointsA = safeRead(rowA, pointsKeyA, 0);
+
+    let goldB = safeRead(rowB, 'gold', 0);
+    let xpB = safeRead(rowB, 'xp', 0);
+    let levelB = safeRead(rowB, 'level', 1);
+    let statpointsB = safeRead(rowB, pointsKeyB, 0);
+
+    const maxHpA = dbHelper.getServerMaxHp({ endurance: safeRead(rowA, 'endurance', 1), equipped: rowA.equipped || {} });
+    const maxHpB = dbHelper.getServerMaxHp({ endurance: safeRead(rowB, 'endurance', 1), equipped: rowB.equipped || {} });
+
+    let endHpA = maxHpA;
+    let endHpB = maxHpB;
+
+    // 3. Исправленный калькулятор итогов (Без дублей и накрутки ХП до 100%)
+    if (result === 'win') {
+      const pvpXp = calculatePvpXp(levelA, levelB);
+      goldA += goldReward;
+      xpA += pvpXp;
+
+      const correctLevelA = dbHelper.getServerCorrectLevelByXp(xpA);
+      if (correctLevelA > levelA) {
+        statpointsA += (correctLevelA - levelA) * 5;
+        levelA = correctLevelA;
+      }
+
+      endHpA = Math.max(1, Number(playerA.currentHp));
+      endHpB = Math.max(1, Math.floor(maxHpB * 0.2)); 
+    } 
+    else if (result === 'lose') {
+      const pvpXp = calculatePvpXp(levelB, levelA);
+      goldB += goldReward;
+      xpB += pvpXp;
+
+      const correctLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
+      if (correctLevelB > levelB) {
+        statpointsB += (correctLevelB - levelB) * 5;
+        levelB = correctLevelB;
+      }
+
+      endHpA = Math.max(1, Math.floor(maxHpA * 0.2)); 
+      endHpB = Math.max(1, Number(playerB.currentHp));
+    } 
+    else {
+      // Ничья
+      endHpA = Math.max(1, Math.floor(maxHpA * 0.2));
+      endHpB = Math.max(1, Math.floor(maxHpB * 0.2));
+    }
+
+    // 4. Запись результатов в облако Supabase
+    await Promise.all([
+      sb.from('players').update({
+        gold: Number(goldA), xp: Number(xpA), level: Number(levelA),
+        inventory: rowA.inventory,
+        equipped: rowA.equipped,
+        [pointsKeyA]: Number(statpointsA), hp: Number(endHpA)
+      }).eq('id', Number(playerA.id)),
+
+      sb.from('players').update({
+        gold: Number(goldB), xp: Number(xpB), level: Number(levelB),
+        inventory: rowB.inventory,
+        equipped: rowB.equipped,
+        [pointsKeyB]: Number(statpointsB), hp: Number(endHpB)
+      }).eq('id', Number(playerB.id))
+    ]);
+
+    console.log("☁️ [БД PvP УСПЕХ] Данные успешно сохранены.");
+
+  } catch (err) {
+    console.error("❌ Фатальная ошибка транзакции PvP наград:", err.message);
   }
+}
 
 };
