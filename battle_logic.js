@@ -65,44 +65,83 @@ function getEquipmentBonus(equipped, bonusKey) {
   }
   return totalBonus;
 }
-// 🔥 ГЛОБАЛЬНАЯ СЕРВЕРНАЯ ФУНКЦИЯ АВТОДОПОЛНЕНИЯ БАНОК ПОСЛЕ ЛЮБОГО БОЯ (PvE и PvP)
+// 🔥 [ПОЛНОСТЬЮ ИСПРАВЛЕНО]: Идеальное автодополнение банок на кукле после боя
 function autoRefillPotionsAfterBattle(playerRow) {
   try {
-    if (playerRow && playerRow.equipped && playerRow.inventory && playerRow.inventory.consumables) {
-      let equipped = playerRow.equipped;
-      let consumables = playerRow.inventory.consumables;
-      const potionSlot = equipped.potion;
+    if (!playerRow || !playerRow.equipped || !playerRow.inventory) return;
 
-      // Если в слоте банок что-то есть, но стак меньше максимальных 5 штук
-      if (potionSlot && typeof potionSlot === 'object' && potionSlot.id) {
-        let currentCount = Number(potionSlot.count || 0);
+    let equipped = playerRow.equipped;
+    let inventory = playerRow.inventory;
+    
+    // Гарантируем, что вкладка расходников существует в рюкзаке
+    if (!inventory.consumables) inventory.consumables = [];
+    let consumables = inventory.consumables;
+
+    // Список лечебных банок по приоритету (какие заливать в пустой слот в первую очередь)
+    const validPotions = ['hp_potion_big', 'hp_potion_small', 'fish_soup'];
+
+    // 1. СЦЕНАРИЙ А: Слот банок полностью пустой (игрок выпил всё в ноль во время боя)
+    if (!equipped.potion || equipped.potion === null || typeof equipped.potion !== 'object') {
+      
+      // Ищем в рюкзаке хотя бы какое-то зелье из нашего списка
+      let foundPotionId = null;
+      let invIdx = -1;
+
+      for (const pId of validPotions) {
+        invIdx = consumables.findIndex(c => c && c.id === pId && Number(c.count || 0) > 0);
+        if (invIdx !== -1) {
+          foundPotionId = pId;
+          break; // Нашли банку, выходим из цикла поиска
+        }
+      }
+
+      // Если в сумке нашли запас банок — легально инициализируем слот на кукле!
+      if (foundPotionId && invIdx !== -1) {
+        const availableInInv = Number(consumables[invIdx].count || 0);
+        const takeQty = Math.min(5, availableInInv); // Забираем максимум 5 штук
+
+        equipped.potion = { id: foundPotionId, count: takeQty };
+
+        if (availableInInv > takeQty) {
+          consumables[invIdx].count -= takeQty;
+        } else {
+          consumables.splice(invIdx, 1); // Вырезаем ячейку из рюкзака, если забрали в ноль
+        }
+        console.log(`🧪 [АВТО-ИНИЦИАЛИЗАЦИЯ] Слот банок был пуст. Сервер взял из рюкзака ${takeQty} шт. (${foundPotionId})`);
+        return; // Слот заполнен, завершаем работу функции
+      }
+    }
+
+    // 2. СЦЕНАРИЙ Б: На кукле уже есть объект банки, но стак не полный (меньше 5 штук)
+    if (equipped.potion && typeof equipped.potion === 'object' && equipped.potion.id) {
+      let potionSlot = equipped.potion;
+      let currentCount = Number(potionSlot.count || 0);
+      
+      if (currentCount < 5) {
+        const needQty = 5 - currentCount; // Сколько банок не хватает до фулла
         
-        if (currentCount < 5) {
-          const needQty = 5 - currentCount; // Сколько банок не хватает до фулла
+        // Ищем точно такую же банку в рюкзаке игрока
+        const invPotionIdx = consumables.findIndex(c => c && c.id === potionSlot.id);
+        
+        if (invPotionIdx !== -1) {
+          const availableInInv = Number(consumables[invPotionIdx].count || 0);
+          const takeQty = Math.min(needQty, availableInInv);
           
-          // Ищем такую же банку в инвентаре расходников игрока
-          const invPotionIdx = consumables.findIndex(c => c && c.id === potionSlot.id);
-          
-          if (invPotionIdx !== -1) {
-            const availableInInv = Number(consumables[invPotionIdx].count || 0);
-            const takeQty = Math.min(needQty, availableInInv); // Берем сколько нужно, но не больше, чем есть
+          if (takeQty > 0) {
+            potionSlot.count = currentCount + takeQty; // Доливаем стак на кукле до максимума
             
-            if (takeQty > 0) {
-              potionSlot.count = currentCount + takeQty; // Доливаем стак на кукле
-              
-              if (availableInInv > takeQty) {
-                consumables[invPotionIdx].count -= takeQty; // Уменьшаем запас в рюкзаке
-              } else {
-                consumables.splice(invPotionIdx, 1); // Вырезаем из сумки, если забрали последнюю
-              }
-              console.log(`🧪 [АВТОДОПОЛНЕНИЕ СЕРВЕРА] Игроку ID ${playerRow.id} доложено +${takeQty} шт. банок (${potionSlot.id})`);
+            if (availableInInv > takeQty) {
+              consumables[invPotionIdx].count -= takeQty;
+            } else {
+              consumables.splice(invPotionIdx, 1); // Стираем из сумки, если выгребли дочиста
             }
+            console.log(`🧪 [АВТОДОПОЛНЕНИЕ СЕРВЕРА] К стаку на кукле доложено +${takeQty} шт. банок (${potionSlot.id})`);
           }
         }
       }
     }
   } catch (err) {
-    console.error("🚨 Ошибка при автодополнении банок:", err.message);
+    console.error("🚨 Фатальный сбой при автодополнении банок:", err.message);
   }
 }
 // Честный серверный расчет боевых параметров персонажей
@@ -1002,7 +1041,7 @@ activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, tim
     const currentRound = room.turnCount;
     room.turnCount++;
 
-    if (isTeamADead || isTeamBDead || room.turnCount > 40) {
+    if (isTeamADead || isTeamBDead || room.turnCount > 1000) {
       let result = 'draw';
       if (!isTeamADead && isTeamBDead) result = 'win';  
       if (isTeamADead && !isTeamBDead) result = 'lose'; 
