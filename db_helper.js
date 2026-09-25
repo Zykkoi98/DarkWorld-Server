@@ -382,7 +382,11 @@ module.exports = {
           endurance: Number(player.stats?.endurance || 1),
           luck: Number(player.stats?.luck || 1),
           inventory: player.inventory || { equipment: [], resources: [], consumables: [] },
-          equipped: player.equipped || { rings: [null, null, null] },
+           equipped: player.equipped || { 
+            head: null, body: null, legs: null, neck: null, gloves: null,
+            mainHand: null, offHand: null, potion: null, scroll: null,
+            rings: [null, null, null] 
+          },
           tower_floor: Number(player.tower_floor ?? player.stats?.tower_floor ?? 1)
         };
 
