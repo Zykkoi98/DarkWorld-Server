@@ -44,6 +44,8 @@ const activeOnlinePlayers = {}; // Временное ОЗУ-хранилище 
 // 1. Ежесекундный тикер лечения
 setInterval(async () => {
   const socketIds = Object.keys(activeOnlinePlayers);
+  // 🔥 ДОБАВЛЯЕМ ЛОГ ДЛЯ ДЕБАГА СЕРВЕРА:
+  console.log(`⏱️ [ТИК РЕГЕНЕРАЦИИ] Сейчас онлайн в тикере: ${socketIds.length} игроков. Активные сокеты:`, socketIds);
   if (socketIds.length === 0) return;
 
   socketIds.forEach(sId => {
