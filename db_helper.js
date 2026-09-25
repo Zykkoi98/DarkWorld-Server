@@ -475,7 +475,7 @@ module.exports = {
         // Базовые 5 очков новичка + по 5 очков за каждый уровень выше первого
         const maxLegalFreePoints = 5 + ((cloudLevel - 1) * 5);
 
-        // 4. Формируем пакет сброса (все базовые статы возвращаются на 1, Стойкость не трогаем, если она скрытая)
+// 4. Формируем пакет сброса (все базовые статы возвращаются на 1)
         let pointsKey = dbPlayer.statpoints !== undefined ? 'statpoints' : 'statPoints';
         
         const updatePayload = {
@@ -487,15 +487,36 @@ module.exports = {
           stat_resets: resetsLeft - 1     // Списываем 1 попытку сброса
         };
 
-        // 5. Пересчитываем базовое ХП для «голого» персонажа с 1 выносливости (с учётом его вещей)
-        updatePayload.hp = getServerMaxHp({ endurance: 1, equipped: dbPlayer.equipped || {} });
+        // Записываем «голые» статы прямо в объект памяти dbPlayer, 
+        // чтобы функция авто-стриптиза ниже увидела, что статы стали равны 1!
+        dbPlayer.strength = 1;
+        dbPlayer.agility = 1;
+        dbPlayer.endurance = 1;
+        dbPlayer.luck = 1;
+        dbPlayer.level = cloudLevel;
 
-        // Записываем чистый сброшенный профиль обратно в облако Supabase
+        // ============================================================================
+        // 🔥 [СИНХРО-ФИКС ДЛЯ МГНОВЕННОГО СНЯТИЯ]:
+        // Запускаем античит куклы прямо здесь! Он увидит статы 1, мгновенно сорвет 
+        // Рогатый Шлем и Тесаки с куклы dbPlayer и перекинет их в рюкзак в памяти ОЗУ!
+        // ============================================================================
+        enforceEquipmentRequirements(dbPlayer, 1, 1, 1, 1, cloudLevel);
+
+        // Упаковываем уже ОЧИЩЕННУЮ куклу и рюкзак в пакет сохранения для Supabase!
+        updatePayload.equipped = dbPlayer.equipped;
+        updatePayload.inventory = dbPlayer.inventory;
+        // ============================================================================
+
+        // Пересчитываем базовое ХП для «голого» персонажа (учитывая, что вещи уже могли слететь!)
+        updatePayload.hp = getServerMaxHp(dbPlayer);
+
+        // Записываем чистый сброшенный профиль с пустой куклой обратно в облако Supabase
         await sb.from('players').update(updatePayload).eq('id', nUserId);
         
-        console.log(`🧹 [БД СБРОС СТАТОВ] Игрок ${dbPlayer.name} выполнил сброс. Осталось попыток: ${resetsLeft - 1}`);
+        console.log(`🧹 [БД СБРОС СТАТОВ С УСПЕШНЫМ СНЯТИЕМ] Игрок ${dbPlayer.name} сброшен. Вещи отправлены в рюкзак.`);
         
-        // Перезагружаем игровой профиль на клиенте
+        // Насильно триггерим отправку профиля — теперь на телефон полетит 
+        // абсолютно пустая кукла и наполненный рюкзак шмоток!
         await triggerLoadGameSuccess(nUserId, socket, sb);
 
       } catch (err) {
