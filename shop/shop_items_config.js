@@ -91,7 +91,7 @@ const GAME_ITEMS_DATABASE = {
   'phantom_ring_8': { name: 'Спираль Призрака', icon: '💍', slotType: 'ring', price: 280, level: 15, req: { agility: 43 }, desc: 'Эфирный перстень из белого золота.', bonus: { stats: { agility: 8 }, mf_inv: 60 } },
   // === УРОВЕНЬ 17: СЕТ ВЕТРА ===
   'gale_scimitar_9': { name: 'Сцимитар Урагана', icon: '⚔️', slotType: 'mainHand', price: 720, level: 17, req: { agility: 56 }, desc: 'Оружие, бьющее со скоростью звука.', bonus: { atk: 52, mf_antiinv: 110 } },
-  'gale_offscimitar_9': { name: 'Сцимитар Урагана (Л)', icon: '⚔️', slotType: 'mainHand', price: 720, level: 17, req: { agility: 56 }, desc: 'Парный клинок. Наносится урон правой руки в левый слот.', bonus: { atk: 35, stats: { agility: 8 }, mf_antiinv: 50 } },
+  'gale_offscimitar_9': { name: 'Сцимитар Урагана (Л)', icon: '⚔️', slotType: 'offHand', price: 720, level: 17, req: { agility: 56 }, desc: 'Парный клинок. Наносится урон правой руки в левый слот.', bonus: { atk: 35, stats: { agility: 8 }, mf_antiinv: 50 } },
   'gale_shield_9': { name: 'Эгида Ветров', icon: '🛡️', slotType: 'offHand', price: 550, level: 17, req: { agility: 50 }, desc: 'Щит из спрессованного воздуха. Открывает 3 блока.', bonus: { def: 10, mf_inv: 70 } },
   'gale_crown_9': { name: 'Венец Бури', icon: '👑', slotType: 'head', price: 520, level: 17, req: { agility: 50 }, desc: 'Диадема, обостряющая реакцию до максимума.', bonus: { def: 12, stats: { agility: 9 }, mf_inv: 70, mf_anticrit: 40 } },
   'gale_cuirass_9': { name: 'Кираса Урагана', icon: '👕', slotType: 'body', price: 850, level: 17, req: { agility: 62 }, desc: 'Доспех, сотканый из потоков горной бури.', bonus: { def: 28, stats: { agility: 12, endurance: 5 }, mf_inv: 80 } },
@@ -102,7 +102,7 @@ const GAME_ITEMS_DATABASE = {
 
   // === УРОВЕНЬ 19: СЕТ ВЕЛИКОГО МАСТЕРА УВОР ОТЧИКА ===
   'grandmaster_kris_10': { name: 'Крис Патриарха', icon: '🗡️', slotType: 'mainHand', price: 1000, level: 19, req: { agility: 70 }, desc: 'Абсолютное оружие. Игнорирует уворот любого врага.', bonus: { atk: 65, stats: { agility: 12 }, mf_antiinv: 140 } },
-  'grandmaster_offkris_10': { name: 'Крис Патриарха (Л)', icon: '🗡️', slotType: 'mainHand', price: 1000, level: 19, req: { agility: 70 }, desc: 'Второй легендарный клинок. Идеальный стиль парных ножей БК.', bonus: { atk: 45, stats: { agility: 10 }, mf_antiinv: 90 } },
+  'grandmaster_offkris_10': { name: 'Крис Патриарха (Л)', icon: '🗡️', slotType: 'offHand', price: 1000, level: 19, req: { agility: 70 }, desc: 'Второй легендарный клинок. Идеальный стиль парных ножей БК.', bonus: { atk: 45, stats: { agility: 10 }, mf_antiinv: 90 } },
   'grandmaster_wall_10': { name: 'Зеркало Мастера', icon: '🛡️', slotType: 'offHand', price: 800, level: 19, req: { agility: 60 }, desc: 'Размывает защиты соперников. Открывает 3 зоны блока.', bonus: { def: 15, mf_inv: 80 } },
   'grandmaster_mask_10': { name: 'Тень Патриарха', icon: '🥷', slotType: 'head', price: 800, level: 19, req: { agility: 60 }, desc: 'Маска главы скрытного клана. Полный антикрит.', bonus: { def: 15, stats: { agility: 10 }, mf_inv: 85, mf_anticrit: 60 } },
   'grandmaster_gi_10': { name: 'Доги Патриарха', icon: '⚡', slotType: 'body', price: 1200, level: 19, req: { agility: 75 }, desc: 'Легендарное кимоно. Размывает тело на атомы при замахах.', bonus: { def: 35, stats: { agility: 15, endurance: 8 }, mf_inv: 100, mf_anticrit: 40 } },
