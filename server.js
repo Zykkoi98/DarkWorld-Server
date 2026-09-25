@@ -36,10 +36,82 @@ const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 // Глобальная память для активных боевых комнат
 let activeRooms = {}; 
 global.activeRooms = activeRooms;
+// ============================================================================
+// 🔥 [РЕГЕНЕРАЦИЯ HP В ГОРОДЕ] — Восстановление 1% ХП в секунду онлайн-игрокам
+// ============================================================================
+const activeOnlinePlayers = {}; // Временное ОЗУ-хранилище для живых сессий города
 
+// 1. Ежесекундный тикер лечения
+setInterval(async () => {
+  const socketIds = Object.keys(activeOnlinePlayers);
+  if (socketIds.length === 0) return;
+
+  socketIds.forEach(sId => {
+    const p = activeOnlinePlayers[sId];
+    
+    // 🛡️ Защита: Если игрок зашел в бой (Лес, Башня, Арена), замораживаем регенерацию города!
+    const isInBattle = Object.keys(global.activeRooms || {}).some(roomId => {
+      const room = global.activeRooms[roomId];
+      return room.teamA.some(f => String(f.id) === String(p.id)) || 
+             room.teamB.some(f => String(f.id) === String(p.id));
+    });
+
+    if (isInBattle) return; 
+
+    // Считаем точный серверный кап здоровья с куклой шмоток
+    const maxHp = dbHelper.getServerMaxHp(p);
+    
+    if (p.hp < maxHp) {
+      const regenAmount = Math.max(1, Math.floor(maxHp * 0.01)); // 1% в сек (минимум 1 HP)
+      p.hp = Math.min(maxHp, p.hp + regenAmount);
+      p.needsSave = true; // Флаг для фонового сброса в БД
+
+      // Шлем пакет на телефон игрока для плавной анимации
+      io.to(sId).emit('town_hp_regen_update', { 
+        currentHp: p.hp, 
+        maxHp: maxHp 
+      });
+    }
+  });
+}, 1000);
+
+// 2. Фоновый сброс в Supabase раз в 15 секунд (чтобы не спамить базу тяжелыми запросами)
+setInterval(async () => {
+  const socketIds = Object.keys(activeOnlinePlayers);
+  for (const sId of socketIds) {
+    const p = activeOnlinePlayers[sId];
+    if (p && p.needsSave) {
+      p.needsSave = false;
+      try {
+        await sb.from('players').update({ hp: Number(p.hp) }).eq('id', Number(p.id));
+        console.log(`☁️ [БД РЕГЕНЕРАЦИЯ] Здоровье гладиатора ${p.name} синхронизировано: ${p.hp} HP.`);
+      } catch (err) {
+        console.error("🚨 Ошибка сохранения ХП регенерации:", err.message);
+      }
+    }
+  }
+}, 15000);
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
-
+   // 1. ТРИГГЕР ВХОДА (Запоминаем игрока в ОЗУ регенерации)
+  socket.on('load_game_secure', async ({ userId }) => {
+    // Мягкое ожидание 150мс, пока db_helper загрузит профиль из базы
+    setTimeout(async () => {
+      try {
+        const { data: row } = await sb.from('players').select('*').eq('id', Number(userId)).maybeSingle();
+        if (row) {
+          activeOnlinePlayers[socket.id] = {
+            id: row.id,
+            name: row.name,
+            hp: Number(row.hp || 10),
+            endurance: Number(row.endurance || 1),
+            equipped: row.equipped || {},
+            needsSave: false
+          };
+        }
+      } catch (e) {}
+    }, 150);
+  });
   // 1. Инициализируем модуль базы данных и античита (Передаем io, socket, sb)
   if (dbHelper && typeof dbHelper.init === 'function') {
     dbHelper.init(io, socket, sb);
@@ -67,8 +139,15 @@ io.on('connection', (socket) => {
     shopLogic(io, socket, sb);
   }
 
-  // Безопасное отключение: чистим socketId оффлайн-игроков в активных битвах
+  // 2. ТРИГГЕР ОТКЛЮЧЕНИЯ (Убираем из списка лечения, чтобы не тратить ОЗУ)
   socket.on('disconnect', () => {
+    const p = activeOnlinePlayers[socket.id];
+    if (p) {
+      delete activeOnlinePlayers[socket.id];
+      console.log(`🧹 [РЕГЕНЕРАЦИЯ] Игрок ${p.name} отключился, сессия лечения закрыта.`);
+    }
+
+    // Твой старый код дисконнекта комнат (очистка сокетов в activeRooms) оставляй без изменений:
     Object.keys(activeRooms).forEach(roomId => {
       const room = activeRooms[roomId];
       const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
@@ -76,10 +155,4 @@ io.on('connection', (socket) => {
     });
     console.log(`❌ Сокет отключен: ${socket.id}`);
   });
-});
-
-// Запуск сервера на порту Render или локальном 3000
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Сервер Dark World запущен по правилам Стойкости на порту ${PORT}`);
 });
