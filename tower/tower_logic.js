@@ -11,7 +11,7 @@ module.exports = function(io, socket, sb, activeRooms) {
   const getServerMaxHp = dbHelper.getServerMaxHp;
   const triggerLoadGameSuccess = dbHelper.triggerLoadGameSuccess;
 
-  // --- 🕒 ОБРАБОТЧИК: ОТДАЧА СТАТУСА КУЛДАУНА ИЗ ТАБЛИЦЫ ТАЙМЕРОВ ---
+   // --- 🕒 ОБРАБОТЧИК: ОТДАЧА СТАТУСА КУЛДАУНА И СБРОС ПРОГРЕССА ---
   socket.on('check_tower_cooldown_request', async ({ userId }) => {
     try {
       const nUserId = Number(userId);
@@ -24,6 +24,14 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (timerRow && new Date(timerRow.ends_at) > new Date()) {
         socket.emit('tower_cooldown_status', { active: true, ends_at: timerRow.ends_at });
       } else {
+        // 🟢 Кулдаун отсутствует или истек! 
+        // На всякий случай проверяем: если КД кончилось, а этаж в БД не 1, обнуляем его
+        const { data: dbPlayer } = await sb.from('players').select('tower_floor').eq('id', nUserId).maybeSingle();
+        if (dbPlayer && Number(dbPlayer.tower_floor || 1) > 1) {
+          await sb.from('players').update({ tower_floor: 1 }).eq('id', nUserId);
+          console.log(`🏰 [АВТО-СБРОС] КД вышло, этаж для ID ${nUserId} принудительно возвращен на 1.`);
+        }
+
         socket.emit('tower_cooldown_status', { active: false });
       }
     } catch (err) { console.error("🚨 Ошибка проверки КД в Башне:", err.message); }

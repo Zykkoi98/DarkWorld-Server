@@ -77,7 +77,9 @@ async function finalizeTowerBattleSecure(room, result, sb) {
         timer_type: 'tower_cooldown',
         ends_at: cooldownTime.toISOString()
       }, { onConflict: 'user_id,timer_type' });
-
+      updatePayload.tower_floor = 1; 
+      player.tower_floor = 1; // Обнуляем и в ОЗУ комнаты для синхронизации
+      console.log(`🏰 [БАШНЯ СБРОС] Прогресс штурма игрока ${player.name} сброшен на 1 этаж!`);
       console.log(`⏱️ [БД ТАЙМЕР] Записано поражение в Башне. КД повешено для ID ${player.id} до ${cooldownTime.toISOString()}`);
     }
 
