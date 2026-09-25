@@ -64,7 +64,35 @@ module.exports = function(io, socket, sb) {
 
       if (!slotType) return socket.emit('error', 'Этот предмет нельзя экипировать!');
       if (cloudLevel < requiredLevel) return socket.emit('error', `🔒 Требуется уровень: ${requiredLevel}`);
+      let itemConfig = GAME_ITEMS_DATABASE[cleanItemId] || (global.SERVER_SHOP_DATABASE ? global.SERVER_SHOP_DATABASE[cleanItemId] : null);
+      // Античит на надевание вещей
+      if (itemConfig && itemConfig.req) {
+        // Считываем чистые статы игрока из БД с помощью твоей утилиты safeReadField
+        const myStr = safeReadField(dbPlayer, 'strength', 1);
+        const myAgi = safeReadField(dbPlayer, 'agility', 1);
+        const myEnd = safeReadField(dbPlayer, 'endurance', 1);
+        const myLuck = safeReadField(dbPlayer, 'luck', 1);
 
+        // Вытаскиваем требования вещи, защищаясь от любого регистра
+        const reqStr = itemConfig.req.strength ?? itemConfig.req.Strength ?? itemConfig.reqStrength ?? 0;
+        const reqAgi = itemConfig.req.agility ?? itemConfig.req.Agility ?? itemConfig.reqAgility ?? 0;
+        const reqEnd = itemConfig.req.endurance ?? itemConfig.req.Endurance ?? itemConfig.reqEndurance ?? 0;
+        const reqLuck = itemConfig.req.luck ?? itemConfig.req.Luck ?? itemConfig.reqLuck ?? 0;
+
+        let isLegal = true;
+        let failReason = "";
+
+        if (reqStr > 0 && myStr < Number(reqStr)) { isLegal = false; failReason = `Не хватает Силы! Нужно ${reqStr} (у вас ${myStr})`; }
+        if (reqAgi > 0 && myAgi < Number(reqAgi)) { isLegal = false; failReason = `Не хватает Ловкости! Нужно ${reqAgi} (у вас ${myAgi})`; }
+        if (reqEnd > 0 && myEnd < Number(reqEnd)) { isLegal = false; failReason = `Не хватает Выносливости! Нужно ${reqEnd} (у вас ${myEnd})`; }
+        if (reqLuck > 0 && myLuck < Number(reqLuck)) { isLegal = false; failReason = `Не хватает Удачи! Нужно ${reqLuck} (у вас ${myLuck})`; }
+
+        // Если статы не подходят — намертво рубим выполнение функции!
+        if (!isLegal) {
+          console.warn(`🚨 [АНТИЧИТ НАДЕВАНИЯ] Игрок ${dbPlayer.name} пытался обойти требования для "${itemConfig.name || cleanItemId}".`);
+          return socket.emit('error', `🔒 ${failReason}`);
+        }
+      }
       const invTab = (slotType === 'potion' || slotType === 'scroll') ? 'consumables' : 'equipment';
       if (!inventory[invTab]) inventory[invTab] = [];
       const inv = inventory[invTab];
