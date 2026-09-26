@@ -232,7 +232,7 @@ const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq
           }
         }
 
-        ssocket.emit('battle_init_data', {
+        socket.emit('battle_init_data', {
           roomId: roomId, turnCount: room.turnCount, myUuid: pFighter.uuid,
           teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB)
         });
