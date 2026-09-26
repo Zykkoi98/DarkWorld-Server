@@ -186,16 +186,24 @@ const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq
       const nUserId = Number(userId);
       const pFighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
 
-       if (pFighter) {
+      if (pFighter) {
+        // 🔥 Проверяем, был ли игрок реально отключён
+        const wasDisconnected = pFighter.disconnectedAt !== null 
+                             && pFighter.disconnectedAt !== undefined;
+
         pFighter.socketId = socket.id;
-        pFighter.disconnectedAt = null; // 🔥 Сбрасываем время дисконнекта
+        pFighter.disconnectedAt = null;
         socket.join(roomId);
 
-        // 🔥 Уведомляем всех, что игрок вернулся
-        io.to(roomId).emit('opponent_reconnected', {
-          name: pFighter.name
-        });
-        console.log(`✅ [РЕКОННЕКТ] ${pFighter.name} вернулся в бой ${roomId}`);
+        // 🔥 Уведомляем ТОЛЬКО если игрок реально возвращался после дисконнекта
+        if (wasDisconnected) {
+          io.to(roomId).emit('opponent_reconnected', {
+            name: pFighter.name
+          });
+          console.log(`✅ [РЕКОННЕКТ] ${pFighter.name} вернулся в бой ${roomId}`);
+        } else {
+          console.log(`🆕 [ПЕРВЫЙ ВХОД] ${pFighter.name} зашёл в бой ${roomId}`);
+        }
          if (pFighter.afkTurns > 0) {
           console.log(`🔄 [АФК РЕКОННЕКТ] ${pFighter.name} вернулся с ${pFighter.afkTurns} АФК. Даём шанс.`);
           // Не сбрасываем сразу — пусть сделает ход
@@ -224,10 +232,25 @@ const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq
           }
         }
 
-        socket.emit('battle_init_data', {
+        ssocket.emit('battle_init_data', {
           roomId: roomId, turnCount: room.turnCount, myUuid: pFighter.uuid,
           teamA: sanitizeTeam(room.teamA), teamB: sanitizeTeam(room.teamB)
         });
+
+        // 🔥 ОТПРАВЛЯЕМ ТАЙМЕР НОВОМУ ИГРОКУ — с учётом уже прошедшего времени
+        if (room.timerEndsAt) {
+          const remainingMs = Math.max(0, room.timerEndsAt - Date.now());
+          
+          if (remainingMs > 0) {
+            socket.emit('turn_timer_started', {
+              durationMs: remainingMs,        // 🔥 Остаток, а не полный таймер
+              totalDurationMs: room.timerDurationMs,
+              round: room.turnCount,
+              isReconnect: true               // 🔥 Помечаем, что это реконнект
+            });
+            console.log(`⏱️ [РЕКОННЕКТ ТАЙМЕР] ${pFighter.name} получил остаток ${Math.round(remainingMs / 1000)}с`);
+          }
+        }
 
         const isTeamADead = room.teamA.every(f => f.currentHp <= 0);
         const isTeamBDead = room.teamB.every(f => f.currentHp <= 0);
@@ -619,81 +642,84 @@ const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq
     startServerTurnTimer(roomId, activeRooms, io);
   }
 
-  // --- 10. ВНУТРЕННЯЯ ФУНКЦИЯ: ТАЙМЕР АФК С ДИНАМИЧЕСКИМ ВРЕМЕНЕМ ---
-function startServerTurnTimer(roomId, activeRooms, io) {
-  const room = activeRooms[roomId];
-  if (!room) return;
-  if (room.timeoutRef) clearTimeout(room.timeoutRef);
+    // --- 10. ВНУТРЕННЯЯ ФУНКЦИЯ: ДИНАМИЧЕСКИЙ ТАЙМЕР ХОДА С АФК-СИСТЕМОЙ ---
+  function startServerTurnTimer(roomId, activeRooms, io) {
+    const room = activeRooms[roomId];
+    if (!room) return;
+    if (room.timeoutRef) clearTimeout(room.timeoutRef);
 
-  // 🔥 ДИНАМИЧЕСКИЙ ТАЙМЕР: считаем максимальный afkTurns среди живых игроков
-  const aliveHumans = [...room.teamA, ...room.teamB]
-    .filter(f => !f.isBot && f.currentHp > 0);
-  
-  const maxAfkInRoom = aliveHumans.reduce((max, f) => Math.max(max, f.afkTurns || 0), 0);
-  
-  let turnDurationMs = 60000; // 60 сек по умолчанию
-  
-  if (maxAfkInRoom === 1) {
-    turnDurationMs = 30000; // После первого АФК — 30 сек
-    console.log(`⏱️ [ДИНАМ. ТАЙМЕР] Штрафное время 30 сек (1 АФК)`);
-  } else if (maxAfkInRoom === 2) {
-    turnDurationMs = 15000; // После второго АФК — 15 сек
-    console.log(`⏱️ [ДИНАМ. ТАЙМЕР] Штрафное время 15 сек (2 АФК)`);
-  }
-  
-  // Отправляем клиентам информацию о длительности
-  io.to(roomId).emit('turn_timer_started', { 
-    durationMs: turnDurationMs,
-    round: room.turnCount
-  });
-
-  room.timeoutRef = setTimeout(() => {
-    if (!activeRooms[roomId]) return;
+    // 🔥 ДИНАМИЧЕСКИЙ ТАЙМЕР: смотрим максимальный afkTurns среди живых игроков
+    const aliveHumans = [...room.teamA, ...room.teamB]
+      .filter(f => !f.isBot && f.currentHp > 0);
     
-    console.log(`⏱️ [АФК ТРИГГЕР] Время (${turnDurationMs / 1000}с) вышло в комнате ${roomId}.`);
-    const allFighters = [...room.teamA, ...room.teamB];
+    const maxAfkInRoom = aliveHumans.reduce((max, f) => Math.max(max, f.afkTurns || 0), 0);
     
-    allFighters.forEach(f => {
-      if (!f.isBot && f.currentHp > 0) {
-        if (!f.turn) {
-          // 🎯 Игрок пропустил ход — увеличиваем счётчик
-          f.afkTurns = (f.afkTurns || 0) + 1;
-          f.missedLastTurn = true; // 🔥 Флаг для лога
-          
-          const opposingTeam = room.teamA.includes(f) ? room.teamB : room.teamA;
-          const aliveEnemies = opposingTeam.filter(e => e.currentHp > 0);
-          
-          // 🎯 АФК-игрок бьёт СЛУЧАЙНО, а не пустышкой — чтобы бой шёл быстрее
-          const zones = ["head", "breast", "torso", "belt", "legs"];
-          const randomDefends = [];
-          const defendsCount = (f.level <= 1) ? 2 : 1;
-          while (randomDefends.length < defendsCount) {
-            const z = zones[Math.floor(Math.random() * zones.length)];
-            if (!randomDefends.includes(z)) randomDefends.push(z);
-          }
-          
-          f.turn = { 
-            targetUuid: aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null, 
-            attack: zones[Math.floor(Math.random() * zones.length)], // 🎯 случайный удар
-            defends: randomDefends,
-            isAfkAutoMove: true // 🔥 Флаг, что ход сгенерирован АФК-системой
-          };
-          
-          console.log(`💤 [АФК] ${f.name} пропустил ход (всего пропусков: ${f.afkTurns})`);
-        } else {
-          // Игрок сделал ход — сбрасываем АФК-счётчик
-          if (f.afkTurns > 0) {
-            console.log(`✅ [АФК СБРОС] ${f.name} снова активен, счётчик сброшен`);
-          }
-          f.afkTurns = 0;
-          f.missedLastTurn = false;
-        }
-      }
+    let turnDurationMs = 60000;
+    
+    if (maxAfkInRoom === 1) {
+      turnDurationMs = 30000;
+      console.log(`⏱️ [ДИНАМ. ТАЙМЕР] Штрафное время 30 сек (1 АФК)`);
+    } else if (maxAfkInRoom >= 2) {
+      turnDurationMs = 15000;
+      console.log(`⏱️ [ДИНАМ. ТАЙМЕР] Штрафное время 15 сек (2+ АФК)`);
+    }
+    
+    // 🔥 СОХРАНЯЕМ ВРЕМЯ ОКОНЧАНИЯ В КОМНАТЕ — чтобы новые игроки видели остаток
+    room.timerStartedAt = Date.now();
+    room.timerDurationMs = turnDurationMs;
+    room.timerEndsAt = Date.now() + turnDurationMs;
+    
+    // 📡 Отправляем клиентам информацию о длительности
+    io.to(roomId).emit('turn_timer_started', { 
+      durationMs: turnDurationMs,
+      round: room.turnCount
     });
-    
-    executeRoundCalculations(roomId, activeRooms, io);
-  }, turnDurationMs); 
-}
+
+    room.timeoutRef = setTimeout(() => {
+      if (!activeRooms[roomId]) return;
+      
+      console.log(`⏱️ [АФК ТРИГГЕР] Время вышло в комнате ${roomId}.`);
+      const allFighters = [...room.teamA, ...room.teamB];
+      
+      allFighters.forEach(f => {
+        if (!f.isBot && f.currentHp > 0) {
+          if (!f.turn) {
+            f.afkTurns = (f.afkTurns || 0) + 1;
+            f.missedLastTurn = true;
+            
+            const opposingTeam = room.teamA.includes(f) ? room.teamB : room.teamA;
+            const aliveEnemies = opposingTeam.filter(e => e.currentHp > 0);
+            
+            const zones = ["head", "breast", "torso", "belt", "legs"];
+            const randomDefends = [];
+            const defendsCount = (Number(f.level || 1) <= 1) ? 2 : 1;
+            
+            while (randomDefends.length < defendsCount) {
+              const z = zones[Math.floor(Math.random() * zones.length)];
+              if (!randomDefends.includes(z)) randomDefends.push(z);
+            }
+            
+            f.turn = { 
+              targetUuid: aliveEnemies.length > 0 ? aliveEnemies[0].uuid : null, 
+              attack: zones[Math.floor(Math.random() * zones.length)],
+              defends: randomDefends,
+              isAfkAutoMove: true
+            };
+            
+            console.log(`💤 [АФК] ${f.name} пропустил ход (${f.afkTurns})`);
+          } else {
+            if (f.afkTurns > 0) {
+              console.log(`✅ [АФК СБРОС] ${f.name} активен, счётчик сброшен`);
+            }
+            f.afkTurns = 0;
+            f.missedLastTurn = false;
+          }
+        }
+      });
+      
+      executeRoundCalculations(roomId, activeRooms, io);
+    }, turnDurationMs); 
+  }
   // --- 11. ГЛАВНАЯ ФУНКЦИЯ РАСЧЕТА РАУНДА ---
   async function executeRoundCalculations(roomId, activeRooms, io) {
     const room = activeRooms[roomId];
