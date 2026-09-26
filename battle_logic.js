@@ -186,9 +186,16 @@ const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq
       const nUserId = Number(userId);
       const pFighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
 
-      if (pFighter) {
+       if (pFighter) {
         pFighter.socketId = socket.id;
+        pFighter.disconnectedAt = null; // 🔥 Сбрасываем время дисконнекта
         socket.join(roomId);
+
+        // 🔥 Уведомляем всех, что игрок вернулся
+        io.to(roomId).emit('opponent_reconnected', {
+          name: pFighter.name
+        });
+        console.log(`✅ [РЕКОННЕКТ] ${pFighter.name} вернулся в бой ${roomId}`);
          if (pFighter.afkTurns > 0) {
           console.log(`🔄 [АФК РЕКОННЕКТ] ${pFighter.name} вернулся с ${pFighter.afkTurns} АФК. Даём шанс.`);
           // Не сбрасываем сразу — пусть сделает ход
@@ -1199,5 +1206,7 @@ function startServerTurnTimer(roomId, activeRooms, io) {
       console.error("❌ Фатальная ошибка транзакции PvP наград:", err.message);
     }
   }
-
+   // 🔥 ЭКСПОРТ В ГЛОБАЛЬНЫЙ ОБЪЕКТ для вызова из server.js (дисконнекты)
+  global.executeRoundCalculations = executeRoundCalculations;
+  global.startServerTurnTimer = startServerTurnTimer;
 };

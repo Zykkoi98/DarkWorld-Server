@@ -167,7 +167,7 @@ io.on('connection', (socket) => {
   }
 
   // Безопасное отключение: чистим socketId оффлайн-игроков и убираем из тикера регенерации
-  socket.on('disconnect', () => {
+socket.on('disconnect', () => {
     const p = activeOnlinePlayers[socket.id];
     if (p) {
       delete activeOnlinePlayers[socket.id];
@@ -176,11 +176,51 @@ io.on('connection', (socket) => {
 
     Object.keys(activeRooms).forEach(roomId => {
       const room = activeRooms[roomId];
-      if (room && room.teamA) {
-        const fighter = [...room.teamA, ...room.teamB].find(f => f && f.socketId === socket.id);
-        if (fighter) fighter.socketId = null;
+      if (!room || !room.teamA) return;
+
+      const fighter = [...room.teamA, ...room.teamB].find(f => f && f.socketId === socket.id);
+      if (!fighter) return;
+
+      fighter.socketId = null;
+      fighter.disconnectedAt = Date.now(); // 🔥 Запоминаем время отключения
+
+      // 🔥 В PvP — даём 10 секунд grace, потом дисквалификация
+      if (room.type === 'pvp' && !room.isOver) {
+        console.log(`⚠️ [PvP ДИСКОННЕКТ] ${fighter.name} отключился. Запускаем grace-таймер 10 сек...`);
+        
+        // Уведомляем соперника
+        io.to(roomId).emit('opponent_disconnected', {
+          name: fighter.name,
+          graceSeconds: 10
+        });
+
+        // Запускаем таймер дисквалификации
+        setTimeout(() => {
+          const currentRoom = activeRooms[roomId];
+          if (!currentRoom || currentRoom.isOver) return;
+
+          const currentFighter = [...currentRoom.teamA, ...currentRoom.teamB]
+            .find(f => String(f.id) === String(fighter.id));
+
+          // Если игрок не вернулся — дисквалифицируем
+          if (currentFighter && !currentFighter.socketId) {
+            console.log(`🛑 [PvP ДИСКОННЕКТ] ${currentFighter.name} не вернулся. Техническое поражение.`);
+            currentFighter.currentHp = 0;
+            
+            // Запускаем финализацию раунда (она сама проверит, что HP = 0, и завершит бой)
+            if (typeof global.executeRoundCalculations === 'function') {
+              global.executeRoundCalculations(roomId, activeRooms, io);
+            }
+          }
+        }, 10000);
+      }
+
+      // 🔥 В PvE — просто продолжаем бой, игрок вернётся через reconnect
+      if (room.type === 'pve') {
+        console.log(`⚠️ [PvE ДИСКОННЕКТ] ${fighter.name} отключился. Бой продолжится, АФК-система сработает.`);
       }
     });
+
     console.log(`❌ Сокет отключен: ${socket.id}`);
   });
 });
