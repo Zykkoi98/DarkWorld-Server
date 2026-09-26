@@ -126,9 +126,38 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       const roomId = `room_pvp_${opponentId}_vs_${myId}_${Date.now()}`;
       
-      const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq('id', nOpponentId).maybeSingle();
+const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq('id', nOpponentId).maybeSingle();
       if (oppErr || !oppData) {
         return socket.emit('error', 'Не удалось загрузить профиль соперника.');
+      }
+
+      // 🔥 [ФИКС ПОТЕРИ РЕДИРЕКТА] Проверяем, что сокет противника жив
+      // Если он отключён — всё равно создаём бой, но отправляем событие в общий канал,
+      // чтобы игрок поймал его при возврате в игру через check_active_battle
+      
+      // Собираем список активных сокетов в комнате io
+      const socketsInRoom = io.sockets.adapter.rooms;
+      
+      // Находим живой сокет противника по его userId (если он ещё онлайн)
+      let opponentSocketId = null;
+      for (const [socketId, sock] of io.sockets.sockets) {
+        // В твоём server.js сокет не хранит userId, но мы можем искать по player
+        // Простейший способ: проверить, есть ли у сокета свойство с нашим userId
+        if (sock.data && String(sock.data.userId) === String(nOpponentId)) {
+          opponentSocketId = socketId;
+          break;
+        }
+      }
+
+      // Если нашли живой сокет — отправим событие адресно
+      if (opponentSocketId) {
+        io.to(opponentSocketId).emit('arena_redirect_to_battle', { roomId });
+        console.log(`📡 [PvP ФИКС] Адресный редирект отправлен в сокет ${opponentSocketId}`);
+      } else {
+        // Игрок оффлайн или на другой странице — используем глобальную рассылку
+        // Он поймает через global_battle_watch.js или check_active_battle
+        console.log(`⚠️ [PvP ФИКС] Сокет соперника не найден в io. Рассылаем глобально.`);
+        io.emit('arena_redirect_to_battle', { roomId });
       }
 
       initiatePvpMatch(roomId, playerData, currentHp, oppData, activeRooms, io);
@@ -551,9 +580,17 @@ module.exports = function(io, socket, sb, activeRooms) {
     activeRooms[roomId] = { id: roomId, type: 'pvp', teamA, teamB, turnCount: 1, timeoutRef: null };
     console.log(`⚔️ [PvP ЗАПУСК] Комната: ${roomId} для ${playerData.name} vs ${p2Data.name}`);
     
+    // 🔥 [ФИКС ПОТЕРИ РЕДИРЕКТА] Отправляем редирект и глобально, и адресно
     setTimeout(() => {
       io.emit('arena_lobby_updated');
+      
+      // Глобальный редирект (поймают все, кто на связи через global_battle_watch.js)
       io.emit('arena_redirect_to_battle', { roomId: roomId });
+      
+      // Плюс шлём в комнату отдельно (для тех, кто уже перешёл)
+      io.to(roomId).emit('arena_redirect_to_battle', { roomId: roomId });
+      
+      console.log(`📡 [PvP РЕДИРЕКТ] Событие отправлено глобально для комнаты ${roomId}`);
     }, 150);
 
     const startCheckTeamA = teamA.every(f => f.currentHp <= 0);

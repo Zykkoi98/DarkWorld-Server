@@ -116,7 +116,9 @@ io.on('connection', (socket) => {
     try {
       const nUserId = Number(payload?.userId || payload?.id || 0);
       if (!nUserId) return;
-
+       // 🔥 СОХРАНЯЕМ userId В СОКЕТЕ
+      socket.data = socket.data || {};
+      socket.data.userId = nUserId;
       const { data: row } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
       if (row) {
         // Сканируем регистры выносливости из Supabase
