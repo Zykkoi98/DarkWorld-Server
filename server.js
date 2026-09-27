@@ -36,122 +36,192 @@ const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 // Глобальная память для активных боевых комнат
 let activeRooms = {}; 
 global.activeRooms = activeRooms;
+global.onlinePlayers = new Map(); 
 
-// ============================================================================
-// 🔥 [АВТОНОМНАЯ РЕГЕНЕРАЦИЯ HP] — Память онлайн-сессий города
-// ============================================================================
-const activeOnlinePlayers = {}; 
+// ----------------------------------------------------------------------------
+// РЕГИСТРАЦИЯ ИГРОКА В ТИКЕРЕ ЛЕЧЕНИЯ
+// Вызывается автоматически при connect через handshake, а также по эвентам load_*
+// ----------------------------------------------------------------------------
+async function registerPlayerForRegen(userId, socketId, sb, io) {
+  const nUserId = Number(userId);
+  if (!nUserId) return;
 
-// 1. Ежесекундное плавное лечение в городе
+  const key = String(nUserId);
+
+  // Если игрок уже зарегистрирован — просто добавляем новый socketId
+  if (global.onlinePlayers.has(key)) {
+    const existing = global.onlinePlayers.get(key);
+    existing.socketIds.add(socketId);
+    console.log(`♻️ [РЕГЕН] ${existing.name} уже в очереди (сокетов: ${existing.socketIds.size})`);
+    return;
+  }
+
+  // Иначе — грузим из БД и регистрируем
+  try {
+    const { data: row } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+    if (!row) {
+      console.log(`⚠️ [РЕГЕН] Игрок ID ${nUserId} не найден в БД, пропускаем регистрацию`);
+      return;
+    }
+
+    // 🔥 Считаем maxHp правильно — через dbHelper (если доступен) или fallback
+    let maxHp = 100;
+    if (dbHelper && typeof dbHelper.getServerMaxHp === 'function') {
+      maxHp = dbHelper.getServerMaxHp(row);
+    } else {
+      maxHp = (Number(row.endurance || 1) * 10);
+    }
+
+    global.onlinePlayers.set(key, {
+      id: nUserId,
+      name: row.name,
+      hp: Math.min(Number(row.hp || 10), maxHp),
+      maxHp: maxHp,
+      endurance: Number(row.endurance || 1),
+      equipped: row.equipped || {},
+      needsSave: false,
+      socketIds: new Set([socketId])
+    });
+    
+    console.log(`✅ [РЕГЕН ВХОД] ${row.name} (ID ${nUserId}) добавлен в очередь лечения. HP: ${row.hp}/${maxHp}`);
+  } catch (e) {
+    console.error("🚨 Ошибка регистрации в регене:", e.message);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// УДАЛЕНИЕ СОКЕТА ИГРОКА (при disconnect)
+// ----------------------------------------------------------------------------
+function unregisterPlayerSocket(userId, socketId) {
+  const key = String(userId);
+  if (!global.onlinePlayers.has(key)) return;
+
+  const player = global.onlinePlayers.get(key);
+  player.socketIds.delete(socketId);
+
+  // Если у игрока больше нет активных сокетов — сохраняем HP и удаляем
+  if (player.socketIds.size === 0) {
+    if (player.needsSave && player.id && sb) {
+      sb.from('players').update({ hp: Number(player.hp) }).eq('id', Number(player.id))
+        .then(() => console.log(`☁️ [РЕГЕН ВЫХОД] ${player.name}: финальное HP ${player.hp} сохранено`))
+        .catch(err => console.error("🚨 Ошибка финального сохранения:", err.message));
+    }
+    global.onlinePlayers.delete(key);
+    console.log(`🧹 [РЕГЕН] ${player.name} удалён из очереди (все сокеты закрыты)`);
+  } else {
+    console.log(`♻️ [РЕГЕН] ${player.name} ещё онлайн на ${player.socketIds.size} сокетах`);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// ТИКЕР РЕГЕНЕРАЦИИ (1% от maxHp в секунду)
+// ----------------------------------------------------------------------------
 setInterval(() => {
   try {
-    const socketIds = Object.keys(activeOnlinePlayers);
-    if (socketIds.length === 0) return;
+    if (!global.onlinePlayers || global.onlinePlayers.size === 0) return;
 
-    socketIds.forEach(sId => {
-      const p = activeOnlinePlayers[sId];
-      if (!p || !p.id) return; // Защита от пустых сокетов
+    for (const [userId, player] of global.onlinePlayers.entries()) {
+      if (!player || player.hp <= 0) continue;
+      if (player.hp >= player.maxHp) continue;
 
-      // Заморозка лечения, если гладиатор ушел в бой
-      const isInBattle = Object.keys(activeRooms || {}).some(roomId => {
-        const room = activeRooms[roomId];
-        return room && room.teamA && room.teamA.some(f => f && String(f.id) === String(p.id));
+      // Проверяем, не в бою ли игрок (в бою HP не восстанавливается)
+      const isInBattle = Object.keys(global.activeRooms || {}).some(roomId => {
+        const room = global.activeRooms[roomId];
+        if (!room) return false;
+        return (room.teamA && room.teamA.some(f => f && String(f.id) === String(userId)))
+            || (room.teamB && room.teamB.some(f => f && String(f.id) === String(userId)));
       });
 
-      if (isInBattle) return;
+      if (isInBattle) continue;
 
-      // 🔥 [ИСПРАВЛЕНО]: Больше никаких ReferenceError! Безопасно вызываем твой 
-      // рабочий dbHelper. Если он занят, включается резервный автономный расчет.
-      let maxHp = 100;
-      if (dbHelper && typeof dbHelper.getServerMaxHp === 'function') {
-        maxHp = dbHelper.getServerMaxHp(p);
-      } else {
-        maxHp = (Number(p.endurance || 1) * 10); 
-      }
-      
-      if (p.hp < maxHp) {
-        const regenAmount = Math.max(1, Math.floor(maxHp * 0.01)); // 1% в сек
-        p.hp = Math.min(maxHp, p.hp + regenAmount);
-        p.needsSave = true;
+      // Регенерация 1% от максимума
+      const regenAmount = Math.max(1, Math.floor(player.maxHp * 0.01));
+      player.hp = Math.min(player.maxHp, player.hp + regenAmount);
+      player.needsSave = true;
 
-        // Отправляем эвент регенерации на телефон игрока
+      // Отправляем всем активным сокетам игрока
+      player.socketIds.forEach(sId => {
         io.to(sId).emit('town_hp_regen_update', { 
-          currentHp: p.hp, 
-          maxHp: maxHp 
+          currentHp: player.hp, 
+          maxHp: player.maxHp 
         });
-      }
-    });
-  } catch (globalLoopErr) {
-    console.error("🚨 Сбой тикера регенерации:", globalLoopErr.message);
+      });
+    }
+  } catch (err) {
+    console.error("🚨 Сбой тикера регенерации:", err.message);
   }
 }, 1000);
 
-// 2. Безопасный фоновый сброс накопленного ХП в Supabase раз в 15 секунд
+// ----------------------------------------------------------------------------
+// ФОНОВОЕ СОХРАНЕНИЕ HP В SUPABASE (раз в 15 сек)
+// ----------------------------------------------------------------------------
 setInterval(async () => {
   try {
-    const socketIds = Object.keys(activeOnlinePlayers);
-    if (socketIds.length === 0) return;
+    if (!global.onlinePlayers || global.onlinePlayers.size === 0) return;
 
-    for (const sId of socketIds) {
-      const p = activeOnlinePlayers[sId];
-      if (p && p.needsSave && p.id) {
-        p.needsSave = false;
-        // Апдейтим строго одну колонку здоровья
-        await sb.from('players').update({ hp: Number(p.hp) }).eq('id', Number(p.id));
-        console.log(`☁️ [БД РЕГЕНЕРАЦИЯ] Здоровье ${p.name} сохранено: ${p.hp} HP.`);
+    for (const [userId, player] of global.onlinePlayers.entries()) {
+      if (player.needsSave && player.id) {
+        player.needsSave = false;
+        await sb.from('players').update({ hp: Number(player.hp) }).eq('id', Number(player.id));
+        console.log(`☁️ [БД РЕГЕН] ${player.name}: ${player.hp} HP сохранено`);
       }
     }
-  } catch (dbSaveErr) {
-    console.error("🚨 Сбой базы при сохранении регенерации:", dbSaveErr.message);
+  } catch (err) {
+    console.error("🚨 Сбой фонового сохранения регена:", err.message);
   }
 }, 15000);
-// ============================================================================
-
-// ГЛАВНЫЙ СЛУШАТЕЛЬ СОКЕТ-ПОДКЛЮЧЕНИЙ
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
 
-  // Регистрация сокета в ОЗУ тикера лечения при успешном входе в город
-  socket.on('load_game_secure', async (payload) => {
-    try {
-      const nUserId = Number(payload?.userId || payload?.id || 0);
-      if (!nUserId) return;
-       // 🔥 СОХРАНЯЕМ userId В СОКЕТЕ
+  // ============================================================================
+  // 🔥 АВТО-РЕГИСТРАЦИЯ В РЕГЕНЕРАЦИИ ЧЕРЕЗ HANDSHAKE
+  // ============================================================================
+  const handshakeUserId = socket.handshake?.auth?.userId;
+  if (handshakeUserId) {
+    socket.data = socket.data || {};
+    socket.data.userId = Number(handshakeUserId);
+    registerPlayerForRegen(handshakeUserId, socket.id, sb, io);
+    console.log(`✅ [АВТО-РЕГЕН] Игрок ID ${handshakeUserId} зарегистрирован через handshake`);
+  } else {
+    console.log(`⚠️ [АВТО-РЕГЕН] Handshake без userId — ждём load_game_secure`);
+  }
+
+  // ============================================================================
+  // 🔥 УНИВЕРСАЛЬНАЯ РЕГИСТРАЦИЯ ЧЕРЕЗ ЛЮБОЙ load_* ЭВЕНТ (страховка)
+  // ============================================================================
+  const universalRegister = (payload) => {
+    const nUserId = Number(payload?.userId || payload?.id || socket.data?.userId || 0);
+    if (nUserId && !socket.data?.registeredUserId) {
       socket.data = socket.data || {};
       socket.data.userId = nUserId;
-      const { data: row } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
-      if (row) {
-        // Сканируем регистры выносливости из Supabase
-        const dbEndurance = row.endurance ?? row.Endurance ?? row.stats?.endurance ?? 1;
-        
-        activeOnlinePlayers[socket.id] = {
-          id: row.id,
-          name: row.name,
-          hp: Number(row.hp || 10),
-          endurance: Number(dbEndurance),
-          equipped: row.equipped || {},
-          needsSave: false
-        };
-        console.log(`✅ [РЕГЕНЕРАЦИЯ ВХОД] Гладиатор ${row.name} добавлен в очередь лечения.`);
-      }
-    } catch (e) { 
-      console.error("🚨 Ошибка авторизации тикера:", e.message); 
+      socket.data.registeredUserId = true;
+      registerPlayerForRegen(nUserId, socket.id, sb, io);
     }
-  });
+  };
 
-  // 1. Инициализируем модуль базы данных и античита (Передаем io, socket, sb)
+  // Ловим любые события авторизации
+  socket.on('load_game_secure', universalRegister);
+  socket.on('load_tower_game_secure', universalRegister);
+  socket.on('load_shop_game_secure', universalRegister);     // на будущее
+  socket.on('load_arena_game_secure', universalRegister);    // на будущее
+  socket.on('load_forest_game_secure', universalRegister);   // на будущее
+  // 🔥 Просто добавляй новые локации сюда
+
+  // ============================================================================
+  // 1. Инициализируем модуль базы данных и античита
+  // ============================================================================
   if (dbHelper && typeof dbHelper.init === 'function') {
     dbHelper.init(io, socket, sb);
   } else if (typeof dbHelper === 'function') {
     dbHelper(io, socket, sb);
   }
 
-  // 2. Инициализируем защищенный модуль инвентаря (Перенос вещей куклы)
+  // 2. Инициализируем защищенный модуль инвентаря
   if (typeof inventoryLogic === 'function') {
     inventoryLogic(io, socket, sb);
   }
 
-  // 3. Инициализируем боевой движок (PvE монстры, PvP Арена лобби и комнаты)
+  // 3. Инициализируем боевой движок
   if (typeof battleLogic === 'function') {
     battleLogic(io, socket, sb, activeRooms);
   }
@@ -166,61 +236,28 @@ io.on('connection', (socket) => {
     shopLogic(io, socket, sb);
   }
 
-  // Безопасное отключение: чистим socketId оффлайн-игроков и убираем из тикера регенерации
-socket.on('disconnect', () => {
-    const p = activeOnlinePlayers[socket.id];
-    if (p) {
-      delete activeOnlinePlayers[socket.id];
-      console.log(`🧹 [РЕГЕНЕРАЦИЯ] Игрок ${p.name} отключился, сессия лечения закрыта.`);
+  // ============================================================================
+  // 🔥 DISCONNECT: убираем игрока из регена + чистим боевые комнаты
+  // ============================================================================
+  socket.on('disconnect', () => {
+    // 1. Убираем из регенерации
+    const userId = socket.data?.userId;
+    if (userId) {
+      unregisterPlayerSocket(userId, socket.id);
     }
 
+    // 2. Отвязываем от боевых комнат
     Object.keys(activeRooms).forEach(roomId => {
       const room = activeRooms[roomId];
-      if (!room || !room.teamA) return;
-
-      const fighter = [...room.teamA, ...room.teamB].find(f => f && f.socketId === socket.id);
-      if (!fighter) return;
-
-      fighter.socketId = null;
-      fighter.disconnectedAt = Date.now(); // 🔥 Запоминаем время отключения
-
-      // 🔥 В PvP — даём 10 секунд grace, потом дисквалификация
-      if (room.type === 'pvp' && !room.isOver) {
-        console.log(`⚠️ [PvP ДИСКОННЕКТ] ${fighter.name} отключился. Запускаем grace-таймер 10 сек...`);
-        
-        // Уведомляем соперника
-        io.to(roomId).emit('opponent_disconnected', {
-          name: fighter.name,
-          graceSeconds: 10
-        });
-
-        // Запускаем таймер дисквалификации
-        setTimeout(() => {
-          const currentRoom = activeRooms[roomId];
-          if (!currentRoom || currentRoom.isOver) return;
-
-          const currentFighter = [...currentRoom.teamA, ...currentRoom.teamB]
-            .find(f => String(f.id) === String(fighter.id));
-
-          // Если игрок не вернулся — дисквалифицируем
-          if (currentFighter && !currentFighter.socketId) {
-            console.log(`🛑 [PvP ДИСКОННЕКТ] ${currentFighter.name} не вернулся. Техническое поражение.`);
-            currentFighter.currentHp = 0;
-            
-            // Запускаем финализацию раунда (она сама проверит, что HP = 0, и завершит бой)
-            if (typeof global.executeRoundCalculations === 'function') {
-              global.executeRoundCalculations(roomId, activeRooms, io);
-            }
-          }
-        }, 10000);
-      }
-
-      // 🔥 В PvE — просто продолжаем бой, игрок вернётся через reconnect
-      if (room.type === 'pve') {
-        console.log(`⚠️ [PvE ДИСКОННЕКТ] ${fighter.name} отключился. Бой продолжится, АФК-система сработает.`);
+      if (room && room.teamA) {
+        const fighter = [...room.teamA, ...room.teamB].find(f => f && f.socketId === socket.id);
+        if (fighter) {
+          fighter.socketId = null;
+          fighter.disconnectedAt = Date.now();
+        }
       }
     });
-
+    
     console.log(`❌ Сокет отключен: ${socket.id}`);
   });
 });
