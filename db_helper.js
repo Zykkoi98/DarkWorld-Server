@@ -378,6 +378,10 @@ module.exports = {
           let needsDbSync = false;
           let updatePayload = {};
 
+          console.log(`🔍 [АНТИЧИТ-АУДИТ] dbLevel=${dbLevel}, correctLevel=${correctLevel}, XP=${currentXp}`);
+          console.log(`🔍 [АНТИЧИТ-АУДИТ] str=${str}, agi=${agi}, end=${end}, lck=${lck}, free=${freePoints}`);
+          console.log(`🔍 [АНТИЧИТ-АУДИТ] totalFighterPoints=${totalFighterPoints}, maxLegalPoints=${maxLegalPoints}`);
+
           if (dbLevel !== correctLevel || totalFighterPoints > maxLegalPoints) {
             console.warn(`🚨 [АНТИЧИТ] Сброс на легальную норму уровня ${correctLevel}`);
             const statsKeys = ['strength', 'agility', 'endurance', 'luck'];
