@@ -159,7 +159,7 @@ module.exports = function(io, socket, sb, activeRooms) {
       const teamA = [{
         uuid: `player_${dbPlayer.id}`, id: String(dbPlayer.id), name: dbPlayer.name, icon: '👤', isBot: false,
         level: Number(dbPlayer.level || 1), strength: Number(dbPlayer.strength || 1), agility: Number(dbPlayer.agility || 1), endurance: Number(dbPlayer.endurance || 1), luck: Number(dbPlayer.luck || 1),
-        currentHp: Math.min(Number(dbPlayer.hp || pMaxHp), pMaxHp), maxHp: pMaxHp, socketId: socket.id, turn: null,
+        currentHp: Math.min(Number(dbPlayer.hp ?? pMaxHp), pMaxHp), maxHp: pMaxHp, socketId: socket.id, turn: null,
         gold: Number(dbPlayer.gold || 0), xp: Number(dbPlayer.xp || 0), statpoints: Number(dbPlayer.statpoints || 0),
         equipped: dbPlayer.equipped || {}, inventory: dbPlayer.inventory || {}, afkTurns: 0 
       }];

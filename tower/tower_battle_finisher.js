@@ -34,7 +34,7 @@ async function finalizeTowerBattleSecure(room, result, sb) {
     let baseGold = Number(freshDbPlayer.gold || 0);
     let baseXp = Number(freshDbPlayer.xp || 0);
     let baseTowerCoins = Number(freshDbPlayer.tower_coins || 0);
-    let currentDbLevel = Number(freshDbPlayer.level || 1);
+    let currentDbLevel = Number(freshDbPlayer.level ?? 1);
     
     // Берем актуальный инвентарь и куклу из базы, а не из старого ОЗУ боя!
     let liveInventory = freshDbPlayer.inventory || { equipment: [], resources: [], consumables: [] };
@@ -59,7 +59,7 @@ async function finalizeTowerBattleSecure(room, result, sb) {
       // 🏆 РАСЧЕТ НАГРАДЫ ПРИ ПОБЕДЕ
       if (room.teamB && Array.isArray(room.teamB)) {
         room.teamB.forEach(m => { 
-          const monsterLevel = Number(m.level || 1);
+          const monsterLevel = Number(m.level ?? 1);
           const monsterXp = (m.rewardXp !== undefined) ? Number(m.rewardXp) : (5 + (monsterLevel * 3));
           gainedXp += monsterXp;
 

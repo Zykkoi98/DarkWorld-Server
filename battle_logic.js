@@ -599,7 +599,7 @@ const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq
       level: Number(playerData.level ?? 1), 
       strength: p1Stats.strength, agility: p1Stats.agility,
       endurance: p1Stats.endurance, luck: p1Stats.luck,
-      currentHp: Math.min(Number(p1Hp || p1MaxHp), p1MaxHp), maxHp: p1MaxHp, socketId: null, turn: null,
+      currentHp: Math.min(Number(p1Hp ?? p1MaxHp), p1MaxHp), maxHp: p1MaxHp, socketId: null, turn: null,
       equipped: playerData.equipped || {}, inventory: playerData.inventory || {}, afkTurns: 0
     }];
 
@@ -935,7 +935,7 @@ const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq
             gainedGold += Number(m.rewardGold || 0);
           });
 
-          const oldLevel = Number(player.level || 1);
+          const oldLevel = Number(player.level ?? 1);
           const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp + gainedXp);
 
           if (correctLevel > oldLevel) {
@@ -1075,7 +1075,7 @@ const { data: oppData, error: oppErr } = await sb.from('players').select('*').eq
         player.gold = Number(player.gold || 0) + gainedGold;
         player.xp = Number(player.xp || 0) + gainedXp;
         
-        const oldLevel = Number(player.level || 1);
+        const oldLevel = Number(player.level ?? 1);
         const correctLevel = dbHelper.getServerCorrectLevelByXp(player.xp);
         
         if (correctLevel > oldLevel) {
