@@ -350,9 +350,15 @@ module.exports = function(io, socket, sb, activeRooms) {
   // --------------------------------------------------------------------------
   socket.on('world_attack', async ({ userId, monsterId }) => {
     try {
+      const pos = await getPlayerPosition(userId);
       const { data: monster } = await sb
         .from('world_monsters').select('*').eq('id', monsterId).maybeSingle();
       if (!monster) return socket.emit('error', 'Моб не найден');
+
+      // 🔥 ФИКС: атаковать можно ТОЛЬКО моба на своей клетке
+      if (monster.x !== pos.x || monster.y !== pos.y) {
+        return socket.emit('error', '⚔️ Моб не на вашей клетке! Сначала перейдите к нему.');
+      }
 
       const { data: botBase } = await sb
         .from('bots').select('*').eq('id', monster.monster_id).maybeSingle();
