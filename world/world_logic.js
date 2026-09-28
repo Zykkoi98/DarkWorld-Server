@@ -1,14 +1,14 @@
 // ============================================================================
 // ===== 🗺️ СЕРВЕРНАЯ ЛОГИКА КАРТЫ МИРА (WORLD_LOGIC.JS) =====
-// ===== С ЗАДЕРЖКОЙ ПЕРЕХОДА 15 СЕКУНД =====
+// ===== С ЗАДЕРЖКОЙ ПЕРЕХОДА 15 СЕКУНД + ЗАЩИТОЙ ОТ СПАМА =====
 // ============================================================================
 
 const { WORLD_REGIONS, RESOURCES_DB, BUILDINGS_DB } = require('./world_config');
 
 const VIEW_RADIUS = 3;
-const MOVE_DURATION_MS = 15000; // 15 секунд на переход
+const MOVE_DURATION_MS = 15000;
 
-// Хранилище активных переходов: Map<userId, { endsAt, dx, dy, targetX, targetY, timerId }>
+// Хранилище активных переходов
 const activeMoves = new Map();
 
 module.exports = function(io, socket, sb, activeRooms) {
@@ -130,15 +130,25 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // --------------------------------------------------------------------------
-  // 2. НАЧАЛО ПЕРЕХОДА (С ТАЙМЕРОМ 15 СЕК)
+  // 2. НАЧАЛО ПЕРЕХОДА (С ЖЁСТКОЙ ЗАЩИТОЙ ОТ СПАМА)
   // --------------------------------------------------------------------------
   socket.on('world_move_start', async ({ userId, dx, dy }) => {
+    let nUserId = null;
     try {
-      const nUserId = Number(userId);
+      nUserId = Number(userId);
 
+      // 🔥 ЖЕЛЕЗНАЯ БЛОКИРОВКА: помечаем игрока СРАЗУ, до любых await
       if (activeMoves.has(nUserId)) {
         return socket.emit('world_move_blocked', { reason: 'Вы уже в пути' });
       }
+      // Заглушка — блокирует повторные запросы, пока идёт проверка
+      activeMoves.set(nUserId, {
+        endsAt: Date.now() + MOVE_DURATION_MS,
+        dx, dy,
+        targetX: 0, targetY: 0,
+        timerId: null,
+        isInitializing: true
+      });
 
       const pos = await getPlayerPosition(userId);
       const mapId = pos.current_map_id;
@@ -147,17 +157,26 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       const { data: mapInfo } = await sb
         .from('world_maps').select('width, height').eq('id', mapId).maybeSingle();
-      if (!mapInfo) return socket.emit('error', 'Карта не найдена');
+      if (!mapInfo) {
+        activeMoves.delete(nUserId);
+        return socket.emit('error', 'Карта не найдена');
+      }
 
       if (newX < 0 || newX >= mapInfo.width || newY < 0 || newY >= mapInfo.height) {
+        activeMoves.delete(nUserId);
         return socket.emit('world_move_blocked', { reason: 'За границей карты' });
       }
 
       const { data: tile } = await sb
         .from('world_tiles').select('is_blocked')
         .eq('map_id', mapId).eq('x', newX).eq('y', newY).maybeSingle();
-      if (!tile) return socket.emit('error', 'Клетка не существует');
+
+      if (!tile) {
+        activeMoves.delete(nUserId);
+        return socket.emit('error', 'Клетка не существует');
+      }
       if (tile.is_blocked) {
+        activeMoves.delete(nUserId);
         return socket.emit('world_move_blocked', { reason: 'Клетка непроходима' });
       }
 
@@ -170,7 +189,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         endsAt: endsAt
       });
 
-      console.log(`🚶 [МИР] ${userId} начал переход (${pos.x},${pos.y}) → (${newX},${newY}) за ${MOVE_DURATION_MS/1000}с`);
+      console.log(`🚶 [МИР] ${userId} начал переход (${pos.x},${pos.y}) → (${newX},${newY}) за ${MOVE_DURATION_MS / 1000}с`);
 
       const timerId = setTimeout(async () => {
         try {
@@ -215,6 +234,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     } catch (err) {
       console.error("🚨 Ошибка world_move_start:", err.message);
+      if (nUserId) activeMoves.delete(nUserId);
     }
   });
 
@@ -226,7 +246,7 @@ module.exports = function(io, socket, sb, activeRooms) {
     const move = activeMoves.get(nUserId);
     if (!move) return;
 
-    clearTimeout(move.timerId);
+    if (move.timerId) clearTimeout(move.timerId);
     activeMoves.delete(nUserId);
     socket.emit('world_move_cancelled');
     console.log(`🚫 [МИР] ${userId} отменил переход`);
@@ -362,6 +382,19 @@ module.exports = function(io, socket, sb, activeRooms) {
       });
     } catch (err) {
       console.error("🚨 Ошибка world_attack:", err.message);
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 7. DISCONNECT — сброс блокировки перехода
+  // --------------------------------------------------------------------------
+  socket.on('disconnect', () => {
+    const nUserId = Number(socket.data?.userId);
+    if (nUserId && activeMoves.has(nUserId)) {
+      const move = activeMoves.get(nUserId);
+      if (move.timerId) clearTimeout(move.timerId);
+      activeMoves.delete(nUserId);
+      console.log(`🧹 [МИР] Переход игрока ${nUserId} отменён при disconnect`);
     }
   });
 
