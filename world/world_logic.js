@@ -191,40 +191,34 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       console.log(`🚶 [МИР] ${userId} начал переход (${pos.x},${pos.y}) → (${newX},${newY}) за ${MOVE_DURATION_MS / 1000}с`);
 
-      const timerId = setTimeout(async () => {
+        const timerId = setTimeout(async () => {
         try {
-          const currentPos = await getPlayerPosition(userId);
-          if (currentPos.x !== pos.x || currentPos.y !== pos.y) {
+            const currentPos = await getPlayerPosition(userId);
+            if (currentPos.x !== pos.x || currentPos.y !== pos.y) {
+            console.log(`⚠️ [МИР] Позиция изменилась — переход отменён`);
             activeMoves.delete(nUserId);
+            // 🔥 ФИКС: всё равно уведомляем клиента, чтобы модалка закрылась
+            socket.emit('world_move_completed', { x: currentPos.x, y: currentPos.y, cancelled: true });
             return;
-          }
-
-          await sb.from('player_position').update({
-            x: newX, y: newY, updated_at: new Date().toISOString()
-          }).eq('user_id', nUserId);
-
-          console.log(`✅ [МИР] ${userId} прибыл в (${newX},${newY})`);
-
-          socket.emit('world_move_completed', { x: newX, y: newY });
-          socket.emit('world_get_map', { userId: nUserId });
-
-          if (global.onlinePlayers) {
-            for (const [otherUserId, player] of global.onlinePlayers.entries()) {
-              if (String(otherUserId) === String(nUserId)) continue;
-              player.socketIds.forEach(sId => {
-                io.to(sId).emit('world_player_moved', {
-                  user_id: nUserId, x: newX, y: newY
-                });
-              });
             }
-          }
 
-          activeMoves.delete(nUserId);
+            await sb.from('player_position').update({
+            x: newX, y: newY, updated_at: new Date().toISOString()
+            }).eq('user_id', nUserId);
+
+            console.log(`✅ [МИР] ${userId} прибыл в (${newX},${newY})`);
+
+            socket.emit('world_move_completed', { x: newX, y: newY });
+            socket.emit('world_get_map', { userId: nUserId });
+            
+            activeMoves.delete(nUserId);
         } catch (err) {
-          console.error("🚨 Ошибка завершения перехода:", err.message);
-          activeMoves.delete(nUserId);
+            console.error("🚨 Ошибка завершения перехода:", err.message);
+            activeMoves.delete(nUserId);
+            // 🔥 ФИКС: даже при ошибке уведомляем клиента
+            socket.emit('world_move_completed', { x: pos.x, y: pos.y, error: true });
         }
-      }, MOVE_DURATION_MS);
+        }, MOVE_DURATION_MS);
 
       activeMoves.set(nUserId, {
         endsAt, dx, dy,
