@@ -14,6 +14,26 @@ const shopLogic = require('./shop/shop_logic');
 const towerLogic = require('./tower/tower_logic'); 
 const app = express();
 app.get('/', (req, res) => res.send('⚔️ Боевое ядро Dark World активно на Render!'));
+app.get('/admin/generate-world', async (req, res) => {
+  try {
+    const { generateWorld, worldExists } = require('./world/world_generator');
+    
+    if (!(await worldExists(sb, 'ashenvale_main'))) {
+      await generateWorld(sb, 'ashenvale_main', 50, 50);
+    }
+    if (!(await worldExists(sb, 'dragonhold_main'))) {
+      await generateWorld(sb, 'dragonhold_main', 100, 100);
+    }
+    if (!(await worldExists(sb, 'mine_1'))) {
+      await generateWorld(sb, 'mine_1', 20, 20);
+    }
+    
+    res.send('✅ Генерация карт завершена!');
+  } catch (err) {
+    console.error(err);
+    res.status(500).send(`🚨 Ошибка: ${err.message}`);
+  }
+});
 
 const server = http.createServer(app);
 const io = new Server(server, { 
