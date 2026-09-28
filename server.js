@@ -14,6 +14,24 @@ const shopLogic = require('./shop/shop_logic');
 const towerLogic = require('./tower/tower_logic'); 
 const app = express();
 app.get('/', (req, res) => res.send('⚔️ Боевое ядро Dark World активно на Render!'));
+
+const server = http.createServer(app);
+const io = new Server(server, { 
+  pingTimeout: 120000,  // Сервер будет ждать ответа от смартфона целых 2 минуты (120 сек) вместо 25
+  pingInterval: 45000, // Сервер будет отправлять пинг раз в 45 секунд, снижая нагрузку на сеть
+  cors: { 
+    origin: [
+      "https://zykkoi98.github.io",
+      "https://github.io", // Вариант с закрывающим слэшем 
+      "http://localhost:3000",
+      "http://127.0.0.1:5500"
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
+  } 
+});
+// Инициализация Supabase из переменных окружения Render
+const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 app.get('/admin/generate-world', async (req, res) => {
   try {
     const { generateWorld, worldExists } = require('./world/world_generator');
@@ -34,24 +52,6 @@ app.get('/admin/generate-world', async (req, res) => {
     res.status(500).send(`🚨 Ошибка: ${err.message}`);
   }
 });
-
-const server = http.createServer(app);
-const io = new Server(server, { 
-  pingTimeout: 120000,  // Сервер будет ждать ответа от смартфона целых 2 минуты (120 сек) вместо 25
-  pingInterval: 45000, // Сервер будет отправлять пинг раз в 45 секунд, снижая нагрузку на сеть
-  cors: { 
-    origin: [
-      "https://zykkoi98.github.io",
-      "https://github.io", // Вариант с закрывающим слэшем 
-      "http://localhost:3000",
-      "http://127.0.0.1:5500"
-    ],
-    methods: ["GET", "POST"],
-    credentials: true
-  } 
-});
-// Инициализация Supabase из переменных окружения Render
-const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // Глобальная память для активных боевых комнат
 let activeRooms = {}; 
