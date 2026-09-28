@@ -12,6 +12,7 @@ const inventoryLogic = require('./inventory_logic');
 const battleLogic = require('./battle_logic');
 const shopLogic = require('./shop/shop_logic');
 const towerLogic = require('./tower/tower_logic'); 
+const worldLogic = require('./world/world_logic');
 const app = express();
 app.get('/', (req, res) => res.send('⚔️ Боевое ядро Dark World активно на Render!'));
 
@@ -254,6 +255,10 @@ io.on('connection', (socket) => {
   // 5. Инициализируем магазин города
   if (typeof shopLogic === 'function') {
     shopLogic(io, socket, sb);
+  }
+    // 6. Инициализируем карту мира
+  if (typeof worldLogic === 'function') {
+    worldLogic(io, socket, sb, activeRooms);
   }
 
   // ============================================================================
