@@ -388,14 +388,13 @@ module.exports = function(io, socket, sb, activeRooms) {
   // --------------------------------------------------------------------------
   // 7. DISCONNECT — сброс блокировки перехода
   // --------------------------------------------------------------------------
-  socket.on('disconnect', () => {
+    socket.on('disconnect', () => {
+    // 🔥 НЕ удаляем переход при disconnect — игрок может вернуться через F5
+    // Переход завершится сам по таймеру, и позиция обновится в БД
     const nUserId = Number(socket.data?.userId);
-    if (nUserId && activeMoves.has(nUserId)) {
-      const move = activeMoves.get(nUserId);
-      if (move.timerId) clearTimeout(move.timerId);
-      activeMoves.delete(nUserId);
-      console.log(`🧹 [МИР] Переход игрока ${nUserId} отменён при disconnect`);
+    if (nUserId) {
+        console.log(`❌ [МИР] Сокет игрока ${nUserId} отключён, но переход продолжается`);
     }
-  });
+    });
 
 };
