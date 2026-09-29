@@ -4,9 +4,110 @@
 // ============================================================================
 
 const { WORLD_REGIONS, RESOURCES_DB, BUILDINGS_DB } = require('./world_config');
-
 const VIEW_RADIUS = 7;
 const MOVE_DURATION_MS = 15000;
+function findPath(startX, startY, endX, endY, tilesGrid) {
+  const MAP_SIZE = 50;
+  const MAX_ITER = 5000;
+
+  // 🔥 Проверка: цель не должна быть заблокирована
+  const endKey = `${endX}_${endY}`;
+  if (tilesGrid[endKey]?.is_blocked) {
+    console.log(`🚫 [A*] Цель (${endX},${endY}) заблокирована`);
+    return null;
+  }
+
+  // 🔥 Открытый и закрытый списки
+  const open = new Map();   // key → {x, y, g, f, parent}
+  const closed = new Set();
+
+  // Эвристика — манхэттенское расстояние
+  const heuristic = (x, y) => Math.abs(x - endX) + Math.abs(y - endY);
+
+  // Стартовая точка
+  const startKey = `${startX}_${startY}`;
+  open.set(startKey, {
+    x: startX,
+    y: startY,
+    g: 0,
+    f: heuristic(startX, startY),
+    parent: null
+  });
+
+  let iter = 0;
+
+  while (open.size > 0 && iter < MAX_ITER) {
+    iter++;
+
+    // 🔥 Находим узел с минимальной f
+    let currentKey = null;
+    let currentF = Infinity;
+    for (const [key, node] of open) {
+      if (node.f < currentF) {
+        currentF = node.f;
+        currentKey = key;
+      }
+    }
+
+    const current = open.get(currentKey);
+
+    // 🔥 Дошли до цели — строим путь
+    if (current.x === endX && current.y === endY) {
+      const path = [];
+      let node = current;
+      while (node.parent) {
+        path.unshift({ x: node.x, y: node.y });
+        node = node.parent;
+      }
+      console.log(`🧭 [A*] Путь найден за ${iter} итераций, длина ${path.length}`);
+      return path;
+    }
+
+    open.delete(currentKey);
+    closed.add(currentKey);
+
+    // 🔥 Соседи (4 направления)
+    const neighbors = [
+      { dx: 1, dy: 0 },
+      { dx: -1, dy: 0 },
+      { dx: 0, dy: 1 },
+      { dx: 0, dy: -1 }
+    ];
+
+    for (const { dx, dy } of neighbors) {
+      const nx = current.x + dx;
+      const ny = current.y + dy;
+
+      // 🔥 Границы карты
+      if (nx < 0 || nx >= MAP_SIZE || ny < 0 || ny >= MAP_SIZE) continue;
+
+      const nKey = `${nx}_${ny}`;
+      if (closed.has(nKey)) continue;
+
+      // 🔥 Клетка заблокирована?
+      const nTile = tilesGrid[nKey];
+      if (nTile && nTile.is_blocked) continue;
+
+      // 🔥 Стоимость: 1 за шаг
+      const tentativeG = current.g + 1;
+
+      const existing = open.get(nKey);
+      if (existing && tentativeG >= existing.g) continue;
+
+      // 🔥 Добавляем/обновляем
+      open.set(nKey, {
+        x: nx,
+        y: ny,
+        g: tentativeG,
+        f: tentativeG + heuristic(nx, ny),
+        parent: current
+      });
+    }
+  }
+
+  console.log(`🚫 [A*] Путь не найден (итераций: ${iter})`);
+  return null;
+}
 
 // Хранилище активных переходов
 const activeMoves = new Map();
@@ -382,6 +483,51 @@ module.exports = function(io, socket, sb, activeRooms) {
       });
     } catch (err) {
       console.error("🚨 Ошибка world_attack:", err.message);
+    }
+  });
+  // 🔥 ЗАПРОС ПОИСКА ПУТИ
+  socket.on('world_find_path', async ({ userId, fromX, fromY, toX, toY }, callback) => {
+    try {
+      console.log(`🧭 [НАВ] Поиск пути: (${fromX},${fromY}) → (${toX},${toY})`);
+
+      const { data: pos } = await getPlayerPosition(userId);
+      const mapId = pos.current_map_id;
+
+      const { data: tiles, error } = await sb
+        .from('world_tiles')
+        .select('x, y, is_blocked')
+        .eq('map_id', mapId);
+
+      if (error || !tiles) {
+        console.error("🚨 [A*] Ошибка загрузки клеток:", error);
+        return callback({ success: false, error: 'Ошибка загрузки карты' });
+      }
+
+      const tilesGrid = {};
+      tiles.forEach(t => {
+        tilesGrid[`${t.x}_${t.y}`] = t;
+      });
+
+      const path = findPath(fromX, fromY, toX, toY, tilesGrid);
+
+      if (!path) {
+        return callback({ success: false, error: 'Путь не найден' });
+      }
+
+      const steps = [];
+      let curX = fromX;
+      let curY = fromY;
+      for (const node of path) {
+        steps.push({ dx: node.x - curX, dy: node.y - curY });
+        curX = node.x;
+        curY = node.y;
+      }
+
+      callback({ success: true, steps: steps, pathLength: path.length });
+      console.log(`✅ [A*] Отправлено ${steps.length} шагов`);
+    } catch (err) {
+      console.error("🚨 [A*] Ошибка:", err.message);
+      callback({ success: false, error: err.message });
     }
   });
 
