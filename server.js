@@ -194,37 +194,43 @@ setInterval(async () => {
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
 
- // 🔥 ФИКС УТЕЧКИ: закрываем все старые сокеты этого игрока
+  // 🔥 ФИКС v2: убиваем ТОЛЬКО старые дубликаты (>10 сек)
   const handshakeUserId = socket.handshake?.auth?.userId;
   if (handshakeUserId) {
     const nUserId = Number(handshakeUserId);
-    let killed = 0;
+    const now = Date.now();
+
     io.sockets.sockets.forEach((existingSocket) => {
       if (existingSocket.id !== socket.id &&
           Number(existingSocket.handshake?.auth?.userId) === nUserId) {
-        console.log(`🧹 [СОКЕТ] Убиваем дубликат ${existingSocket.id} для игрока ${nUserId}`);
-        existingSocket.disconnect(true);
-        killed++;
+        const ageMs = now - (existingSocket.data?.connectedAt || 0);
+        if (ageMs > 10000) {
+          console.log(`🧹 [СОКЕТ] Убиваем старый дубликат ${existingSocket.id} (возраст ${Math.round(ageMs / 1000)}с)`);
+          existingSocket.disconnect(true);
+        } else {
+          console.log(`⏸️ [СОКЕТ] Не убиваем свежий дубликат ${existingSocket.id} (возраст ${Math.round(ageMs / 1000)}с)`);
+        }
       }
     });
-    if (killed > 0) {
-      console.log(`✅ [СОКЕТ] Убито дубликатов: ${killed}`);
-    }
   }
+
+  // 🔥 Записываем время подключения — чтобы следующий сокет знал возраст
+  socket.data = socket.data || {};
+  socket.data.connectedAt = Date.now();
 
   // ============================================================================
   // 🔥 АВТО-РЕГИСТРАЦИЯ В РЕГЕНЕРАЦИИ ЧЕРЕЗ HANDSHAKE
   // ============================================================================
   if (handshakeUserId) {
-    socket.data = socket.data || {};
     socket.data.userId = Number(handshakeUserId);
     registerPlayerForRegen(handshakeUserId, socket.id, sb, io);
     console.log(`✅ [АВТО-РЕГЕН] Игрок ID ${handshakeUserId} зарегистрирован через handshake`);
   } else {
     console.log(`⚠️ [АВТО-РЕГЕН] Handshake без userId — ждём load_game_secure`);
   }
+
   // ============================================================================
-  // 🔥 УНИВЕРСАЛЬНАЯ РЕГИСТРАЦИЯ ЧЕРЕЗ ЛЮБОЙ load_* ЭВЕНТ (страховка)
+  // 🔥 УНИВЕРСАЛЬНАЯ РЕГИСТРАЦИЯ (без изменений)
   // ============================================================================
   const universalRegister = (payload) => {
     const nUserId = Number(payload?.userId || payload?.id || socket.data?.userId || 0);
@@ -236,16 +242,14 @@ io.on('connection', (socket) => {
     }
   };
 
-  // Ловим любые события авторизации
   socket.on('load_game_secure', universalRegister);
   socket.on('load_tower_game_secure', universalRegister);
-  socket.on('load_shop_game_secure', universalRegister);     // на будущее
-  socket.on('load_arena_game_secure', universalRegister);    // на будущее
-  socket.on('load_forest_game_secure', universalRegister);   // на будущее
-  // 🔥 Просто добавляй новые локации сюда
+  socket.on('load_shop_game_secure', universalRegister);
+  socket.on('load_arena_game_secure', universalRegister);
+  socket.on('load_forest_game_secure', universalRegister);
 
   // ============================================================================
-  // 1. Инициализируем модуль базы данных и античита
+  // 1-6. ИНИЦИАЛИЗАЦИЯ МОДУЛЕЙ (без изменений)
   // ============================================================================
   if (dbHelper && typeof dbHelper.init === 'function') {
     dbHelper.init(io, socket, sb);
@@ -253,41 +257,35 @@ io.on('connection', (socket) => {
     dbHelper(io, socket, sb);
   }
 
-  // 2. Инициализируем защищенный модуль инвентаря
   if (typeof inventoryLogic === 'function') {
     inventoryLogic(io, socket, sb);
   }
 
-  // 3. Инициализируем боевой движок
   if (typeof battleLogic === 'function') {
     battleLogic(io, socket, sb, activeRooms);
   }
 
-  // 4. Инициализируем ядро Бесконечной Башни
   if (typeof towerLogic === 'function') {
     towerLogic(io, socket, sb, activeRooms);
   }
 
-  // 5. Инициализируем магазин города
   if (typeof shopLogic === 'function') {
     shopLogic(io, socket, sb);
   }
-    // 6. Инициализируем карту мира
+
   if (typeof worldLogic === 'function') {
     worldLogic(io, socket, sb, activeRooms);
   }
 
   // ============================================================================
-  // 🔥 DISCONNECT: убираем игрока из регена + чистим боевые комнаты
+  // DISCONNECT (без изменений)
   // ============================================================================
   socket.on('disconnect', () => {
-    // 1. Убираем из регенерации
     const userId = socket.data?.userId;
     if (userId) {
       unregisterPlayerSocket(userId, socket.id);
     }
 
-    // 2. Отвязываем от боевых комнат
     Object.keys(activeRooms).forEach(roomId => {
       const room = activeRooms[roomId];
       if (room && room.teamA) {
@@ -298,7 +296,7 @@ io.on('connection', (socket) => {
         }
       }
     });
-    
+
     console.log(`❌ Сокет отключен: ${socket.id}`);
   });
 });
