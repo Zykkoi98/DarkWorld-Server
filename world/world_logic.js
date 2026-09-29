@@ -119,14 +119,20 @@ module.exports = function(io, socket, sb, activeRooms) {
   // ХЕЛПЕР: Получить позицию игрока
   // --------------------------------------------------------------------------
   async function getPlayerPosition(userId) {
-    const { data } = await sb
+  try {
+    const { data, error } = await sb
       .from('player_position')
       .select('*')
       .eq('user_id', Number(userId))
       .maybeSingle();
 
+    if (error) {
+      console.error("🚨 [POS] Ошибка SELECT:", error.message);
+    }
+
     if (data) return data;
 
+    // 🔥 Если нет — создаём дефолт
     const defaultPos = {
       user_id: Number(userId),
       current_map_id: 'ashenvale_main',
@@ -134,9 +140,23 @@ module.exports = function(io, socket, sb, activeRooms) {
       updated_at: new Date().toISOString()
     };
 
-    await sb.from('player_position').insert(defaultPos);
+    const { error: insertErr } = await sb.from('player_position').insert(defaultPos);
+
+    if (insertErr) {
+      console.error("🚨 [POS] Ошибка INSERT:", insertErr.message);
+    }
+
     return defaultPos;
+  } catch (err) {
+    console.error("🚨 [POS] Критическая ошибка:", err.message);
+    // 🔥 Fallback — дефолт
+    return {
+      user_id: Number(userId),
+      current_map_id: 'ashenvale_main',
+      x: 25, y: 25
+    };
   }
+}
 
   // --------------------------------------------------------------------------
   // ХЕЛПЕР: Онлайн-игроки на карте
@@ -486,50 +506,62 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
   });
   // 🔥 ЗАПРОС ПОИСКА ПУТИ
-  socket.on('world_find_path', async ({ userId, fromX, fromY, toX, toY }, callback) => {
-    try {
-      console.log(`🧭 [НАВ] Поиск пути: (${fromX},${fromY}) → (${toX},${toY})`);
+    socket.on('world_find_path', async ({ userId, fromX, fromY, toX, toY }, callback) => {
+        try {
+        console.log(`🧭 [НАВ] Поиск пути: (${fromX},${fromY}) → (${toX},${toY})`);
 
-      const { data: pos } = await getPlayerPosition(userId);
-      const mapId = pos.current_map_id;
+        // 🔥 ЗАЩИТА: если getPlayerPosition вернул undefined — используем дефолт
+        let pos = null;
+        try {
+            pos = await getPlayerPosition(userId);
+        } catch (err) {
+            console.error("🚨 [A*] Ошибка getPlayerPosition:", err.message);
+        }
 
-      const { data: tiles, error } = await sb
-        .from('world_tiles')
-        .select('x, y, is_blocked')
-        .eq('map_id', mapId);
+        if (!pos) {
+            console.warn("⚠️ [A*] pos = undefined, использую дефолтную карту");
+            pos = { current_map_id: 'ashenvale_main', x: 25, y: 25 };
+        }
 
-      if (error || !tiles) {
-        console.error("🚨 [A*] Ошибка загрузки клеток:", error);
-        return callback({ success: false, error: 'Ошибка загрузки карты' });
-      }
+        const mapId = pos.current_map_id || 'ashenvale_main';
 
-      const tilesGrid = {};
-      tiles.forEach(t => {
-        tilesGrid[`${t.x}_${t.y}`] = t;
-      });
+        const { data: tiles, error } = await sb
+            .from('world_tiles')
+            .select('x, y, is_blocked')
+            .eq('map_id', mapId);
 
-      const path = findPath(fromX, fromY, toX, toY, tilesGrid);
+        if (error || !tiles) {
+            console.error("🚨 [A*] Ошибка загрузки клеток:", error);
+            return callback({ success: false, error: 'Ошибка загрузки карты' });
+        }
 
-      if (!path) {
-        return callback({ success: false, error: 'Путь не найден' });
-      }
+        const tilesGrid = {};
+        tiles.forEach(t => {
+            tilesGrid[`${t.x}_${t.y}`] = t;
+        });
 
-      const steps = [];
-      let curX = fromX;
-      let curY = fromY;
-      for (const node of path) {
-        steps.push({ dx: node.x - curX, dy: node.y - curY });
-        curX = node.x;
-        curY = node.y;
-      }
+        const path = findPath(fromX, fromY, toX, toY, tilesGrid);
 
-      callback({ success: true, steps: steps, pathLength: path.length });
-      console.log(`✅ [A*] Отправлено ${steps.length} шагов`);
-    } catch (err) {
-      console.error("🚨 [A*] Ошибка:", err.message);
-      callback({ success: false, error: err.message });
-    }
-  });
+        if (!path) {
+            return callback({ success: false, error: 'Путь не найден' });
+        }
+
+        const steps = [];
+        let curX = fromX;
+        let curY = fromY;
+        for (const node of path) {
+            steps.push({ dx: node.x - curX, dy: node.y - curY });
+            curX = node.x;
+            curY = node.y;
+        }
+
+        callback({ success: true, steps: steps, pathLength: path.length });
+        console.log(`✅ [A*] Отправлено ${steps.length} шагов`);
+        } catch (err) {
+        console.error("🚨 [A*] Ошибка:", err.message);
+        callback({ success: false, error: err.message });
+        }
+    });
 
   // --------------------------------------------------------------------------
   // 7. DISCONNECT — сброс блокировки перехода
