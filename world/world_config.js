@@ -8,6 +8,7 @@ const WORLD_REGIONS = {
   meadow:   { id: 'meadow',   name: 'Луг',     icon: '🌾', blocked: false },
   mountain: { id: 'mountain', name: 'Горы',    icon: '🏔️', blocked: true },
   water:    { id: 'water',    name: 'Пруд',    icon: '🌊', blocked: true },
+  sand:     { id: 'sand',     name: 'Песок',   icon: '🏜️', blocked: false },  // ← НОВЫЙ
   swamp:    { id: 'swamp',    name: 'Болото',  icon: '🌿', blocked: false },
   river:    { id: 'river',    name: 'Река',    icon: '🏞️', blocked: true },
   desert:   { id: 'desert',   name: 'Пустыня', icon: '🏜️', blocked: false },
@@ -21,6 +22,7 @@ const REGION_RESOURCES = {
   mountain: ['ore_copper', 'ore_iron', 'stone_granite'],
   water:    ['fish_karas', 'fish_pike', 'fish_catfish'],
   swamp:    ['herb_moss', 'herb_lotus', 'mushroom_dark'],
+  sand:     ['stone_salt', 'gem_topaz', 'herb_aloe'],  // ← НОВОЕ (взято из desert)
   river:    ['fish_trout', 'fish_salmon'],
   desert:   ['herb_aloe', 'stone_salt', 'gem_topaz'],
   ice:      ['ice_crystal', 'gem_sapphire', 'herb_frost']
@@ -59,6 +61,7 @@ const REGION_MONSTERS = {
   meadow:   ['world_rabbit', 'world_bee', 'world_fox'],
   mountain: ['world_bear', 'world_eagle'],
   water:    ['world_duck', 'world_crocodile'],
+  sand:     ['world_scorpion', 'world_cobra'],  // ← НОВОЕ (взято из desert)
   swamp:    ['world_frog', 'world_swamp_croc'],
   river:    ['world_beaver', 'world_water_snake'],
   desert:   ['world_scorpion', 'world_cobra'],
