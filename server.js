@@ -194,10 +194,27 @@ setInterval(async () => {
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
 
+ // 🔥 ФИКС УТЕЧКИ: закрываем все старые сокеты этого игрока
+  const handshakeUserId = socket.handshake?.auth?.userId;
+  if (handshakeUserId) {
+    const nUserId = Number(handshakeUserId);
+    let killed = 0;
+    io.sockets.sockets.forEach((existingSocket) => {
+      if (existingSocket.id !== socket.id &&
+          Number(existingSocket.handshake?.auth?.userId) === nUserId) {
+        console.log(`🧹 [СОКЕТ] Убиваем дубликат ${existingSocket.id} для игрока ${nUserId}`);
+        existingSocket.disconnect(true);
+        killed++;
+      }
+    });
+    if (killed > 0) {
+      console.log(`✅ [СОКЕТ] Убито дубликатов: ${killed}`);
+    }
+  }
+
   // ============================================================================
   // 🔥 АВТО-РЕГИСТРАЦИЯ В РЕГЕНЕРАЦИИ ЧЕРЕЗ HANDSHAKE
   // ============================================================================
-  const handshakeUserId = socket.handshake?.auth?.userId;
   if (handshakeUserId) {
     socket.data = socket.data || {};
     socket.data.userId = Number(handshakeUserId);
@@ -206,7 +223,6 @@ io.on('connection', (socket) => {
   } else {
     console.log(`⚠️ [АВТО-РЕГЕН] Handshake без userId — ждём load_game_secure`);
   }
-
   // ============================================================================
   // 🔥 УНИВЕРСАЛЬНАЯ РЕГИСТРАЦИЯ ЧЕРЕЗ ЛЮБОЙ load_* ЭВЕНТ (страховка)
   // ============================================================================
