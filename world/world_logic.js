@@ -5,7 +5,7 @@
 
 const { WORLD_REGIONS, RESOURCES_DB, BUILDINGS_DB } = require('./world_config');
 
-const VIEW_RADIUS = 3;
+const VIEW_RADIUS = 7;
 const MOVE_DURATION_MS = 15000;
 
 // Хранилище активных переходов
