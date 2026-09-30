@@ -58,17 +58,24 @@ async function finalizeTowerBattleSecure(room, result, sb) {
     if (result === 'win') {
       // 🏆 РАСЧЕТ НАГРАДЫ ПРИ ПОБЕДЕ
       if (room.teamB && Array.isArray(room.teamB)) {
-        room.teamB.forEach(m => { 
+        room.teamB.forEach(m => {
           const monsterLevel = Number(m.level ?? 1);
+
+          // ✨ ОПЫТ — 100% (всегда)
           const monsterXp = (m.rewardXp !== undefined) ? Number(m.rewardXp) : (5 + (monsterLevel * 3));
           gainedXp += monsterXp;
 
-          if (m.rewardGold !== undefined) {
-            gainedGold += Number(m.rewardGold);
-          } else if (rand(1, 100) <= 10) {
-            gainedGold += monsterLevel;
+          // 💰 ЗОЛОТО — 10% ШАНС
+          if (rand(1, 100) <= 10) {
+            // Если у моба задан rewardGold — используем его (для боссов)
+            // Иначе даём голд по уровню моба
+            const goldDrop = (m.rewardGold !== undefined)
+              ? Number(m.rewardGold)
+              : monsterLevel;
+            gainedGold += goldDrop;
           }
 
+          // 🪙 МОНЕТЫ БАШНИ — 30% ШАНС
           if (rand(1, 100) <= 30) {
             let maxCoins = 1 + Math.floor((monsterLevel - 1) / 5);
             const isBoss = (m.rewardXp !== undefined && String(m.id).includes('boss'));
