@@ -303,12 +303,21 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       const endsAt = Date.now() + MOVE_DURATION_MS;
 
-      socket.emit('world_move_started', {
-        fromX: pos.x, fromY: pos.y,
-        toX: newX, toY: newY,
-        durationMs: MOVE_DURATION_MS,
-        endsAt: endsAt
-      });
+      const startedData = {
+              fromX: pos.x, fromY: pos.y,
+              toX: newX, toY: newY,
+              durationMs: MOVE_DURATION_MS,
+              endsAt: endsAt
+            };
+
+            if (global.onlinePlayers && global.onlinePlayers.has(String(userId))) {
+              const player = global.onlinePlayers.get(String(userId));
+              player.socketIds.forEach(sId => {
+                io.to(sId).emit('world_move_started', startedData);
+              });
+            } else {
+              socket.emit('world_move_started', startedData);
+            }
 
       console.log(`🚶 [МИР] ${userId} начал переход (${pos.x},${pos.y}) → (${newX},${newY}) за ${MOVE_DURATION_MS / 1000}с`);
 
@@ -319,7 +328,14 @@ module.exports = function(io, socket, sb, activeRooms) {
             console.log(`⚠️ [МИР] Позиция изменилась — переход отменён`);
             activeMoves.delete(nUserId);
             // 🔥 ФИКС: всё равно уведомляем клиента, чтобы модалка закрылась
-            socket.emit('world_move_completed', { x: currentPos.x, y: currentPos.y, cancelled: true });
+             if (global.onlinePlayers && global.onlinePlayers.has(String(userId))) {
+              const player = global.onlinePlayers.get(String(userId));
+              player.socketIds.forEach(sId => {
+                io.to(sId).emit('world_move_completed', { x: currentPos.x, y: currentPos.y, cancelled: true });
+              });
+            } else {
+              socket.emit('world_move_completed', { x: currentPos.x, y: currentPos.y, cancelled: true });
+            }
             return;
             }
 
@@ -329,8 +345,17 @@ module.exports = function(io, socket, sb, activeRooms) {
 
             console.log(`✅ [МИР] ${userId} прибыл в (${newX},${newY})`);
 
-            socket.emit('world_move_completed', { x: newX, y: newY });
-            socket.emit('world_get_map', { userId: nUserId });
+  if (global.onlinePlayers && global.onlinePlayers.has(String(userId))) {
+              const player = global.onlinePlayers.get(String(userId));
+              player.socketIds.forEach(sId => {
+                io.to(sId).emit('world_move_completed', { x: newX, y: newY });
+                io.to(sId).emit('world_get_map', { userId: nUserId });
+              });
+              console.log(`📡 [МИР] move_completed разослан в ${player.socketIds.size} сокетов`);
+            } else {
+              socket.emit('world_move_completed', { x: newX, y: newY });
+              socket.emit('world_get_map', { userId: nUserId });
+            }
             
             activeMoves.delete(nUserId);
         } catch (err) {
@@ -555,11 +580,23 @@ module.exports = function(io, socket, sb, activeRooms) {
             curY = node.y;
         }
 
-        callback({ success: true, steps: steps, pathLength: path.length });
+    const response = { success: true, steps: steps, pathLength: path.length, targetUserId: Number(userId) };
+
+        if (typeof callback === 'function') callback(response);
+
+        if (global.onlinePlayers && global.onlinePlayers.has(String(userId))) {
+            const player = global.onlinePlayers.get(String(userId));
+            player.socketIds.forEach(sId => {
+                io.to(sId).emit('world_find_path_result', response);
+            });
+            console.log(`📡 [A*] Разослано в ${player.socketIds.size} сокетов`);
+        } else {
+            socket.emit('world_find_path_result', response);
+        }
         console.log(`✅ [A*] Отправлено ${steps.length} шагов`);
         } catch (err) {
         console.error("🚨 [A*] Ошибка:", err.message);
-        callback({ success: false, error: err.message });
+        if (typeof callback === 'function') callback({ success: false, error: err.message });
         }
     });
 
