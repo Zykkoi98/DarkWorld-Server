@@ -213,8 +213,10 @@ module.exports = function(io, socket, sb, activeRooms) {
         teamB: state.serializeTeam(room.teamB),
         isTower: battleType === 'tower',
         battleType,
-        isSpectator: false
-      });
+        isSpectator: false,
+        isOver: false,
+        result: null
+        });
 
       startTurnTimer(room, io);
 
@@ -420,15 +422,18 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
 
     socket.emit('battle_init_data', {
-      roomId: room.id,
-      turnCount: room.turnCount,
-      myUuid: fighter.uuid,
-      teamA: state.serializeTeam(room.teamA),
-      teamB: state.serializeTeam(room.teamB),
-      isTower: room.battleType === 'tower',
-      battleType: room.battleType,
-      isSpectator: false,
-      allLogs: core.getAllLogs(room)
+        roomId: room.id,
+        turnCount: room.turnCount,
+        myUuid: fighter.uuid,
+        teamA: state.serializeTeam(room.teamA),
+        teamB: state.serializeTeam(room.teamB),
+        isTower: room.battleType === 'tower',
+        battleType: room.battleType,
+        isSpectator: false,
+        allLogs: core.getAllLogs(room),
+        // 🔥 NEW: сигнал, что бой уже завершён
+        isOver: room.state === 'finished',
+        result: room.result || null
     });
 
     if (room.timerEndsAt) {
