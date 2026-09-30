@@ -40,20 +40,34 @@ module.exports = function(io, socket, sb, activeRooms) {
         }
       }
 
-        // 🔥 Проверка — не в бою ли уже (с автоочисткой мёртвых комнат)
-        const existingRoomId = global.activeBattlesByUser.get(String(playerData.id));
-        if (existingRoomId) {
-        const existingRoom = activeRooms[existingRoomId];
+        // 🔥 ЖЁСТКАЯ ПРОВЕРКА: сканируем ВСЕ активные комнаты
+        const sUserId = String(playerData.id);
+        const existingRoomIds = [];
 
-        // Если комната мертва/завершена/отсутствует — очищаем индекс
-        if (!existingRoom || existingRoom.state === 'finished') {
-            console.log(`🧹 [ОЧИСТКА] Мёртвая комната ${existingRoomId} удалена из индекса`);
-            global.activeBattlesByUser.delete(String(playerData.id));
-            if (existingRoom) delete activeRooms[existingRoomId];
-        } else {
-            // Живая комната — блокируем новый бой
-            return socket.emit('error', 'Вы уже в бою! Откройте текущий бой.');
+        for (const roomId in activeRooms) {
+        const room = activeRooms[roomId];
+        if (!room || room.state === 'finished') continue;
+
+        const hasPlayer = [...room.teamA, ...room.teamB].some(f => !f.isBot && String(f.id) === sUserId);
+        if (hasPlayer) existingRoomIds.push(roomId);
         }
+
+        if (existingRoomIds.length > 0) {
+        console.warn(`🚨 [АНТИЧИТ] Игрок ${playerData.name} уже в ${existingRoomIds.length} комнатах: ${existingRoomIds.join(', ')}`);
+
+        // 🔥 Удаляем ВСЕ старые комнаты (защита от параллельных боёв)
+        existingRoomIds.forEach(roomId => {
+            const room = activeRooms[roomId];
+            room.state = 'finished';
+            if (room.timeoutRef) clearTimeout(room.timeoutRef);
+            delete activeRooms[roomId];
+            console.log(`🧹 [ОЧИСТКА ДУБЛЯ] Комната ${roomId} удалена`);
+        });
+
+        // Очищаем индекс
+        global.activeBattlesByUser.delete(sUserId);
+
+        // НЕ блокируем — создаём новый бой
         }
 
       const { data: dbPlayer } = await sb.from('players')
@@ -619,8 +633,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         graceSeconds: 60
       });
 
-      // 🔥 Если это PvE (одиночный бой) — сразу удаляем из индекса
-      // (у одиночного боя нет смысла ждать реконнекта — проще новый бой)
+      // 🔥 PvE (мир/башня) — сразу удаляем из индекса
       if (room.battleType === 'world' || room.battleType === 'tower') {
         global.activeBattlesByUser.delete(String(fighter.id));
         console.log(`🧹 [ОЧИСТКА] PvE-боец ${fighter.name} удалён из индекса`);
