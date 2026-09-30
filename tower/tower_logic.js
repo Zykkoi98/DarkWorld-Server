@@ -101,8 +101,12 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (!itemConfig) return socket.emit('tower_shop_error', { message: "🚨 Предмет отсутствует!" });
 
       const { data: playerRow } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
-      const currentGold = Number(playerRow.gold ?? 0);
-      if (currentGold < itemConfig.price) return socket.emit('tower_shop_error', { message: "❌ Мало золота!" });
+
+      // 🔥 ЧИТАЕМ МОНЕТЫ БАШНИ (tower_coins), а не золото
+      const currentCoins = Number(playerRow.tower_coins ?? 0);
+      if (currentCoins < itemConfig.price) {
+        return socket.emit('tower_shop_error', { message: `❌ Мало монет Башни! Нужно: ${itemConfig.price}, у вас: ${currentCoins}` });
+      }
 
       let inventory = playerRow.inventory || { equipment: [], consumables: [], resources: [] };
       if (itemConfig.type === 'consumable') {
@@ -113,10 +117,17 @@ module.exports = function(io, socket, sb, activeRooms) {
         inventory.equipment.push({ uuid: `${itemId}_tower_${Date.now()}`, id: itemId });
       }
 
-      await sb.from('players').update({ gold: currentGold - itemConfig.price, inventory }).eq('id', nUserId);
+      // 🔥 СПИСЫВАЕМ МОНЕТЫ БАШНИ
+      await sb.from('players').update({
+        tower_coins: currentCoins - itemConfig.price,
+        inventory: inventory
+      }).eq('id', nUserId);
+
       await triggerLoadGameSuccess(nUserId, socket, sb);
-      socket.emit('tower_shop_success', { message: "🎉 Успешно куплено!" });
-    } catch (err) { socket.emit('tower_shop_error', { message: `🚨 Ошибка: ${err.message}` }); }
+      socket.emit('tower_shop_success', { message: `🎉 Куплено за ${itemConfig.price} монет Башни!` });
+    } catch (err) {
+      socket.emit('tower_shop_error', { message: `🚨 Ошибка: ${err.message}` });
+    }
   });
 // --- 🏰 ОБРАБОТЧИК: ПРОЦЕДУРНЫЙ СПАВН ЭТАЖА И РЕДИРЕКТ С АНТИ-СПАМОМ КД ---
   socket.on('start_tower_battle_secure', async ({ userId, currentFloor }) => {
