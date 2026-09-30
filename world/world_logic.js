@@ -345,17 +345,17 @@ module.exports = function(io, socket, sb, activeRooms) {
 
             console.log(`✅ [МИР] ${userId} прибыл в (${newX},${newY})`);
 
-  if (global.onlinePlayers && global.onlinePlayers.has(String(userId))) {
-              const player = global.onlinePlayers.get(String(userId));
-              player.socketIds.forEach(sId => {
-                io.to(sId).emit('world_move_completed', { x: newX, y: newY });
-                io.to(sId).emit('world_get_map', { userId: nUserId });
-              });
-              console.log(`📡 [МИР] move_completed разослан в ${player.socketIds.size} сокетов`);
-            } else {
-              socket.emit('world_move_completed', { x: newX, y: newY });
-              socket.emit('world_get_map', { userId: nUserId });
-            }
+      if (global.onlinePlayers && global.onlinePlayers.has(String(userId))) {
+                    const player = global.onlinePlayers.get(String(userId));
+                    player.socketIds.forEach(sId => {
+                      io.to(sId).emit('world_move_completed', { x: newX, y: newY });
+                      // 🔥 Убрали дублирующий world_get_map — клиент сам запросит
+                    });
+                    console.log(`📡 [МИР] move_completed разослан в ${player.socketIds.size} сокетов`);
+                  } else {
+                    socket.emit('world_move_completed', { x: newX, y: newY });
+                    // 🔥 Убрали дублирующий world_get_map
+                  }
             
             activeMoves.delete(nUserId);
         } catch (err) {
