@@ -123,8 +123,38 @@ module.exports = function(io, socket, sb, activeRooms) {
         inventory: inventory
       }).eq('id', nUserId);
 
-      await triggerLoadGameSuccess(nUserId, socket, sb);
-      socket.emit('tower_shop_success', { message: `🎉 Куплено за ${itemConfig.price} монет Башни!` });
+    // 🔥 ШЛЁМ ИМЕННО tower_load_game_success (клиент Башни слушает ЕГО)
+    const { data: freshDb } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+    if (freshDb) {
+      const currentXp = dbHelper.safeReadField(freshDb, 'xp', 0);
+      const cloudLevel = dbHelper.getServerCorrectLevelByXp(currentXp);
+      let pointsKey = freshDb.statpoints !== undefined ? 'statpoints' : 'statPoints';
+
+      const freshProfile = {
+        id: freshDb.id,
+        name: freshDb.name,
+        avatar: freshDb.avatar || "assets/avatars/hero1.png",
+        level: cloudLevel,
+        gold: dbHelper.safeReadField(freshDb, 'gold', 0),
+        xp: currentXp,
+        hp: dbHelper.safeReadField(freshDb, 'hp', 10),
+        statPoints: dbHelper.safeReadField(freshDb, pointsKey, 0),
+        currentTownIndex: dbHelper.safeReadField(freshDb, 'currenttownindex', 0),
+        tower_floor: dbHelper.safeReadField(freshDb, 'tower_floor', 1),
+        tower_coins: dbHelper.safeReadField(freshDb, 'tower_coins', 0),
+        stats: {
+          strength: dbHelper.safeReadField(freshDb, 'strength', 1),
+          agility: dbHelper.safeReadField(freshDb, 'agility', 1),
+          endurance: dbHelper.safeReadField(freshDb, 'endurance', 1),
+          luck: dbHelper.safeReadField(freshDb, 'luck', 1)
+        },
+        inventory: freshDb.inventory || { equipment: [], resources: [], consumables: [] },
+        equipped: freshDb.equipped || { rings: [null, null, null] }
+      };
+      socket.emit('tower_load_game_success', { player: freshProfile });
+    }
+
+    socket.emit('tower_shop_success', { message: `🎉 Куплено за ${itemConfig.price} монет Башни!` });
     } catch (err) {
       socket.emit('tower_shop_error', { message: `🚨 Ошибка: ${err.message}` });
     }
