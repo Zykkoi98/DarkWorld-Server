@@ -562,24 +562,49 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         const mapId = pos.current_map_id || 'ashenvale_main';
 
-        const { data: tiles, error } = await sb
+      // 🔥 ПАГИНАЦИЯ: Supabase по умолчанию отдаёт max 1000 строк
+      // Сортировка по x, потом по y (поля id нет в таблице)
+      const PAGE_SIZE = 1000;
+      let allTiles = [];
+      let page = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const from = page * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+
+        const { data: chunk, error } = await sb
           .from('world_tiles')
           .select('x, y, is_blocked, region')
           .eq('map_id', mapId)
-          .range(0, 5000);   // 🔥 Явно просим 5000 строк (защита от лимита)
+          .order('x', { ascending: true })
+          .order('y', { ascending: true })
+          .range(from, to);
 
-        if (error || !tiles) {
+        if (error) {
           console.error("🚨 [A*] Ошибка загрузки клеток:", error);
           return callback({ success: false, error: 'Ошибка загрузки карты' });
         }
 
-        console.log(`📊 [A*] Загружено клеток: ${tiles.length} (ожидаем 2500)`);
-        console.log(`📊 [A*] Вода в БД: ${tiles.filter(t => t.region === 'water').length}`);
+        if (!chunk || chunk.length === 0) {
+          hasMore = false;
+        } else {
+          allTiles = allTiles.concat(chunk);
+          if (chunk.length < PAGE_SIZE) hasMore = false;
+          else page++;
+        }
+      }
 
-        const tilesGrid = {};
-        tiles.forEach(t => {
-          tilesGrid[`${t.x}_${t.y}`] = t;
-        });
+      const tiles = allTiles;
+
+      console.log(`📊 [A*] Загружено клеток: ${tiles.length} (ожидаем 2500)`);
+      console.log(`📊 [A*] Вода в БД: ${tiles.filter(t => t.region === 'water').length}`);
+      console.log(`📊 [A*] Вода с is_blocked=true: ${tiles.filter(t => t.region === 'water' && t.is_blocked === true).length}`);
+
+      const tilesGrid = {};
+      tiles.forEach(t => {
+        tilesGrid[`${t.x}_${t.y}`] = t;
+      });
 
         const path = findPath(fromX, fromY, toX, toY, tilesGrid);
 
