@@ -638,11 +638,6 @@ module.exports = function(io, socket, sb, activeRooms) {
         graceSeconds: 60
       });
 
-      // 🔥 PvE (мир/башня) — сразу удаляем из индекса
-      if (room.battleType === 'world' || room.battleType === 'tower') {
-        global.activeBattlesByUser.delete(String(fighter.id));
-        console.log(`🧹 [ОЧИСТКА] PvE-боец ${fighter.name} удалён из индекса`);
-      }
     }
   });
 });
