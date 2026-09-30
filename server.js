@@ -9,44 +9,40 @@ const { createClient } = require('@supabase/supabase-js');
 // Импортируем наши отдельные модули логики
 const dbHelper = require('./db_helper');
 const inventoryLogic = require('./inventory_logic');
-const battleLogic = require('./battle_logic');
+const battleHandlers = require('./battle/battle_handlers');   // 🔥 НОВОЕ: боевое ядро
 const shopLogic = require('./shop/shop_logic');
-const towerLogic = require('./tower/tower_logic'); 
+const towerLogic = require('./tower/tower_logic');
 const worldLogic = require('./world/world_logic');
+
 const app = express();
 app.get('/', (req, res) => res.send('⚔️ Боевое ядро Dark World активно на Render!'));
 
 const server = http.createServer(app);
-const io = new Server(server, { 
-  pingTimeout: 120000,  // Сервер будет ждать ответа от смартфона целых 2 минуты (120 сек) вместо 25
-  pingInterval: 45000, // Сервер будет отправлять пинг раз в 45 секунд, снижая нагрузку на сеть
-  cors: { 
+const io = new Server(server, {
+  pingTimeout: 120000,
+  pingInterval: 45000,
+  cors: {
     origin: [
       "https://zykkoi98.github.io",
-      "https://github.io", // Вариант с закрывающим слэшем 
+      "https://github.io",
       "http://localhost:3000",
       "http://127.0.0.1:5500"
     ],
     methods: ["GET", "POST"],
     credentials: true
-  } 
+  }
 });
-// Инициализация Supabase из переменных окружения Render
+
+// Инициализация Supabase
 const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+// Генерация мира
 app.get('/admin/generate-world', async (req, res) => {
   try {
     const { generateWorld, worldExists } = require('./world/world_generator');
-    
-    if (!(await worldExists(sb, 'ashenvale_main'))) {
-      await generateWorld(sb, 'ashenvale_main', 50, 50);
-    }
-    if (!(await worldExists(sb, 'dragonhold_main'))) {
-      await generateWorld(sb, 'dragonhold_main', 100, 100);
-    }
-    if (!(await worldExists(sb, 'mine_1'))) {
-      await generateWorld(sb, 'mine_1', 20, 20);
-    }
-    
+    if (!(await worldExists(sb, 'ashenvale_main'))) await generateWorld(sb, 'ashenvale_main', 50, 50);
+    if (!(await worldExists(sb, 'dragonhold_main'))) await generateWorld(sb, 'dragonhold_main', 100, 100);
+    if (!(await worldExists(sb, 'mine_1'))) await generateWorld(sb, 'mine_1', 20, 20);
     res.send('✅ Генерация карт завершена!');
   } catch (err) {
     console.error(err);
@@ -55,13 +51,12 @@ app.get('/admin/generate-world', async (req, res) => {
 });
 
 // Глобальная память для активных боевых комнат
-let activeRooms = {}; 
+let activeRooms = {};
 global.activeRooms = activeRooms;
-global.onlinePlayers = new Map(); 
+global.onlinePlayers = new Map();
 
 // ----------------------------------------------------------------------------
 // РЕГИСТРАЦИЯ ИГРОКА В ТИКЕРЕ ЛЕЧЕНИЯ
-// Вызывается автоматически при connect через handshake, а также по эвентам load_*
 // ----------------------------------------------------------------------------
 async function registerPlayerForRegen(userId, socketId, sb, io) {
   const nUserId = Number(userId);
@@ -69,7 +64,6 @@ async function registerPlayerForRegen(userId, socketId, sb, io) {
 
   const key = String(nUserId);
 
-  // Если игрок уже зарегистрирован — просто добавляем новый socketId
   if (global.onlinePlayers.has(key)) {
     const existing = global.onlinePlayers.get(key);
     existing.socketIds.add(socketId);
@@ -77,7 +71,6 @@ async function registerPlayerForRegen(userId, socketId, sb, io) {
     return;
   }
 
-  // Иначе — грузим из БД и регистрируем
   try {
     const { data: row } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
     if (!row) {
@@ -85,7 +78,6 @@ async function registerPlayerForRegen(userId, socketId, sb, io) {
       return;
     }
 
-    // 🔥 Считаем maxHp правильно — через dbHelper (если доступен) или fallback
     let maxHp = 100;
     if (dbHelper && typeof dbHelper.getServerMaxHp === 'function') {
       maxHp = dbHelper.getServerMaxHp(row);
@@ -103,15 +95,15 @@ async function registerPlayerForRegen(userId, socketId, sb, io) {
       needsSave: false,
       socketIds: new Set([socketId])
     });
-    
-    console.log(`✅ [РЕГЕН ВХОД] ${row.name} (ID ${nUserId}) добавлен в очередь лечения. HP: ${row.hp}/${maxHp}`);
+
+    console.log(`✅ [РЕГЕН ВХОД] ${row.name} (ID ${nUserId}) добавлен в очередь. HP: ${row.hp}/${maxHp}`);
   } catch (e) {
     console.error("🚨 Ошибка регистрации в регене:", e.message);
   }
 }
 
 // ----------------------------------------------------------------------------
-// УДАЛЕНИЕ СОКЕТА ИГРОКА (при disconnect)
+// УДАЛЕНИЕ СОКЕТА
 // ----------------------------------------------------------------------------
 function unregisterPlayerSocket(userId, socketId) {
   const key = String(userId);
@@ -120,7 +112,6 @@ function unregisterPlayerSocket(userId, socketId) {
   const player = global.onlinePlayers.get(key);
   player.socketIds.delete(socketId);
 
-  // Если у игрока больше нет активных сокетов — сохраняем HP и удаляем
   if (player.socketIds.size === 0) {
     if (player.needsSave && player.id && sb) {
       sb.from('players').update({ hp: Number(player.hp) }).eq('id', Number(player.id))
@@ -128,7 +119,7 @@ function unregisterPlayerSocket(userId, socketId) {
         .catch(err => console.error("🚨 Ошибка финального сохранения:", err.message));
     }
     global.onlinePlayers.delete(key);
-    console.log(`🧹 [РЕГЕН] ${player.name} удалён из очереди (все сокеты закрыты)`);
+    console.log(`🧹 [РЕГЕН] ${player.name} удалён из очереди`);
   } else {
     console.log(`♻️ [РЕГЕН] ${player.name} ещё онлайн на ${player.socketIds.size} сокетах`);
   }
@@ -145,7 +136,6 @@ setInterval(() => {
       if (!player || player.hp <= 0) continue;
       if (player.hp >= player.maxHp) continue;
 
-      // Проверяем, не в бою ли игрок (в бою HP не восстанавливается)
       const isInBattle = Object.keys(global.activeRooms || {}).some(roomId => {
         const room = global.activeRooms[roomId];
         if (!room) return false;
@@ -155,16 +145,14 @@ setInterval(() => {
 
       if (isInBattle) continue;
 
-      // Регенерация 1% от максимума
       const regenAmount = Math.max(1, Math.floor(player.maxHp * 0.01));
       player.hp = Math.min(player.maxHp, player.hp + regenAmount);
       player.needsSave = true;
 
-      // Отправляем всем активным сокетам игрока
       player.socketIds.forEach(sId => {
-        io.to(sId).emit('town_hp_regen_update', { 
-          currentHp: player.hp, 
-          maxHp: player.maxHp 
+        io.to(sId).emit('town_hp_regen_update', {
+          currentHp: player.hp,
+          maxHp: player.maxHp
         });
       });
     }
@@ -174,7 +162,7 @@ setInterval(() => {
 }, 1000);
 
 // ----------------------------------------------------------------------------
-// ФОНОВОЕ СОХРАНЕНИЕ HP В SUPABASE (раз в 15 сек)
+// ФОНОВОЕ СОХРАНЕНИЕ HP
 // ----------------------------------------------------------------------------
 setInterval(async () => {
   try {
@@ -191,10 +179,13 @@ setInterval(async () => {
     console.error("🚨 Сбой фонового сохранения регена:", err.message);
   }
 }, 15000);
-io.on('connection', (socket) => {
-  console.log(`🔌 Подключен сокет игрока: ${socket.id}`);
 
-  // 🔥 ФИКС v2: убиваем ТОЛЬКО старые дубликаты (>10 сек)
+// ----------------------------------------------------------------------------
+// SOCKET.IO CONNECTION
+// ----------------------------------------------------------------------------
+io.on('connection', (socket) => {
+  console.log(`🔌 Подключен сокет: ${socket.id}`);
+
   const handshakeUserId = socket.handshake?.auth?.userId;
   if (handshakeUserId) {
     const nUserId = Number(handshakeUserId);
@@ -205,33 +196,22 @@ io.on('connection', (socket) => {
           Number(existingSocket.handshake?.auth?.userId) === nUserId) {
         const ageMs = now - (existingSocket.data?.connectedAt || 0);
         if (ageMs > 10000) {
-          console.log(`🧹 [СОКЕТ] Убиваем старый дубликат ${existingSocket.id} (возраст ${Math.round(ageMs / 1000)}с)`);
+          console.log(`🧹 [СОКЕТ] Убиваем старый дубликат ${existingSocket.id}`);
           existingSocket.disconnect(true);
-        } else {
-          console.log(`⏸️ [СОКЕТ] Не убиваем свежий дубликат ${existingSocket.id} (возраст ${Math.round(ageMs / 1000)}с)`);
         }
       }
     });
   }
 
-  // 🔥 Записываем время подключения — чтобы следующий сокет знал возраст
   socket.data = socket.data || {};
   socket.data.connectedAt = Date.now();
 
-  // ============================================================================
-  // 🔥 АВТО-РЕГИСТРАЦИЯ В РЕГЕНЕРАЦИИ ЧЕРЕЗ HANDSHAKE
-  // ============================================================================
   if (handshakeUserId) {
     socket.data.userId = Number(handshakeUserId);
     registerPlayerForRegen(handshakeUserId, socket.id, sb, io);
-    console.log(`✅ [АВТО-РЕГЕН] Игрок ID ${handshakeUserId} зарегистрирован через handshake`);
-  } else {
-    console.log(`⚠️ [АВТО-РЕГЕН] Handshake без userId — ждём load_game_secure`);
   }
 
-  // ============================================================================
-  // 🔥 УНИВЕРСАЛЬНАЯ РЕГИСТРАЦИЯ (без изменений)
-  // ============================================================================
+  // Универсальная регистрация
   const universalRegister = (payload) => {
     const nUserId = Number(payload?.userId || payload?.id || socket.data?.userId || 0);
     if (nUserId && !socket.data?.registeredUserId) {
@@ -248,9 +228,9 @@ io.on('connection', (socket) => {
   socket.on('load_arena_game_secure', universalRegister);
   socket.on('load_forest_game_secure', universalRegister);
 
-  // ============================================================================
-  // 1-6. ИНИЦИАЛИЗАЦИЯ МОДУЛЕЙ (без изменений)
-  // ============================================================================
+  // ==========================================================================
+  // ИНИЦИАЛИЗАЦИЯ МОДУЛЕЙ
+  // ==========================================================================
   if (dbHelper && typeof dbHelper.init === 'function') {
     dbHelper.init(io, socket, sb);
   } else if (typeof dbHelper === 'function') {
@@ -261,8 +241,9 @@ io.on('connection', (socket) => {
     inventoryLogic(io, socket, sb);
   }
 
-  if (typeof battleLogic === 'function') {
-    battleLogic(io, socket, sb, activeRooms);
+  // 🔥 НОВОЕ: боевые хендлеры вместо старого battleLogic
+  if (typeof battleHandlers === 'function') {
+    battleHandlers(io, socket, sb, activeRooms);
   }
 
   if (typeof towerLogic === 'function') {
@@ -277,9 +258,9 @@ io.on('connection', (socket) => {
     worldLogic(io, socket, sb, activeRooms);
   }
 
-  // ============================================================================
-  // DISCONNECT (без изменений)
-  // ============================================================================
+  // ==========================================================================
+  // DISCONNECT
+  // ==========================================================================
   socket.on('disconnect', () => {
     const userId = socket.data?.userId;
     if (userId) {
@@ -301,8 +282,8 @@ io.on('connection', (socket) => {
   });
 });
 
-// Запуск сервера на порту Render
+// Запуск сервера
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Сервер Dark World запущен по правилам Стойкости на порту ${PORT}`);
+  console.log(`🚀 Сервер Dark World запущен на порту ${PORT}`);
 });
