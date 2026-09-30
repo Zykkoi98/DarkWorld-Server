@@ -1,6 +1,6 @@
 // ============================================================================
-// ===== 🏰 ФИНАЛИЗЕР БАШНИ (TOWER_FINISHER.JS) =====
-// ===== Перенос из старого tower/tower_battle_finisher.js =====
+// ===== 🏰 ФИНАЛИЗЕР БАШНИ (TOWER_FINISHER.JS) — v2 =====
+// ===== Награды + возврат в башню + КД =====
 // ============================================================================
 
 const dbHelper = require('../../db_helper');
@@ -9,18 +9,21 @@ module.exports = {
   async finalize(room, result, sb) {
     const player = room.teamA[0];
     if (!player) {
-      console.error('🚨 [TOWER FINISHER] Нет игрока');
+      console.error('🚨 [TOWER FINISHER] Нет игрока в комнате');
       return { rewards: null, logs: [] };
     }
 
     const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-    // Свежий профиль
+    // Этаж — откуда пришёл бой
+    const currentFloor = Number(room.config?.towerFloor || 1);
+
+    // 🔥 Свежий профиль из БД (защита от откатов)
     const { data: freshDb } = await sb.from('players')
       .select('*').eq('id', Number(player.id)).maybeSingle();
 
     if (!freshDb) {
-      console.error('🚨 [TOWER FINISHER] Игрок не найден');
+      console.error('🚨 [TOWER FINISHER] Игрок не найден в БД');
       return { rewards: null, logs: [] };
     }
 
@@ -29,6 +32,7 @@ module.exports = {
     let baseTowerCoins = Number(freshDb.tower_coins || 0);
     let currentDbLevel = Number(freshDb.level ?? 1);
 
+    // Свежий инвентарь/кукла
     const liveInventory = freshDb.inventory || { equipment: [], resources: [], consumables: [] };
     const liveEquipped = freshDb.equipped || { rings: [null, null, null] };
     player.inventory = liveInventory;
@@ -50,17 +54,18 @@ module.exports = {
     };
 
     if (result === 'win') {
+      // 🔥 РАСЧЁТ НАГРАД
       room.teamB.forEach(m => {
         const mLevel = Number(m.level ?? 1);
         gainedXp += Number(m.rewardXp || (5 + mLevel * 3));
 
-        // 10% gold
+        // 10% золото
         if (rand(1, 100) <= 10) {
           const goldDrop = m.rewardGold !== undefined ? Number(m.rewardGold) : mLevel;
           gainedGold += goldDrop;
         }
 
-        // 30% coins
+        // 30% монеты Башни
         if (rand(1, 100) <= 30) {
           let maxCoins = 1 + Math.floor((mLevel - 1) / 5);
           const isBoss = String(m.id || '').includes('boss');
@@ -69,10 +74,12 @@ module.exports = {
         }
       });
 
+      // Начисляем всё к свежим значениям из БД
       updatePayload.gold = baseGold + gainedGold;
       updatePayload.xp = baseXp + gainedXp;
       updatePayload.tower_coins = baseTowerCoins + gainedCoins;
 
+      // Проверка левелапа
       const correctLevel = dbHelper.getServerCorrectLevelByXp(updatePayload.xp);
       if (correctLevel > currentDbLevel) {
         updatePayload[pointsKey] = currentDbStatPoints + (correctLevel - currentDbLevel) * 5;
@@ -81,23 +88,26 @@ module.exports = {
           endurance: Number(freshDb.endurance || 1),
           equipped: player.equipped
         });
+        logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня!`);
       } else {
         updatePayload.level = currentDbLevel;
         updatePayload[pointsKey] = currentDbStatPoints;
         updatePayload.hp = player.currentHp;
       }
 
-      updatePayload.tower_floor = Number(room.config?.towerFloor || 1) + 1;
+      // 🔥 Открываем следующий этаж
+      updatePayload.tower_floor = currentFloor + 1;
 
-      let rewardText = `🏁 <strong>ПОБЕДА В БАШНЕ!</strong> Этаж ${room.config?.towerFloor || 1}. Награда: ✨ +${gainedXp} опыта`;
+      let rewardText = `🏁 <strong>ПОБЕДА В БАШНЕ!</strong> Этаж ${currentFloor}. Награда: ✨ +${gainedXp} опыта`;
       if (gainedGold > 0) rewardText += `, 💰 +${gainedGold} золота`;
       if (gainedCoins > 0) rewardText += `, 🪙 +${gainedCoins} монет Башни`;
       rewardText += '.';
       logs.push(rewardText);
 
     } else {
-      // Поражение — КД 3 часа
+      // 🔥 ПОРАЖЕНИЕ — КД 3 часа
       const cooldownTime = new Date(Date.now() + 3 * 60 * 60 * 1000);
+
       await sb.from('player_timers').upsert({
         user_id: Number(player.id),
         timer_type: 'tower_cooldown',
@@ -118,6 +128,7 @@ module.exports = {
       logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Башня сброшена на 1 этаж. КД 3 часа.`);
     }
 
+    // Запись в БД
     await sb.from('players').update(updatePayload).eq('id', Number(player.id));
 
     return {

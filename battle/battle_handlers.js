@@ -56,25 +56,114 @@ module.exports = function(io, socket, sb, activeRooms) {
       teamA[0].currentHp = Math.min(teamA[0].currentHp, teamA[0].maxHp);
       teamA[0].socketId = socket.id;
 
-      let teamB = [];
-      if (battleType === 'world' || battleType === 'tower') {
-        const monsterIds = params.monsterIds || [];
-        const { data: allBots } = await sb.from('bots')
-          .select('*').in('id', monsterIds);
+    let teamB = [];
 
-        if (!allBots || allBots.length === 0) {
-          return socket.emit('error', 'Мобы не найдены');
+    // === БАШНЯ: свой спавн мобов ===
+    if (battleType === 'tower') {
+    const floor = Math.max(1, Number(params.currentFloor || 1));
+
+    // Загрузка пула мобов башни
+    const { data: allBots } = await sb.from('bots').select('*').eq('category', 'tower');
+    if (!allBots || allBots.length === 0) {
+        return socket.emit('error', 'Мобы Башни не найдены в БД');
+    }
+
+    const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    const statMultiplier = 1 + ((floor - 1) * 0.20);
+    const rewardMultiplier = 1 + ((floor - 1) * 0.20);
+
+    // Босс 15% с 5 этажа
+    const isBossFloor = floor >= 5 && rand(1, 100) <= 15;
+
+    if (isBossFloor) {
+        let bossTemplate = allBots.find(b => b.id.includes('boss') || b.name.toLowerCase().includes('босс')) || allBots[0];
+
+        const bossStr = Math.floor(Number(bossTemplate.strength || 5) * statMultiplier * 1.5);
+        const bossAgi = Math.floor(Number(bossTemplate.agility || 5) * statMultiplier * 1.5);
+        const bossEnd = Math.floor(Number(bossTemplate.endurance || 5) * statMultiplier * 2.0);
+        const bossLuck = Math.floor(Number(bossTemplate.luck || 5) * statMultiplier * 1.5);
+
+        teamB.push({
+        uuid: `bot_tower_boss_${bossTemplate.id}_${Date.now()}`,
+        id: bossTemplate.id,
+        name: `👑 ${bossTemplate.name} [БОСС]`,
+        icon: bossTemplate.icon || '👹',
+        isBot: true,
+        level: floor,
+        strength: bossStr,
+        agility: bossAgi,
+        endurance: bossEnd,
+        luck: bossLuck,
+        currentHp: 0, maxHp: 0,   // заполним ниже
+        rewardXp: Math.floor(Number(bossTemplate.reward_xp || 20) * rewardMultiplier * 2),
+        rewardGold: Math.floor(Number(bossTemplate.reward_gold || 10) * rewardMultiplier * 2),
+        turn: null, afkTurns: 0
+        });
+    } else {
+        let maxSpawnCount = 2;
+        if (floor >= 4) maxSpawnCount = 3;
+        if (floor >= 7) maxSpawnCount = 4;
+        if (floor >= 10) maxSpawnCount = 5;
+
+        const finalSpawnCount = rand(1, maxSpawnCount);
+        const regularPool = allBots.filter(b => !b.id.includes('boss') && !b.name.toLowerCase().includes('босс'));
+
+        for (let i = 0; i < finalSpawnCount; i++) {
+        const baseBot = regularPool[rand(0, regularPool.length - 1)] || allBots[0];
+
+        const bStr = Math.floor(Number(baseBot.strength || 4) * statMultiplier);
+        const bAgi = Math.floor(Number(baseBot.agility || 4) * statMultiplier);
+        const bEnd = Math.floor(Number(baseBot.endurance || 4) * statMultiplier);
+        const bLuck = Math.floor(Number(baseBot.luck || 4) * statMultiplier);
+
+        teamB.push({
+            uuid: `bot_tower_floor_${floor}_slot_${i}_${Date.now()}`,
+            id: baseBot.id,
+            name: `${baseBot.name} #${i + 1}`,
+            icon: baseBot.icon || '👹',
+            isBot: true,
+            level: floor,
+            strength: bStr,
+            agility: bAgi,
+            endurance: bEnd,
+            luck: bLuck,
+            currentHp: 0, maxHp: 0,
+            rewardXp: Math.floor(Number(baseBot.reward_xp || 10) * rewardMultiplier),
+            rewardGold: Math.floor(Number(baseBot.reward_gold || 5) * rewardMultiplier),
+            turn: null, afkTurns: 0
+        });
         }
+    }
 
-        teamB = router.buildMonsterTeam(allBots, config, {
-          count: params.count || monsterIds.length
-        });
+    // Заполняем HP
+    teamB.forEach(m => {
+        m.maxHp = getServerMaxHp(m);
+        m.currentHp = m.maxHp;
+    });
 
-        teamB.forEach(m => {
-          m.maxHp = getServerMaxHp(m);
-          m.currentHp = m.maxHp;
-        });
-      }
+    // Запоминаем этаж
+    config.towerFloor = floor;
+    }
+
+    // === МИР: стандартный спавн ===
+    else if (battleType === 'world') {
+    const monsterIds = params.monsterIds || [];
+    const { data: allBots } = await sb.from('bots')
+        .select('*').in('id', monsterIds);
+
+    if (!allBots || allBots.length === 0) {
+        return socket.emit('error', 'Мобы не найдены');
+    }
+
+    teamB = router.buildMonsterTeam(allBots, config, {
+        count: params.count || monsterIds.length
+    });
+
+    teamB.forEach(m => {
+        m.maxHp = getServerMaxHp(m);
+        m.currentHp = m.maxHp;
+    });
+    }
 
       const room = core.createRoom({
         battleType,
@@ -83,10 +172,6 @@ module.exports = function(io, socket, sb, activeRooms) {
         config,
         params: { roomId: params.roomId }
       });
-
-      if (battleType === 'tower') {
-        room.config.towerFloor = params.currentFloor || 1;
-      }
 
       activeRooms[room.id] = room;
       socket.join(room.id);
