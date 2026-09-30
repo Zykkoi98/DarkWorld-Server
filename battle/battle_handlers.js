@@ -40,11 +40,21 @@ module.exports = function(io, socket, sb, activeRooms) {
         }
       }
 
-      // Проверка — не в бою ли уже
-      const existingRoomId = global.activeBattlesByUser.get(String(playerData.id));
-      if (existingRoomId && activeRooms[existingRoomId]) {
-        return socket.emit('error', 'Вы уже в бою!');
-      }
+        // 🔥 Проверка — не в бою ли уже (с автоочисткой мёртвых комнат)
+        const existingRoomId = global.activeBattlesByUser.get(String(playerData.id));
+        if (existingRoomId) {
+        const existingRoom = activeRooms[existingRoomId];
+
+        // Если комната мертва/завершена/отсутствует — очищаем индекс
+        if (!existingRoom || existingRoom.state === 'finished') {
+            console.log(`🧹 [ОЧИСТКА] Мёртвая комната ${existingRoomId} удалена из индекса`);
+            global.activeBattlesByUser.delete(String(playerData.id));
+            if (existingRoom) delete activeRooms[existingRoomId];
+        } else {
+            // Живая комната — блокируем новый бой
+            return socket.emit('error', 'Вы уже в бою! Откройте текущий бой.');
+        }
+        }
 
       const { data: dbPlayer } = await sb.from('players')
         .select('*').eq('id', Number(playerData.id)).maybeSingle();
@@ -586,26 +596,36 @@ module.exports = function(io, socket, sb, activeRooms) {
   // 13. DISCONNECT (зрители + участники)
   // ==========================================================================
   socket.on('disconnect', () => {
-    // Убираем из зрителей
-    Object.keys(activeRooms).forEach(roomId => {
-      const room = activeRooms[roomId];
-      if (room.spectators && room.spectators.has(socket.id)) {
-        core.removeSpectator(room, socket.id);
-      }
-    });
+  console.log(`❌ [BATTLE] Сокет отключён: ${socket.id}`);
 
-    // Помечаем участника как отключённого
-    Object.keys(activeRooms).forEach(roomId => {
-      const room = activeRooms[roomId];
-      const fighter = [...room.teamA, ...room.teamB].find(f => f.socketId === socket.id);
-      if (fighter) {
-        fighter.socketId = null;
-        fighter.disconnectedAt = Date.now();
-        io.to(roomId).emit('opponent_disconnected', {
-          name: fighter.name,
-          graceSeconds: 60
-        });
-      }
-    });
+  // Убираем из зрителей
+  Object.keys(activeRooms).forEach(roomId => {
+    const room = activeRooms[roomId];
+    if (room.spectators && room.spectators.has(socket.id)) {
+      core.removeSpectator(room, socket.id);
+    }
   });
+
+  // Помечаем участника как отключённого
+  Object.keys(activeRooms).forEach(roomId => {
+    const room = activeRooms[roomId];
+    const fighter = [...room.teamA, ...room.teamB].find(f => f.socketId === socket.id);
+    if (fighter) {
+      fighter.socketId = null;
+      fighter.disconnectedAt = Date.now();
+
+      io.to(roomId).emit('opponent_disconnected', {
+        name: fighter.name,
+        graceSeconds: 60
+      });
+
+      // 🔥 Если это PvE (одиночный бой) — сразу удаляем из индекса
+      // (у одиночного боя нет смысла ждать реконнекта — проще новый бой)
+      if (room.battleType === 'world' || room.battleType === 'tower') {
+        global.activeBattlesByUser.delete(String(fighter.id));
+        console.log(`🧹 [ОЧИСТКА] PvE-боец ${fighter.name} удалён из индекса`);
+      }
+    }
+  });
+});
 };
