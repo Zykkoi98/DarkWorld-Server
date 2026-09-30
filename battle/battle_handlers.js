@@ -1,6 +1,5 @@
 // ============================================================================
-// ===== 🔌 SOCKET-СЛОЙ БОЯ (BATTLE_HANDLERS.JS) =====
-// ===== Связка между ядром и клиентом через socket.io =====
+// ===== 🔌 SOCKET-СЛОЙ БОЯ (BATTLE_HANDLERS.JS) — v2 (со зрителями) =====
 // ============================================================================
 
 const dbHelper = require('../db_helper');
@@ -8,20 +7,25 @@ const core = require('./battle_core');
 const state = require('./battle_state');
 const router = require('./battle_router');
 
+// 🔥 Глобальный индекс: userId → roomId (для проверки «в бою ли игрок»)
+if (!global.activeBattlesByUser) {
+  global.activeBattlesByUser = new Map();
+}
+
 module.exports = function(io, socket, sb, activeRooms) {
   if (!socket) return;
 
   const getServerMaxHp = dbHelper.getServerMaxHp;
 
   // ==========================================================================
-  // 1. СТАРТ БОЯ (PvE с мобами на карте, башня)
+  // 1. СТАРТ БОЯ
   // ==========================================================================
   socket.on('battle_start', async ({ battleType, params = {}, playerData = {} }) => {
     try {
       const config = router.getConfig(battleType);
       if (!config) return socket.emit('error', `Неизвестный тип боя: ${battleType}`);
 
-      // Проверка кулдауна (если у конфига есть)
+      // Кулдаун
       if (config.cooldown) {
         const { data: timerRow } = await sb.from('player_timers')
           .select('ends_at')
@@ -36,18 +40,22 @@ module.exports = function(io, socket, sb, activeRooms) {
         }
       }
 
-      // Загружаем игрока из БД
+      // Проверка — не в бою ли уже
+      const existingRoomId = global.activeBattlesByUser.get(String(playerData.id));
+      if (existingRoomId && activeRooms[existingRoomId]) {
+        return socket.emit('error', 'Вы уже в бою!');
+      }
+
       const { data: dbPlayer } = await sb.from('players')
         .select('*').eq('id', Number(playerData.id)).maybeSingle();
 
       if (!dbPlayer) return socket.emit('error', 'Игрок не найден');
 
-      // Собираем команду игрока
       const teamA = router.buildPlayerTeam(playerData, dbPlayer);
       teamA[0].maxHp = getServerMaxHp(teamA[0]);
       teamA[0].currentHp = Math.min(teamA[0].currentHp, teamA[0].maxHp);
+      teamA[0].socketId = socket.id;
 
-      // Собираем мобов
       let teamB = [];
       if (battleType === 'world' || battleType === 'tower') {
         const monsterIds = params.monsterIds || [];
@@ -62,14 +70,12 @@ module.exports = function(io, socket, sb, activeRooms) {
           count: params.count || monsterIds.length
         });
 
-        // HP + скалирование
         teamB.forEach(m => {
           m.maxHp = getServerMaxHp(m);
           m.currentHp = m.maxHp;
         });
       }
 
-      // Создаём комнату
       const room = core.createRoom({
         battleType,
         teamA,
@@ -78,7 +84,6 @@ module.exports = function(io, socket, sb, activeRooms) {
         params: { roomId: params.roomId }
       });
 
-      // Заполняем доп. поля для башни
       if (battleType === 'tower') {
         room.config.towerFloor = params.currentFloor || 1;
       }
@@ -86,7 +91,11 @@ module.exports = function(io, socket, sb, activeRooms) {
       activeRooms[room.id] = room;
       socket.join(room.id);
 
-      // Отправляем init_data
+      // 🔥 Индекс userId → roomId
+      teamA.forEach(f => {
+        if (!f.isBot) global.activeBattlesByUser.set(String(f.id), room.id);
+      });
+
       socket.emit('battle_init_data', {
         roomId: room.id,
         turnCount: 1,
@@ -94,10 +103,10 @@ module.exports = function(io, socket, sb, activeRooms) {
         teamA: state.serializeTeam(room.teamA),
         teamB: state.serializeTeam(room.teamB),
         isTower: battleType === 'tower',
-        battleType
+        battleType,
+        isSpectator: false
       });
 
-      // Запускаем таймер хода
       startTurnTimer(room, io);
 
       console.log(`🎬 [BATTLE START] ${battleType} | Комната: ${room.id} | Игрок: ${teamA[0].name}`);
@@ -109,7 +118,66 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // ==========================================================================
-  // 2. ПРИЁМ ХОДА
+  // 2. ЗРИТЕЛЬ — ПОДКЛЮЧЕНИЕ
+  // ==========================================================================
+  socket.on('battle_spectate', ({ roomId }) => {
+    try {
+      const room = activeRooms[roomId];
+      if (!room) return socket.emit('error', 'Бой не найден или завершён.');
+
+      core.addSpectator(room, socket.id);
+      socket.join(roomId);
+
+      // Отправляем полное состояние + архив логов
+      const battleState = core.getBattleState(room);
+
+      socket.emit('battle_init_data', {
+        roomId: room.id,
+        turnCount: room.turnCount,
+        myUuid: null,
+        teamA: battleState.teamA,
+        teamB: battleState.teamB,
+        isTower: room.battleType === 'tower',
+        battleType: room.battleType,
+        isSpectator: true,
+        allLogs: battleState.allLogs,
+        spectatorCount: battleState.spectatorCount
+      });
+
+      // Оставшийся таймер
+      if (room.timerEndsAt) {
+        const remainingMs = Math.max(0, room.timerEndsAt - Date.now());
+        if (remainingMs > 0) {
+          socket.emit('turn_timer_started', {
+            durationMs: remainingMs,
+            totalDurationMs: room.timerDurationMs,
+            round: room.turnCount
+          });
+        }
+      }
+
+      console.log(`👁️ [SPECTATE] Зритель ${socket.id} подключился к ${roomId} (всего: ${core.getSpectatorCount(room)})`);
+
+    } catch (err) {
+      console.error('🚨 [battle_spectate]', err.message);
+    }
+  });
+
+  // ==========================================================================
+  // 3. ЗРИТЕЛЬ — ВЫХОД
+  // ==========================================================================
+  socket.on('battle_spectator_leave', ({ roomId }) => {
+    const room = activeRooms[roomId];
+    if (!room) return;
+
+    core.removeSpectator(room, socket.id);
+    socket.leave(roomId);
+
+    console.log(`👁️ [SPECTATE] Зритель ${socket.id} вышел из ${roomId} (осталось: ${core.getSpectatorCount(room)})`);
+  });
+
+  // ==========================================================================
+  // 4. ПРИЁМ ХОДА
   // ==========================================================================
   socket.on('battle_submit_turn', ({ roomId, targetUuid, attack, defends }) => {
     const room = activeRooms[roomId];
@@ -119,14 +187,10 @@ module.exports = function(io, socket, sb, activeRooms) {
     if (!fighter) return;
 
     const result = core.submitTurn(room, fighter.uuid, { targetUuid, attack, defends });
-    if (!result.ok) {
-      console.log(`⚠️ [ХОД ОТКЛОНЁН] ${result.error}`);
-      return;
-    }
+    if (!result.ok) return;
 
-    console.log(`📥 [ХОД] ${fighter.name} | Удар: ${JSON.stringify(attack)} | Блок: ${JSON.stringify(defends)}`);
+    console.log(`📥 [ХОД] ${fighter.name}`);
 
-    // Проверяем, все ли сделали ход
     if (core.isReadyForRound(room)) {
       clearTimeout(room.timeoutRef);
       room.isCalculating = true;
@@ -135,7 +199,7 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // ==========================================================================
-  // 3. ИСПОЛЬЗОВАНИЕ ЗЕЛИЙ
+  // 5. БАНКА
   // ==========================================================================
   socket.on('battle_use_potion', async ({ roomId }) => {
     try {
@@ -187,7 +251,7 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // ==========================================================================
-  // 4. ПОПОВЕРЫ СТАТОВ (для клиента)
+  // 6. СТАТЫ ДЛЯ ПОПОВЕРОВ
   // ==========================================================================
   socket.on('battle_get_stats', ({ roomId, targetUuid }, callback) => {
     try {
@@ -227,7 +291,7 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // ==========================================================================
-  // 5. РЕКОННЕКТ
+  // 7. РЕКОННЕКТ
   // ==========================================================================
   socket.on('battle_reconnect', ({ roomId, userId }) => {
     const room = activeRooms[roomId];
@@ -253,10 +317,11 @@ module.exports = function(io, socket, sb, activeRooms) {
       teamA: state.serializeTeam(room.teamA),
       teamB: state.serializeTeam(room.teamB),
       isTower: room.battleType === 'tower',
-      battleType: room.battleType
+      battleType: room.battleType,
+      isSpectator: false,
+      allLogs: core.getAllLogs(room)
     });
 
-    // Оставшийся таймер
     if (room.timerEndsAt) {
       const remainingMs = Math.max(0, room.timerEndsAt - Date.now());
       if (remainingMs > 0) {
@@ -270,69 +335,81 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // ==========================================================================
-  // 6. ПРОВЕРКА АКТИВНОГО БОЯ
+  // 8. ПРОВЕРКА АКТИВНОГО БОЯ
   // ==========================================================================
   socket.on('battle_check_active', ({ userId }, callback) => {
     const sUserId = String(userId);
-    const roomId = Object.keys(activeRooms).find(id => {
-      const r = activeRooms[id];
-      return [...r.teamA, ...r.teamB].some(f => String(f.id) === sUserId);
-    });
+    const roomId = global.activeBattlesByUser.get(sUserId);
 
     if (typeof callback === 'function') {
-      callback({ activeRoomId: roomId || null });
-    } else if (roomId) {
+      callback({ activeRoomId: (roomId && activeRooms[roomId]) ? roomId : null });
+    } else if (roomId && activeRooms[roomId]) {
       socket.emit('arena_redirect_to_battle', { roomId });
     }
   });
 
   // ==========================================================================
-  // 7. РАСЧЁТ РАУНДА + РАССЫЛКА
+  // 9. ПРОВЕРКА «В БОЮ ЛИ ИГРОК» (для профиля)
+  // ==========================================================================
+  socket.on('check_player_battle', ({ userId }, callback) => {
+    const sUserId = String(userId);
+    const roomId = global.activeBattlesByUser.get(sUserId);
+    const room = roomId ? activeRooms[roomId] : null;
+
+    if (typeof callback === 'function') {
+      callback({
+        inBattle: !!room,
+        roomId: room ? room.id : null,
+        spectatorCount: room ? core.getSpectatorCount(room) : 0
+      });
+    }
+  });
+
+  // ==========================================================================
+  // 10. РАСЧЁТ РАУНДА + BROADCAST (участникам + зрителям)
   // ==========================================================================
   async function executeRoundAndBroadcast(room, io) {
-    // 1. Ядро считает раунд
     const result = core.executeRound(room);
 
-    // 2. Логи (пока только в консоль — потом в БД)
+    // 🔥 Сохраняем логи раунда в архив
+    core.addRoundLogs(room, result.turnCount, result.logs);
+
     result.logs.forEach(l => console.log(`  └─ ${l.replace(/<[^>]+>/g, '')}`));
 
-    // 3. Рассылка
+    // Broadcast всем в комнате (участники + зрители)
     if (room.battleType === 'arena_pvp') {
-      // Для PvP — отдельные сообщения
       const playerA = room.teamA[0];
       const playerB = room.teamB[0];
 
       if (playerA?.socketId) {
-        io.to(playerA.socketId).emit('battle_round_result', {
-          ...result,
-          resultType: result.result
-        });
+        io.to(playerA.socketId).emit('battle_round_result', { ...result, resultType: result.result });
       }
       if (playerB?.socketId) {
         const resB = result.result === 'win' ? 'lose' : (result.result === 'lose' ? 'win' : 'draw');
-        io.to(playerB.socketId).emit('battle_round_result', {
-          ...result,
-          resultType: resB
-        });
+        io.to(playerB.socketId).emit('battle_round_result', { ...result, resultType: resB });
       }
+
+      // Зрителям PvP — нейтрально
+      room.spectators.forEach(sid => {
+        io.to(sid).emit('battle_round_result', { ...result, resultType: 'spectator' });
+      });
+
     } else {
-      // Для PvE — всем в комнате
+      // PvE — всем в комнате
       io.to(room.id).emit('battle_round_result', result);
     }
 
-    // 4. Финал
     if (result.isOver) {
       clearTimeout(room.timeoutRef);
       await finishBattle(room, result);
     } else {
-      // 5. Новый таймер
       room.isCalculating = false;
       startTurnTimer(room, io);
     }
   }
 
   // ==========================================================================
-  // 8. ФИНАЛИЗАЦИЯ БОЯ
+  // 11. ФИНАЛИЗАЦИЯ
   // ==========================================================================
   async function finishBattle(room, result) {
     const config = room.config;
@@ -346,8 +423,9 @@ module.exports = function(io, socket, sb, activeRooms) {
     try {
       const finalData = await finisher.finalize(room, result.result, sb);
 
-      // Добавляем логи финала в результат
       if (finalData.logs && finalData.logs.length > 0) {
+        // Добавляем финальные логи в архив
+        core.addRoundLogs(room, 'final', finalData.logs);
         io.to(room.id).emit('battle_final_logs', { logs: finalData.logs });
       }
 
@@ -357,16 +435,21 @@ module.exports = function(io, socket, sb, activeRooms) {
       console.error('🚨 [finishBattle]', err.message);
     }
 
-    // Удаляем комнату через паузу
+    // Удаляем из индекса
+    [...room.teamA, ...room.teamB].forEach(f => {
+      if (!f.isBot) global.activeBattlesByUser.delete(String(f.id));
+    });
+
+    // Очистка комнаты через паузу
     setTimeout(() => {
       core.destroyRoom(room);
       delete activeRooms[room.id];
       console.log(`🗑️ [ОЧИСТКА] Комната ${room.id} удалена`);
-    }, 3000);
+    }, 5000);
   }
 
   // ==========================================================================
-  // 9. ТАЙМЕР ХОДА (динамический)
+  // 12. ТАЙМЕР ХОДА
   // ==========================================================================
   function startTurnTimer(room, io) {
     if (room.timeoutRef) clearTimeout(room.timeoutRef);
@@ -374,7 +457,6 @@ module.exports = function(io, socket, sb, activeRooms) {
     const config = room.config;
     const timerCfg = config.turnTimer || {};
 
-    // Считаем макс. afkTurns среди живых
     const aliveHumans = [...room.teamA, ...room.teamB].filter(f => !f.isBot && f.currentHp > 0);
     const maxAfk = aliveHumans.reduce((max, f) => Math.max(max, f.afkTurns || 0), 0);
 
@@ -396,7 +478,6 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       console.log(`⏱️ [АФК] Время вышло в комнате ${room.id}`);
 
-      // АФК-обработка
       const allFighters = [...room.teamA, ...room.teamB];
       allFighters.forEach(f => {
         if (f.isBot || f.currentHp <= 0) return;
@@ -415,4 +496,31 @@ module.exports = function(io, socket, sb, activeRooms) {
       executeRoundAndBroadcast(room, io);
     }, durationMs);
   }
+
+  // ==========================================================================
+  // 13. DISCONNECT (зрители + участники)
+  // ==========================================================================
+  socket.on('disconnect', () => {
+    // Убираем из зрителей
+    Object.keys(activeRooms).forEach(roomId => {
+      const room = activeRooms[roomId];
+      if (room.spectators && room.spectators.has(socket.id)) {
+        core.removeSpectator(room, socket.id);
+      }
+    });
+
+    // Помечаем участника как отключённого
+    Object.keys(activeRooms).forEach(roomId => {
+      const room = activeRooms[roomId];
+      const fighter = [...room.teamA, ...room.teamB].find(f => f.socketId === socket.id);
+      if (fighter) {
+        fighter.socketId = null;
+        fighter.disconnectedAt = Date.now();
+        io.to(roomId).emit('opponent_disconnected', {
+          name: fighter.name,
+          graceSeconds: 60
+        });
+      }
+    });
+  });
 };

@@ -1,7 +1,6 @@
 // ============================================================================
-// ===== 🧠 ЯДРО БОЯ (BATTLE_CORE.JS) =====
-// ===== Управление комнатами: создание, ходы, раунд, финал =====
-// ===== НЕ знает socket. Возвращает данные — эмитит их handlers. =====
+// ===== 🧠 ЯДРО БОЯ (BATTLE_CORE.JS) — v2 (со зрителями) =====
+// ===== Управление комнатами + логи + зрители =====
 // ============================================================================
 
 const engine = require('./battle_engine');
@@ -21,15 +20,17 @@ function createRoom({ battleType, teamA, teamB, config, params = {} }) {
     teamA,
     teamB,
     fighters: state.createFighterMap(teamA, teamB),
+
     turnCount: 1,
-    state: 'active',           // active | finished
+    state: 'active',
     isCalculating: false,
     createdAt: Date.now(),
 
-    // Таймер (заполняется позже — из handlers/systems)
+    // Таймер
     timerStartedAt: null,
     timerEndsAt: null,
     timerDurationMs: null,
+    timeoutRef: null,
 
     // Волны и фазы (заготовки)
     waves: null,
@@ -37,12 +38,54 @@ function createRoom({ battleType, teamA, teamB, config, params = {} }) {
     phases: null,
     currentPhase: 0,
 
-    // Для финализера
+    // Финал
     result: null,
-    logs: []
+
+    // 🔥 АРХИВ ЛОГОВ (для зрителей и реплеев)
+    logs: [],
+
+    // 🔥 ЗРИТЕЛИ
+    spectators: new Set()   // socketId зрителей
   };
 
   return room;
+}
+
+// ============================================================================
+// ЛОГИ РАУНДА
+// ============================================================================
+
+function addRoundLogs(room, roundNumber, logs) {
+  if (!room.logs) room.logs = [];
+  room.logs.push({
+    round: roundNumber,
+    timestamp: Date.now(),
+    logs: logs
+  });
+}
+
+function getAllLogs(room) {
+  return room.logs || [];
+}
+
+// ============================================================================
+// ЗРИТЕЛИ
+// ============================================================================
+
+function addSpectator(room, socketId) {
+  if (!room.spectators) room.spectators = new Set();
+  room.spectators.add(socketId);
+  return room.spectators.size;
+}
+
+function removeSpectator(room, socketId) {
+  if (!room.spectators) return 0;
+  room.spectators.delete(socketId);
+  return room.spectators.size;
+}
+
+function getSpectatorCount(room) {
+  return room.spectators ? room.spectators.size : 0;
 }
 
 // ============================================================================
@@ -64,7 +107,6 @@ function submitTurn(room, uuid, payload) {
 
   const { targetUuid, attack, defends } = payload;
 
-  // Античит по лимитам
   const { maxAttacks, maxDefends } = engine.getCombatLimits(fighter);
 
   let checkedAttack = attack;
@@ -92,11 +134,10 @@ function submitTurn(room, uuid, payload) {
 }
 
 // ============================================================================
-// ПРОВЕРКА, ГОТОВ ЛИ РАУНД
+// ГОТОВ ЛИ РАУНД
 // ============================================================================
 
 function isReadyForRound(room) {
-  // Все живые игроки (не боты) сделали ход
   const aliveHumans = [...room.teamA, ...room.teamB]
     .filter(f => !f.isBot && f.currentHp > 0);
 
@@ -116,7 +157,7 @@ function executeRound(room) {
   const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
   const zoneNames = { head: 'Голову', breast: 'Грудь', torso: 'Торс', belt: 'Пояс', legs: 'Ноги' };
 
-  // ──────── 1. ПРОВЕРКА АФК-ДИСКВАЛИФИКАЦИИ ────────
+  // АФК-дисквалификация
   const allHumans = [...room.teamA, ...room.teamB].filter(f => !f.isBot && f.currentHp > 0);
   const disqualified = allHumans.find(f => (f.afkTurns || 0) >= (room.config?.turnTimer?.maxAfkTurns || 3));
 
@@ -126,7 +167,7 @@ function executeRound(room) {
     return finalizeRound(room, logs);
   }
 
-  // Логи о пропущенных ходах
+  // Логи о пропусках
   allHumans.forEach(f => {
     if (f.missedLastTurn && f.afkTurns > 0) {
       const remaining = (room.config?.turnTimer?.maxAfkTurns || 3) - f.afkTurns;
@@ -136,10 +177,10 @@ function executeRound(room) {
     }
   });
 
-  // ──────── 2. ИИ МОБОВ (заглушка — реально будет вызов ai.monster_ai) ────────
+  // ИИ мобов
   room.teamB.forEach(bot => {
     if (bot.currentHp <= 0 || !bot.isBot) return;
-    if (bot.turn) return;   // уже сделал ход
+    if (bot.turn) return;
 
     const aliveTargets = room.teamA.filter(a => a.currentHp > 0);
     if (aliveTargets.length === 0) return;
@@ -161,14 +202,10 @@ function executeRound(room) {
       attackPayload = zones[rand(0, zones.length - 1)];
     }
 
-    bot.turn = {
-      targetUuid: target.uuid,
-      attack: attackPayload,
-      defends
-    };
+    bot.turn = { targetUuid: target.uuid, attack: attackPayload, defends };
   });
 
-  // ──────── 3. СБОРКА ОЧЕРЕДИ АТАК ────────
+  // Очередь атак
   const queue = [...room.teamA, ...room.teamB];
   const aliveAtStart = queue.filter(f => f.currentHp > 0).map(f => f.uuid);
 
@@ -184,7 +221,6 @@ function executeRound(room) {
 
     if (attacker.uuid === target.uuid) return;
 
-    // ─── Список зон атаки ───
     let attacksList = [];
 
     if (attacker.isBot) {
@@ -196,7 +232,6 @@ function executeRound(room) {
       if (engine.isTwoHanded(mainWeapon)) {
         attacksList = Array.isArray(attacker.turn.attack) ? attacker.turn.attack : [attacker.turn.attack];
       } else if (offWeapon && !engine.isShield(offWeapon)) {
-        // Дуалы — 2 удара
         const primary = Array.isArray(attacker.turn.attack) ? attacker.turn.attack[0] : attacker.turn.attack;
         const zones = ['head', 'breast', 'torso', 'belt', 'legs'];
         const leftZone = zones[Math.floor(Math.random() * zones.length)];
@@ -207,17 +242,12 @@ function executeRound(room) {
       }
     }
 
-    // ─── Расчёт ударов ───
     const damageFactor = attacksList.length === 2 ? 1.3 : 1.0;
 
     attacksList.forEach(zone => {
       if (!zone) return;
 
-      const result = engine.calculateHit(attacker, target, zone, {
-        rand,
-        damageFactor,
-        zoneNames
-      });
+      const result = engine.calculateHit(attacker, target, zone, { rand, damageFactor, zoneNames });
 
       if (result.hit) {
         target.currentHp = Math.max(0, Number(target.currentHp || 0) - result.damage);
@@ -227,22 +257,15 @@ function executeRound(room) {
     });
   });
 
-  // ──────── 4. СБРОС ХОДОВ ────────
-  room.teamA.forEach(f => {
-    f.turn = null;
-    f.missedLastTurn = false;
-  });
-  room.teamB.forEach(f => {
-    f.turn = null;
-    f.missedLastTurn = false;
-  });
+  // Сброс ходов
+  room.teamA.forEach(f => { f.turn = null; f.missedLastTurn = false; });
+  room.teamB.forEach(f => { f.turn = null; f.missedLastTurn = false; });
 
-  // ──────── 5. ПРОВЕРКА ФИНАЛА ────────
   return finalizeRound(room, logs);
 }
 
 // ============================================================================
-// ЗАВЕРШЕНИЕ РАУНДА — проверка финала
+// ФИНАЛИЗАЦИЯ РАУНДА
 // ============================================================================
 
 function finalizeRound(room, logs) {
@@ -265,7 +288,6 @@ function finalizeRound(room, logs) {
     room.result = result;
   }
 
-  // Обновления для diff-протокола
   const updates = [...room.teamA, ...room.teamB].map(f => ({
     uuid: f.uuid,
     currentHp: f.currentHp,
@@ -284,6 +306,23 @@ function finalizeRound(room, logs) {
 }
 
 // ============================================================================
+// СОСТОЯНИЕ БОЯ ДЛЯ ЗРИТЕЛЯ
+// ============================================================================
+
+function getBattleState(room) {
+  return {
+    roomId: room.id,
+    battleType: room.battleType,
+    turnCount: room.turnCount,
+    state: room.state,
+    teamA: state.serializeTeam(room.teamA),
+    teamB: state.serializeTeam(room.teamB),
+    allLogs: getAllLogs(room),
+    spectatorCount: getSpectatorCount(room)
+  };
+}
+
+// ============================================================================
 // УНИЧТОЖЕНИЕ КОМНАТЫ
 // ============================================================================
 
@@ -291,6 +330,7 @@ function destroyRoom(room) {
   if (!room) return;
   room.state = 'finished';
   room.fighters.clear();
+  if (room.spectators) room.spectators.clear();
   room.teamA = [];
   room.teamB = [];
 }
@@ -304,5 +344,17 @@ module.exports = {
   submitTurn,
   isReadyForRound,
   executeRound,
-  destroyRoom
+  destroyRoom,
+
+  // Зрители
+  addSpectator,
+  removeSpectator,
+  getSpectatorCount,
+
+  // Логи
+  addRoundLogs,
+  getAllLogs,
+
+  // Состояние
+  getBattleState
 };
