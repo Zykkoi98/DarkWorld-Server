@@ -563,18 +563,22 @@ module.exports = function(io, socket, sb, activeRooms) {
         const mapId = pos.current_map_id || 'ashenvale_main';
 
         const { data: tiles, error } = await sb
-            .from('world_tiles')
-            .select('x, y, is_blocked, region')   // 🔥 Добавил region
-            .eq('map_id', mapId);
+          .from('world_tiles')
+          .select('x, y, is_blocked, region')
+          .eq('map_id', mapId)
+          .range(0, 5000);   // 🔥 Явно просим 5000 строк (защита от лимита)
 
         if (error || !tiles) {
-            console.error("🚨 [A*] Ошибка загрузки клеток:", error);
-            return callback({ success: false, error: 'Ошибка загрузки карты' });
+          console.error("🚨 [A*] Ошибка загрузки клеток:", error);
+          return callback({ success: false, error: 'Ошибка загрузки карты' });
         }
+
+        console.log(`📊 [A*] Загружено клеток: ${tiles.length} (ожидаем 2500)`);
+        console.log(`📊 [A*] Вода в БД: ${tiles.filter(t => t.region === 'water').length}`);
 
         const tilesGrid = {};
         tiles.forEach(t => {
-            tilesGrid[`${t.x}_${t.y}`] = t;
+          tilesGrid[`${t.x}_${t.y}`] = t;
         });
 
         const path = findPath(fromX, fromY, toX, toY, tilesGrid);
