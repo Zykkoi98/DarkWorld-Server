@@ -85,8 +85,20 @@ function findPath(startX, startY, endX, endY, tilesGrid) {
       if (closed.has(nKey)) continue;
 
       // 🔥 Клетка заблокирована?
-      const nTile = tilesGrid[nKey];
-      if (nTile && nTile.is_blocked) continue;
+          const nTile = tilesGrid[nKey];
+          // 🔥 ЖЕЛЕЗНАЯ ПРОВЕРКА: по is_blocked + по региону
+          if (nTile) {
+            // Проверка 1: явная блокировка
+            if (nTile.is_blocked === true) {
+              console.log(`🌊 [A*] Блок (${nx},${ny}) region=${nTile.region} is_blocked=true`);
+              continue;
+            }
+            // Проверка 2: непроходимые регионы (даже если is_blocked = null/false)
+            if (nTile.region === 'water' || nTile.region === 'river' || nTile.region === 'mountain') {
+              console.log(`🌊 [A*] Блок по региону (${nx},${ny}) region=${nTile.region}`);
+              continue;
+            }
+          }
 
       // 🔥 Стоимость: 1 за шаг
       const tentativeG = current.g + 1;
@@ -552,7 +564,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         const { data: tiles, error } = await sb
             .from('world_tiles')
-            .select('x, y, is_blocked')
+            .select('x, y, is_blocked, region')   // 🔥 Добавил region
             .eq('map_id', mapId);
 
         if (error || !tiles) {
