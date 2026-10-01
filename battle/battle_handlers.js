@@ -374,25 +374,52 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       const engine = require('./battle_engine');
 
-      const totalAgi = engine.getAgility(fighter);
-      const totalLuck = engine.getLuck(fighter);
+      // ===== БАЗОВЫЕ СТАТЫ (без шмота) =====
+      const baseStr  = Number(fighter.strength  ?? fighter.stats?.strength  ?? 1);
+      const baseAgi  = Number(fighter.agility   ?? fighter.stats?.agility   ?? 1);
+      const baseEnd  = Number(fighter.endurance ?? fighter.stats?.endurance ?? 1);
+      const baseLuck = Number(fighter.luck      ?? fighter.stats?.luck      ?? 1);
 
-      const mfInv = (totalAgi * 10) + engine.getEquipmentBonus(fighter, 'mf_inv');
-      const mfAntiInv = (totalAgi * 4) + engine.getEquipmentBonus(fighter, 'mf_antiinv');
-      const mfCrit = (totalLuck * 10) + engine.getEquipmentBonus(fighter, 'mf_crit');
-      const mfAntiCrit = (totalLuck * 4) + engine.getEquipmentBonus(fighter, 'mf_anticrit');
+      // ===== БОНУСЫ ШМОТА =====
+      const gearStr  = engine.getEquipmentBonus(fighter, 'strength');
+      const gearAgi  = engine.getEquipmentBonus(fighter, 'agility');
+      const gearEnd  = engine.getEquipmentBonus(fighter, 'endurance');
+      const gearLuck = engine.getEquipmentBonus(fighter, 'luck');
+
+      // ===== ИТОГОВЫЕ ПРОИЗВОДНЫЕ =====
+      const atk = engine.getAtk(fighter);
+      const def = engine.getDef(fighter);
+
+      // ===== МОДИФИКАТОРЫ (сырые очки) =====
+      const totalAgi  = baseAgi  + gearAgi;
+      const totalLuck = baseLuck + gearLuck;
+
+      const mfInv      = (totalAgi  * 10) + engine.getEquipmentBonus(fighter, 'mf_inv');
+      const mfAntiInv  = (totalAgi  * 4)  + engine.getEquipmentBonus(fighter, 'mf_antiinv');
+      const mfCrit     = (totalLuck * 10) + engine.getEquipmentBonus(fighter, 'mf_crit');
+      const mfAntiCrit = (totalLuck * 4)  + engine.getEquipmentBonus(fighter, 'mf_anticrit');
+
+      // ===== ФОРМАТ "база (+шмот)" =====
+      const fmt = (base, gear) => gear > 0 ? `${base} (+${gear})` : `${base}`;
 
       callback({
         success: true,
         stats: [
-          { label: '💪 Сила', value: engine.getAtk(fighter) },
-          { label: '🏹 Ловкость', value: totalAgi },
-          { label: '🛡️ Выносливость', value: engine.getDef(fighter) },
-          { label: '🍀 Удача', value: totalLuck },
-          { label: '🏹 Мф. Уворота', value: `+${mfInv}%` },
-          { label: '🎯 Мф. Антиуворота', value: `+${mfAntiInv}%` },
-          { label: '💥 Мф. Крита', value: `+${mfCrit}%` },
-          { label: '🛡️ Мф. Антикрита', value: `+${mfAntiCrit}%` }
+          // --- Основные характеристики ---
+          { label: '💪 Сила',          value: fmt(baseStr,  gearStr) },
+          { label: '🏹 Ловкость',      value: fmt(baseAgi,  gearAgi) },
+          { label: '🛡️ Выносливость',  value: fmt(baseEnd,  gearEnd) },
+          { label: '🍀 Удача',         value: fmt(baseLuck, gearLuck) },
+
+          // --- Боевые производные ---
+          { label: '⚔️ Атака',   value: atk },
+          { label: '🛡️ Защита',  value: def },
+
+          // --- Модификаторы (сырые очки) ---
+          { label: '🏹 Мф. Увертывания',     value: `+${mfInv}%` },
+          { label: '🎯 Мф. Против уворота',  value: `+${mfAntiInv}%` },
+          { label: '💥 Мф. Крита',           value: `+${mfCrit}%` },
+          { label: '🛡️ Мф. Против крита',   value: `+${mfAntiCrit}%` }
         ]
       });
     } catch (err) {
