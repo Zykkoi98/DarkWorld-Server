@@ -187,7 +187,7 @@ setInterval(async () => {
 io.on('connection', (socket) => {
   console.log(`🔌 Подключен сокет: ${socket.id}`);
 
-  const handshakeUserId = socket.handshake?.auth?.userId;
+const handshakeUserId = socket.handshake?.auth?.userId;
   if (handshakeUserId) {
     const nUserId = Number(handshakeUserId);
     const now = Date.now();
@@ -195,6 +195,16 @@ io.on('connection', (socket) => {
     io.sockets.sockets.forEach((existingSocket) => {
       if (existingSocket.id !== socket.id &&
           Number(existingSocket.handshake?.auth?.userId) === nUserId) {
+
+        // 🔥 НЕ убиваем, если игрок в активном бою
+        const roomId = global.activeBattlesByUser?.get(String(nUserId));
+        const isInBattle = roomId && activeRooms?.[roomId];
+
+        if (isInBattle) {
+          console.log(`⚔️ [СОКЕТ] Не убиваем дубликат ${existingSocket.id} — игрок в бою ${roomId}`);
+          return;
+        }
+
         const ageMs = now - (existingSocket.data?.connectedAt || 0);
         if (ageMs > 10000) {
           console.log(`🧹 [СОКЕТ] Убиваем старый дубликат ${existingSocket.id}`);

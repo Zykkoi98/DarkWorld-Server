@@ -22,6 +22,11 @@ module.exports = function(io, socket, sb, activeRooms) {
   // ==========================================================================
   socket.on('battle_start', async ({ battleType, params = {}, playerData = {} }) => {
     try {
+      // 🔥 PvP стартует через arena_logic, не через battle_start
+      if (battleType === 'arena_pvp') {
+        console.warn('⚠️ [battle_start] Попытка старта PvP через battle_start — игнорируем');
+        return;
+      }
       const config = router.getConfig(battleType);
       if (!config) return socket.emit('error', `Неизвестный тип боя: ${battleType}`);
 
@@ -445,13 +450,19 @@ module.exports = function(io, socket, sb, activeRooms) {
     const fighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
     if (!fighter) return socket.emit('error', 'Вы не в этой комнате');
 
-    const wasDisconnected = fighter.disconnectedAt !== null && fighter.disconnectedAt !== undefined;
+// 🔥 Различаем реальный реконнект и первое подключение
+    const isFirstJoin = !fighter.socketId || fighter.socketId === socket.id;
+    const wasDisconnected = !isFirstJoin && fighter.disconnectedAt != null;
+
     fighter.socketId = socket.id;
     fighter.disconnectedAt = null;
     socket.join(roomId);
 
     if (wasDisconnected) {
+      console.log(`♻️ [BATTLE] ${fighter.name} реально переподключился — оповещаем`);
       io.to(roomId).emit('opponent_reconnected', { name: fighter.name });
+    } else {
+      console.log(`✅ [BATTLE] ${fighter.name} первый раз в комнате`);
     }
 
     socket.emit('battle_init_data', {
