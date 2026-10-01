@@ -1,129 +1,174 @@
 // ============================================================================
-// ===== ⚔️ ФИНАЛИЗЕР PvP-АРЕНЫ (ARENA_FINISHER.JS) =====
-// ===== Награды за PvP: 25 монет + XP по формуле =====
+// ===== 🏆 ФИНАЛИЗЕР PVP АРЕНЫ (ARENA_FINISHER.JS) — v2 =====
+// ===== Использует новые формулы наград через arena_rewards.js =====
 // ============================================================================
 
-const dbHelper = require('../../db_helper');
+const dbHelper = require('./../db_helper');
+const rewards = require('./arena_rewards');
 
 module.exports = {
+  /**
+   * Финализация боя на Арене.
+   * @param {Object} room - комната боя (содержит damageStats)
+   * @param {string} result - 'win' | 'lose' | 'draw'
+   * @param {Object} sb - Supabase клиент
+   * @returns {Object} { rewards, logs }
+   */
   async finalize(room, result, sb) {
-    const playerA = room.teamA[0];
-    const playerB = room.teamB[0];
-    if (!playerA || !playerB) {
-      console.error('🚨 [ARENA FINISHER] Нет игроков');
-      return { rewards: null, logs: [] };
+    console.log(`🏆 [ARENA FINISHER] Старт финализации. result=${result}`);
+
+    // ========================================================================
+    // 1. СЧИТАЕМ НАГРАДЫ через общий модуль
+    // ========================================================================
+    const damageStats = room.damageStats || {};
+    const rewardMap = rewards.calculateBattleRewards(room, damageStats);
+
+    console.log(`📊 [ARENA FINISHER] Награды рассчитаны для ${Object.keys(rewardMap).length} игроков`);
+
+    // ========================================================================
+    // 2. СОБИРАЕМ СПИСОК ВСЕХ ИГРОКОВ + ЧИТАЕМ ИХ ПРОФИЛИ ИЗ БД
+    // ========================================================================
+    const allFighters = [...room.teamA, ...room.teamB];
+    const dbProfiles = {};
+
+    for (const fighter of allFighters) {
+      if (fighter.isBot) continue;
+      try {
+        const { data } = await sb.from('players').select('*').eq('id', Number(fighter.id)).maybeSingle();
+        if (data) dbProfiles[fighter.uuid] = data;
+      } catch (err) {
+        console.error(`🚨 Не удалось прочитать профиль ${fighter.name}:`, err.message);
+      }
     }
 
-    const config = room.config || {};
-    const goldReward = config.pvpReward?.gold || 25;
-    const xpBase = config.pvpReward?.xpBase || 15;
-    const xpUp = config.pvpReward?.xpMultiplierUp || 1.25;
-    const xpDown = config.pvpReward?.xpMultiplierDown || 0.8;
-
-    const calculateXp = (winnerLvl, loserLvl) => {
-      const base = Number(loserLvl || 1) * xpBase;
-      let mult = 1;
-      if (loserLvl > winnerLvl) mult = 1 + ((loserLvl - winnerLvl) * (xpUp - 1));
-      else if (loserLvl < winnerLvl) mult = Math.max(0.1, 1 - ((winnerLvl - loserLvl) * (1 - xpDown)));
-      return Math.floor(base * mult);
-    };
-
-    const [resA, resB] = await Promise.all([
-      sb.from('players').select('*').eq('id', Number(playerA.id)).maybeSingle(),
-      sb.from('players').select('*').eq('id', Number(playerB.id)).maybeSingle()
-    ]);
-
-    if (!resA?.data || !resB?.data) {
-      console.error('🚨 [ARENA FINISHER] Профили не найдены');
-      return { rewards: null, logs: [] };
-    }
-
-    const rowA = resA.data;
-    const rowB = resB.data;
-
-    dbHelper.autoRefillPotionsAfterBattle(rowA);
-    dbHelper.autoRefillPotionsAfterBattle(rowB);
-
-    const safeRead = (row, field, def = 0) => {
-      const low = field.toLowerCase();
-      const cap = field.charAt(0).toUpperCase() + field.slice(1);
-      return Number(row[low] ?? row[cap] ?? row[field] ?? def);
-    };
-
-    let pointsKeyA = rowA.statpoints !== undefined ? 'statpoints' : 'statPoints';
-    let pointsKeyB = rowB.statpoints !== undefined ? 'statpoints' : 'statPoints';
-
-    let goldA = safeRead(rowA, 'gold', 0);
-    let xpA = safeRead(rowA, 'xp', 0);
-    let levelA = safeRead(rowA, 'level', 1);
-    let statPointsA = safeRead(rowA, pointsKeyA, 0);
-
-    let goldB = safeRead(rowB, 'gold', 0);
-    let xpB = safeRead(rowB, 'xp', 0);
-    let levelB = safeRead(rowB, 'level', 1);
-    let statPointsB = safeRead(rowB, pointsKeyB, 0);
-
-    const maxHpA = dbHelper.getServerMaxHp({ endurance: safeRead(rowA, 'endurance', 1), equipped: rowA.equipped || {} });
-    const maxHpB = dbHelper.getServerMaxHp({ endurance: safeRead(rowB, 'endurance', 1), equipped: rowB.equipped || {} });
-
-    let endHpA = maxHpA;
-    let endHpB = maxHpB;
+    // ========================================================================
+    // 3. ПРИМЕНЯЕМ НАГРАДЫ И ОБНОВЛЯЕМ БД
+    // ========================================================================
     const logs = [];
+    const applyResults = [];
 
-    if (result === 'win') {
-      const xpGained = calculateXp(levelA, levelB);
-      goldA += goldReward;
-      xpA += xpGained;
+    for (const fighter of allFighters) {
+      if (fighter.isBot) continue;
 
-      const newLevelA = dbHelper.getServerCorrectLevelByXp(xpA);
-      if (newLevelA > levelA) {
-        statPointsA += (newLevelA - levelA) * 5;
-        levelA = newLevelA;
+      const reward = rewardMap[fighter.uuid];
+      const dbRow = dbProfiles[fighter.uuid];
+
+      if (!reward || !dbRow) {
+        console.warn(`⚠️ Пропускаем ${fighter.name} — нет reward или dbRow`);
+        continue;
       }
 
-      endHpA = Math.max(1, Number(playerA.currentHp));
-      endHpB = Math.max(1, Math.floor(maxHpB * 0.2));
+      // Читаем текущие значения из БД
+      const currentGold = dbHelper.safeReadField(dbRow, 'gold', 0);
+      const currentXp = dbHelper.safeReadField(dbRow, 'xp', 0);
+      const currentLevel = dbHelper.safeReadField(dbRow, 'level', 1);
+      const pointsKey = dbRow.statpoints !== undefined ? 'statpoints' : 'statPoints';
+      const currentStatPoints = dbHelper.safeReadField(dbRow, pointsKey, 0);
 
-      logs.push(`🏁 <strong>ПОБЕДА НА АРЕНЕ!</strong> ${playerA.name} поверг соперника! Награда: 💰 ${goldReward} монет, ✨ ${xpGained} опыта.`);
+      // Новые значения
+      const newGold = currentGold + reward.gold;
+      const newXp = currentXp + reward.xp;
+      const newLevel = dbHelper.getServerCorrectLevelByXp(newXp);
 
-    } else if (result === 'lose') {
-      const xpGained = calculateXp(levelB, levelA);
-      goldB += goldReward;
-      xpB += xpGained;
-
-      const newLevelB = dbHelper.getServerCorrectLevelByXp(xpB);
-      if (newLevelB > levelB) {
-        statPointsB += (newLevelB - levelB) * 5;
-        levelB = newLevelB;
+      // Статпоинты за повышение
+      let newStatPoints = currentStatPoints;
+      let levelUpMessage = null;
+      if (newLevel > currentLevel) {
+        const gainedLevels = newLevel - currentLevel;
+        newStatPoints += gainedLevels * 5;
+        levelUpMessage = `🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> ${fighter.name} достиг ${newLevel} уровня! (+${gainedLevels * 5} очков)`;
       }
 
-      endHpA = Math.max(1, Math.floor(maxHpA * 0.2));
-      endHpB = Math.max(1, Number(playerB.currentHp));
+      // HP — победителю остаток, проигравшему 20%
+      const maxHp = dbHelper.getServerMaxHp({
+        endurance: dbHelper.safeReadField(dbRow, 'endurance', 1),
+        equipped: dbRow.equipped || {}
+      });
 
-      logs.push(`🏁 <strong>ПОБЕДА НА АРЕНЕ!</strong> ${playerB.name} одержал верх! Награда: 💰 ${goldReward} монет, ✨ ${xpGained} опыта.`);
+      let finalHp;
+      if (reward.isWinner) {
+        finalHp = Math.max(1, Math.floor(Number(fighter.currentHp || 1)));
+      } else {
+        finalHp = Math.max(1, Math.floor(maxHp * 0.2));
+      }
 
-    } else {
-      endHpA = Math.max(1, Math.floor(maxHpA * 0.2));
-      endHpB = Math.max(1, Math.floor(maxHpB * 0.2));
-      logs.push(`🏁 <strong>НИЧЬЯ НА АРЕНЕ!</strong> Силы равны. Награды аннулированы.`);
+      // Автопополнение банок после боя
+      const playerObjForPotion = {
+        equipped: dbRow.equipped || {},
+        inventory: dbRow.inventory || { equipment: [], resources: [], consumables: [] }
+      };
+      dbHelper.autoRefillPotionsAfterBattle(playerObjForPotion);
+
+      // ====================================================================
+      // ОБНОВЛЯЕМ БД
+      // ====================================================================
+      try {
+        await sb.from('players').update({
+          gold: newGold,
+          xp: newXp,
+          level: newLevel,
+          hp: finalHp,
+          [pointsKey]: newStatPoints,
+          equipped: playerObjForPotion.equipped,
+          inventory: playerObjForPotion.inventory
+        }).eq('id', Number(fighter.id));
+      } catch (err) {
+        console.error(`🚨 Ошибка обновления ${fighter.name}:`, err.message);
+      }
+
+      applyResults.push({
+        uuid: fighter.uuid,
+        name: fighter.name,
+        level: fighter.level,
+        isWinner: reward.isWinner,
+        goldGained: reward.gold,
+        xpGained: reward.xp,
+        newLevel,
+        levelUp: newLevel > currentLevel,
+        finalHp,
+        maxHp,
+        breakdown: reward.breakdown
+      });
     }
 
-    await Promise.all([
-      sb.from('players').update({
-        gold: goldA, xp: xpA, level: levelA, hp: endHpA,
-        inventory: rowA.inventory, equipped: rowA.equipped,
-        [pointsKeyA]: statPointsA
-      }).eq('id', Number(playerA.id)),
+    // ========================================================================
+    // 4. СОБИРАЕМ ЛОГИ ФИНАЛА (для UI)
+    // ========================================================================
+    for (const r of applyResults) {
+      const tag = r.isWinner ? '🏆 ПОБЕДА' : '💀 ПОРАЖЕНИЕ';
+      const parts = [];
+      if (r.goldGained > 0) parts.push(`💰 +${r.goldGained} золота`);
+      if (r.xpGained > 0) parts.push(`✨ +${r.xpGained} XP`);
 
-      sb.from('players').update({
-        gold: goldB, xp: xpB, level: levelB, hp: endHpB,
-        inventory: rowB.inventory, equipped: rowB.equipped,
-        [pointsKeyB]: statPointsB
-      }).eq('id', Number(playerB.id))
-    ]);
+      let line = `${tag} <strong>${r.name}</strong> (Lv ${r.level})`;
+      if (parts.length > 0) {
+        line += `: ${parts.join(', ')}`;
+      } else {
+        line += `: без наград`;
+      }
+      logs.push(line);
+    }
+
+    // Отдельно пишем про повышение уровня
+    for (const r of applyResults) {
+      if (r.levelUp) {
+        logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> ${r.name} → ${r.newLevel} уровень!`);
+      }
+    }
+
+    // Ничья
+    if (result === 'draw') {
+      logs.push(`🤝 <strong>НИЧЬЯ НА АРЕНЕ!</strong> Силы равны.`);
+    }
+
+    console.log(`✅ [ARENA FINISHER] Готово. Логов: ${logs.length}`);
+    applyResults.forEach(r => {
+      console.log(`  ${r.isWinner ? '🏆' : '💀'} ${r.name}: +${r.goldGained}g, +${r.xpGained}xp`);
+    });
 
     return {
-      rewards: { winnerGold: goldReward, winnerXp: (result === 'win' ? calculateXp(levelA, levelB) : calculateXp(levelB, levelA)) },
+      rewards: rewardMap,
+      applyResults,
       logs
     };
   }
