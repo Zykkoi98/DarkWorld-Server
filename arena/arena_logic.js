@@ -488,8 +488,7 @@ module.exports = function(io, socket, sb, activeRooms) {
       io.emit('arena_lobby_updated');
     }, 30 * 1000);   // 30 сек
   });
-};
-// --------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
   // 9. ПРОВЕРКА — я в лобби? (для восстановления после F5)
   // --------------------------------------------------------------------------
   socket.on('arena_check_my_request', () => {
@@ -514,3 +513,4 @@ module.exports = function(io, socket, sb, activeRooms) {
       console.error('🚨 [arena_check_my_request]', err.message);
     }
   });
+};
