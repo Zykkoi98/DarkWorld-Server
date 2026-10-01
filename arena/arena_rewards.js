@@ -1,6 +1,6 @@
 // ============================================================================
-// ===== 🏆 РАСЧЁТ НАГРАД PVP АРЕНЫ (ARENA_REWARDS.JS) =====
-// ===== Combat Power, XP, золото =====
+// ===== 🏆 РАСЧЁТ НАГРАД PVP АРЕНЫ (ARENA_REWARDS.JS) — v3 =====
+// ===== Contribution = доля от maxHp врага. Золото = 0.5 × Lv (в 10× меньше) =====
 // ============================================================================
 
 const GAME_ITEMS_DATABASE = require('./../shop/shop_items_config');
@@ -14,7 +14,6 @@ function getGearContribution(player) {
   const eq = player.equipped;
   let total = 0;
 
-  // Обычные слоты
   const slots = ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand'];
   slots.forEach(slot => {
     const raw = eq[slot];
@@ -25,7 +24,6 @@ function getGearContribution(player) {
     if (item && item.level) total += item.level * 2;
   });
 
-  // Кольца
   if (Array.isArray(eq.rings)) {
     eq.rings.forEach(raw => {
       const itemId = (raw && typeof raw === 'object') ? raw.id : raw;
@@ -63,16 +61,9 @@ function getCpMultiplier(cpWinner, cpLoser) {
 // ============================================================================
 // ОСНОВНАЯ ФУНКЦИЯ: расчёт наград для всех участников боя
 // ============================================================================
-/**
- * @param {Object} room - комната боя (teamA, teamB, result: 'win'|'lose'|'draw')
- * @param {Object} damageStats - { [uuid]: { damageByTarget: { [targetUuid]: N }, totalDamage: N } }
- * @returns {Object} - { [uuid]: { xp, gold, isWinner, breakdown } }
- */
 function calculateBattleRewards(room, damageStats) {
   const rewards = {};
 
-  // Определяем кто победил
-  // room.result: 'win' (teamA победила), 'lose' (teamB победила), 'draw'
   const result = room.result;
 
   let winners, losers;
@@ -83,7 +74,6 @@ function calculateBattleRewards(room, damageStats) {
     winners = room.teamB;
     losers = room.teamA;
   } else {
-    // Ничья — все получают только XP по урону, без золота
     winners = [];
     losers = [...room.teamA, ...room.teamB];
   }
@@ -91,49 +81,44 @@ function calculateBattleRewards(room, damageStats) {
   const totalPlayers = room.teamA.length + room.teamB.length;
 
   // ============================================================================
-  // ЗОЛОТО — пул и делёж поровну
+  // ЗОЛОТО — пул 0.5 × Lv, cap 5 × N
   // ============================================================================
   let goldPerWinner = 0;
   let goldPerLoser = 0;
 
   if (winners.length > 0 && losers.length > 0) {
-    const rawGoldPool = losers.reduce((sum, l) => sum + (5 * Number(l.level || 1)), 0);
-    const goldPool = Math.min(rawGoldPool, totalPlayers * 50);
+    const rawGoldPool = losers.reduce((sum, l) => sum + (0.5 * Number(l.level || 1)), 0);
+    const goldPool = Math.min(rawGoldPool, totalPlayers * 5);
 
-    goldPerWinner = Math.floor((goldPool * 0.8) / winners.length);
-    goldPerLoser  = Math.floor((goldPool * 0.2) / losers.length);
+    const winnerShare = (goldPool * 0.8) / winners.length;
+    const loserShare  = (goldPool * 0.2) / losers.length;
+
+    goldPerWinner = Math.floor(winnerShare);
+    goldPerLoser  = Math.floor(loserShare);
   }
 
   // ============================================================================
   // XP — индивидуально по каждому врагу
   // ============================================================================
-  function calcXpFor(fighter, opponents, teammates, isWinner) {
+  function calcXpFor(fighter, opponents, isWinner) {
     let totalXp = 0;
     const breakdown = [];
 
     opponents.forEach(enemy => {
       const myDmg = damageStats[fighter.uuid]?.damageByTarget?.[enemy.uuid] || 0;
-      if (myDmg === 0) return;   // не бил этого врага — 0 XP за него
+      if (myDmg === 0) return;
 
-      // Общий урон МОЕЙ КОМАНДЫ по этому врагу
-      const teamDmg = teammates.reduce((sum, m) => {
-        return sum + (damageStats[m.uuid]?.damageByTarget?.[enemy.uuid] || 0);
-      }, 0);
+      // 🔥 CONTRIBUTION = доля от maxHp врага
+      const enemyMaxHp = Number(enemy.maxHp || 1);
+      const contribution = Math.min(1.0, myDmg / enemyMaxHp);
 
-      if (teamDmg === 0) return;
-
-      const contribution = myDmg / teamDmg;
-
-      // Combat Power
       const cpMe = getCombatPower(fighter);
       const cpEnemy = getCombatPower(enemy);
 
-      // Потенциальная XP за убийство/урон этому врагу
       const baseXp = getBaseXp(enemy.level);
       const mult = getCpMultiplier(cpMe, cpEnemy);
       const potentialXp = baseXp * mult;
 
-      // Моя доля
       const xpForThisEnemy = potentialXp * contribution;
       totalXp += xpForThisEnemy;
 
@@ -142,7 +127,7 @@ function calculateBattleRewards(room, damageStats) {
         enemyName: enemy.name,
         enemyLevel: Number(enemy.level || 1),
         myDamage: Math.floor(myDmg),
-        teamDamage: Math.floor(teamDmg),
+        enemyMaxHp: Math.floor(enemyMaxHp),
         contribution: Number(contribution.toFixed(3)),
         baseXp: Math.floor(baseXp),
         cpMultiplier: Number(mult.toFixed(2)),
@@ -151,21 +136,16 @@ function calculateBattleRewards(room, damageStats) {
       });
     });
 
-    // Проигравшим — штраф 20%
     const finalXpRaw = isWinner ? totalXp : totalXp * 0.2;
-
-    // Cap: level × 100
     const cap = Number(fighter.level || 1) * 100;
     const finalXp = Math.min(Math.floor(finalXpRaw), cap);
 
     return { finalXp, totalXpRaw: Math.floor(finalXpRaw), cap, breakdown };
   }
 
-  // ============================================================================
   // Победители
-  // ============================================================================
   winners.forEach(w => {
-    const { finalXp, breakdown } = calcXpFor(w, losers, winners, true);
+    const { finalXp, breakdown } = calcXpFor(w, losers, true);
 
     rewards[w.uuid] = {
       uuid: w.uuid,
@@ -178,17 +158,10 @@ function calculateBattleRewards(room, damageStats) {
     };
   });
 
-  // ============================================================================
   // Проигравшие
-  // ============================================================================
   losers.forEach(l => {
     const opponents = winners.length > 0 ? winners : [...room.teamA, ...room.teamB].filter(f => f.uuid !== l.uuid);
-    const teammates = [...room.teamA, ...room.teamB].filter(f =>
-      (room.teamA.includes(l) && room.teamA.includes(f)) ||
-      (room.teamB.includes(l) && room.teamB.includes(f))
-    );
-
-    const { finalXp, breakdown } = calcXpFor(l, opponents, teammates, false);
+    const { finalXp, breakdown } = calcXpFor(l, opponents, false);
 
     rewards[l.uuid] = {
       uuid: l.uuid,
