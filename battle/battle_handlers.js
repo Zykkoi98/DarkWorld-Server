@@ -309,13 +309,19 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
   });
 
-  // ==========================================================================
+ // ==========================================================================
   // 5. БАНКА
   // ==========================================================================
   socket.on('battle_use_potion', async ({ roomId }) => {
     try {
       const room = activeRooms[roomId];
       if (!room) return;
+
+      // 🔥 АНТИЧИТ: нельзя пить банку после завершения боя
+      if (room.state !== 'active') {
+        console.log(`🚫 [БАНКА] Бой завершён (state=${room.state}) — отклонено`);
+        return;
+      }
 
       const fighter = [...room.teamA, ...room.teamB].find(p => p.socketId === socket.id);
       if (!fighter || fighter.currentHp <= 0) return;
