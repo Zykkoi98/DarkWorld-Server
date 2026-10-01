@@ -169,15 +169,23 @@ module.exports = function(io, socket, sb, activeRooms) {
   // --------------------------------------------------------------------------
   // 2. СОЗДАНИЕ СВОЕЙ ЗАЯВКИ
   // --------------------------------------------------------------------------
-  socket.on('arena_create_request', async ({ mode = 'duel_1v1' } = {}) => {
+    socket.on('arena_create_request', async ({ mode = 'duel_1v1' } = {}) => {
     try {
-      const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
-      if (!userId) return socket.emit('arena_error', 'Не авторизован');
+        const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
+        if (!userId) return socket.emit('arena_error', 'Не авторизован');
 
-      // Защита: одна заявка на игрока
-      if (arenaLobby.has(userId)) {
+        // 🔥 Если игрок уже в лобби, но отключён — обновляем socketId
+        const existing = arenaLobby.get(userId);
+        if (existing) {
+        if (existing.disconnectedAt) {
+            console.log(`♻️ [ARENA] ${existing.name} вернулся после F5 — восстанавливаем заявку`);
+            existing.socketId = socket.id;
+            existing.disconnectedAt = null;
+            io.emit('arena_lobby_updated');
+            return socket.emit('arena_lobby_updated_self');
+        }
         return socket.emit('arena_error', 'У вас уже есть активная заявка');
-      }
+        }
 
       // Читаем профиль из БД
       const { data: row } = await sb.from('players').select('*').eq('id', userId).maybeSingle();
@@ -435,7 +443,7 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
   }, 30 * 1000);   // каждые 30 секунд
  // --------------------------------------------------------------------------
-  // 8. DISCONNECT — убираем игрока из лобби
+  // 8. DISCONNECT — заявку НЕ удаляем сразу (даём время на F5)
   // --------------------------------------------------------------------------
   socket.on('disconnect', () => {
     const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
@@ -444,22 +452,65 @@ module.exports = function(io, socket, sb, activeRooms) {
     const entry = arenaLobby.get(userId);
     if (!entry) return;
 
-    console.log(`🚪 [ARENA] ${entry.name} отключился — убираем из лобби`);
-    arenaLobby.delete(userId);
+    console.log(`⚠️ [ARENA] ${entry.name} отключился — заявка остаётся на 30 сек`);
 
-    // Если был владельцем — удаляем всю комнату
-    if (entry.id === entry.ownerId) {
-      const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === entry.ownerId);
-      for (const m of members) {
-        arenaLobby.delete(m.id);
-        io.to(m.socketId).emit('arena_request_cancelled', { reason: 'Владелец покинул лобби' });
+    // 🔥 Даём 30 секунд на F5/переподключение
+    const disconnectTime = Date.now();
+    entry.disconnectedAt = disconnectTime;
+
+    setTimeout(() => {
+      const currentEntry = arenaLobby.get(userId);
+      if (!currentEntry) return;
+
+      // Если за это время игрок переподключился и обновил socketId — не удаляем
+      if (currentEntry.disconnectedAt !== disconnectTime) {
+        console.log(`✅ [ARENA] ${currentEntry.name} вернулся — заявка сохранена`);
+        return;
       }
-      deleteLobbyFromDb(sb, entry.ownerId);
-    } else {
-      // Если был участником — просто выходим
-      sb.from('arena_lobby').delete().eq('id', userId).then(() => {});
-    }
 
-    io.emit('arena_lobby_updated');
+      console.log(`🚪 [ARENA] ${currentEntry.name} не вернулся за 30 сек — убираем из лобби`);
+
+      const ownerId = currentEntry.ownerId;
+      const wasOwner = (currentEntry.id === ownerId);
+      arenaLobby.delete(userId);
+
+      if (wasOwner) {
+        const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === ownerId);
+        for (const m of members) {
+          arenaLobby.delete(m.id);
+          io.to(m.socketId).emit('arena_request_cancelled', { reason: 'Владелец покинул лобби' });
+        }
+        deleteLobbyFromDb(sb, ownerId);
+      } else {
+        sb.from('arena_lobby').delete().eq('id', userId).then(() => {});
+      }
+
+      io.emit('arena_lobby_updated');
+    }, 30 * 1000);   // 30 сек
   });
 };
+// --------------------------------------------------------------------------
+  // 9. ПРОВЕРКА — я в лобби? (для восстановления после F5)
+  // --------------------------------------------------------------------------
+  socket.on('arena_check_my_request', () => {
+    try {
+      const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
+      if (!userId) return;
+
+      const entry = arenaLobby.get(userId);
+      if (!entry) {
+        socket.emit('arena_lobby_updated_self', { restored: false });
+        return;
+      }
+
+      // 🔥 Восстанавливаем: обновляем socketId и снимаем пометку disconnect
+      console.log(`♻️ [ARENA] ${entry.name} вернулся после F5 — восстанавливаем заявку`);
+      entry.socketId = socket.id;
+      entry.disconnectedAt = null;
+
+      socket.emit('arena_lobby_updated_self', { restored: true });
+      io.emit('arena_lobby_updated');
+    } catch (err) {
+      console.error('🚨 [arena_check_my_request]', err.message);
+    }
+  });
