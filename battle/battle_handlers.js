@@ -655,34 +655,39 @@ module.exports = function(io, socket, sb, activeRooms) {
     }, durationMs);
   }
 
-  // ==========================================================================
+ // ==========================================================================
   // 13. DISCONNECT (зрители + участники)
   // ==========================================================================
   socket.on('disconnect', () => {
-  console.log(`❌ [BATTLE] Сокет отключён: ${socket.id}`);
+    console.log(`❌ [BATTLE] Сокет отключён: ${socket.id}`);
 
-  // Убираем из зрителей
-  Object.keys(activeRooms).forEach(roomId => {
-    const room = activeRooms[roomId];
-    if (room.spectators && room.spectators.has(socket.id)) {
-      core.removeSpectator(room, socket.id);
-    }
-  });
+    // Убираем из зрителей
+    Object.keys(activeRooms).forEach(roomId => {
+      const room = activeRooms[roomId];
+      if (room.spectators && room.spectators.has(socket.id)) {
+        core.removeSpectator(room, socket.id);
+      }
+    });
 
-  // Помечаем участника как отключённого
-  Object.keys(activeRooms).forEach(roomId => {
-    const room = activeRooms[roomId];
-    const fighter = [...room.teamA, ...room.teamB].find(f => f.socketId === socket.id);
-    if (fighter) {
+    // Помечаем участника как отключённого
+    Object.keys(activeRooms).forEach(roomId => {
+      const room = activeRooms[roomId];
+      const fighter = [...room.teamA, ...room.teamB].find(f => f.socketId === socket.id);
+      if (!fighter) return;
+
       fighter.socketId = null;
       fighter.disconnectedAt = Date.now();
+
+      // 🔥 НЕ рассылаем "отключился", если бой уже завершён
+      if (room.state === 'finished') {
+        console.log(`✅ [BATTLE] ${fighter.name} вышел после боя — тост не отправляем`);
+        return;
+      }
 
       io.to(roomId).emit('opponent_disconnected', {
         name: fighter.name,
         graceSeconds: 60
       });
-
-    }
+    });
   });
-});
 };

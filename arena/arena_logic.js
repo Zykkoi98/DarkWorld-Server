@@ -434,5 +434,32 @@ module.exports = function(io, socket, sb, activeRooms) {
       console.error('🚨 [ARENA] Ошибка очистки:', err.message);
     }
   }, 30 * 1000);   // каждые 30 секунд
+ // --------------------------------------------------------------------------
+  // 8. DISCONNECT — убираем игрока из лобби
+  // --------------------------------------------------------------------------
+  socket.on('disconnect', () => {
+    const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
+    if (!userId) return;
 
+    const entry = arenaLobby.get(userId);
+    if (!entry) return;
+
+    console.log(`🚪 [ARENA] ${entry.name} отключился — убираем из лобби`);
+    arenaLobby.delete(userId);
+
+    // Если был владельцем — удаляем всю комнату
+    if (entry.id === entry.ownerId) {
+      const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === entry.ownerId);
+      for (const m of members) {
+        arenaLobby.delete(m.id);
+        io.to(m.socketId).emit('arena_request_cancelled', { reason: 'Владелец покинул лобби' });
+      }
+      deleteLobbyFromDb(sb, entry.ownerId);
+    } else {
+      // Если был участником — просто выходим
+      sb.from('arena_lobby').delete().eq('id', userId).then(() => {});
+    }
+
+    io.emit('arena_lobby_updated');
+  });
 };
