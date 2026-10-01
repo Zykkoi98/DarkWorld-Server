@@ -588,6 +588,7 @@ module.exports = function(io, socket, sb, activeRooms) {
       }
 
       console.log(`🏁 [ФИНАЛ] ${room.battleType} | ${result.result} | Комната: ${room.id}`);
+      console.log(`📊 [DAMAGE STATS]`, JSON.stringify(room.damageStats, null, 2));
 
     } catch (err) {
       console.error('🚨 [finishBattle]', err.message);
