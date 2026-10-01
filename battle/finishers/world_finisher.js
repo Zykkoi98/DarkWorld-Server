@@ -1,7 +1,6 @@
 // ============================================================================
-// ===== 🌍 ФИНАЛИЗЕР БОЯ НА КАРТЕ МИРА (WORLD_FINISHER.JS) =====
-// ===== Награды за убийство мобов на клетке: gold + xp =====
-// ===== Заменяет forest_finisher =====
+// ===== 🌍 ФИНАЛИЗЕР БОЯ НА КАРТЕ МИРА (WORLD_FINISHER.JS) — v2 =====
+// ===== Добавлено: applyResults в обеих ветках (победа / поражение) =====
 // ============================================================================
 
 const dbHelper = require('../../db_helper');
@@ -11,16 +10,15 @@ module.exports = {
     const player = room.teamA[0];
     if (!player) {
       console.error('🚨 [WORLD FINISHER] Нет игрока в комнате');
-      return { rewards: null, logs: [] };
+      return { rewards: null, logs: [], applyResults: [] };
     }
 
-    // Свежий профиль из БД — защита от откатов
     const { data: freshDb } = await sb.from('players')
       .select('*').eq('id', Number(player.id)).maybeSingle();
 
     if (!freshDb) {
       console.error('🚨 [WORLD FINISHER] Игрок не найден в БД');
-      return { rewards: null, logs: [] };
+      return { rewards: null, logs: [], applyResults: [] };
     }
 
     let gainedXp = 0;
@@ -29,13 +27,11 @@ module.exports = {
 
     const logs = [];
 
-    // Свежий инвентарь/кукла — защита от откатов
     const liveInventory = freshDb.inventory || { equipment: [], resources: [], consumables: [] };
     const liveEquipped = freshDb.equipped || { rings: [null, null, null] };
     player.inventory = liveInventory;
     player.equipped = liveEquipped;
 
-    // Автодополнение банок
     dbHelper.autoRefillPotionsAfterBattle(player);
 
     if (result === 'win') {
@@ -51,12 +47,14 @@ module.exports = {
       let pointsKey = freshDb.statpoints !== undefined ? 'statpoints' : 'statPoints';
       let newStatPoints = Number(freshDb[pointsKey] || 0);
 
+      let levelUp = false;
       if (newLevel > oldLevel) {
         newStatPoints += (newLevel - oldLevel) * 5;
         player.currentHp = dbHelper.getServerMaxHp({
           endurance: Number(freshDb.endurance || 1),
           equipped: liveEquipped
         });
+        levelUp = true;
         logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${newLevel} уровня!`);
       }
 
@@ -76,6 +74,18 @@ module.exports = {
 
       return {
         rewards: { gold: gainedGold, xp: gainedXp },
+        applyResults: [{
+          uuid: player.uuid,
+          name: player.name,
+          level: oldLevel,
+          isWinner: true,
+          goldGained: gainedGold,
+          xpGained: gainedXp,
+          newLevel,
+          levelUp,
+          finalHp: dbHpPayload,
+          maxHp: 0
+        }],
         logs
       };
 
@@ -97,6 +107,18 @@ module.exports = {
 
       return {
         rewards: { gold: 0, xp: 0 },
+        applyResults: [{
+          uuid: player.uuid,
+          name: player.name,
+          level: Number(freshDb.level || 1),
+          isWinner: false,
+          goldGained: 0,
+          xpGained: 0,
+          newLevel: Number(freshDb.level || 1),
+          levelUp: false,
+          finalHp: dbHpPayload,
+          maxHp: 0
+        }],
         logs
       };
     }

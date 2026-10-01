@@ -1,24 +1,17 @@
 // ============================================================================
-// ===== 🏆 ФИНАЛИЗЕР PVP АРЕНЫ (ARENA_FINISHER.JS) — v2 =====
-// ===== Использует новые формулы наград через arena_rewards.js =====
+// ===== 🏆 ФИНАЛИЗЕР PVP АРЕНЫ (ARENA_FINISHER.JS) — v3 =====
+// ===== Исправлено: levelUp объявлен, maxHp в applyResults =====
 // ============================================================================
 
 const dbHelper = require('./../../db_helper');
 const rewards = require('./../../arena/arena_rewards');
 
 module.exports = {
-  /**
-   * Финализация боя на Арене.
-   * @param {Object} room - комната боя (содержит damageStats)
-   * @param {string} result - 'win' | 'lose' | 'draw'
-   * @param {Object} sb - Supabase клиент
-   * @returns {Object} { rewards, logs }
-   */
   async finalize(room, result, sb) {
     console.log(`🏆 [ARENA FINISHER] Старт финализации. result=${result}`);
 
     // ========================================================================
-    // 1. СЧИТАЕМ НАГРАДЫ через общий модуль
+    // 1. СЧИТАЕМ НАГРАДЫ
     // ========================================================================
     const damageStats = room.damageStats || {};
     const rewardMap = rewards.calculateBattleRewards(room, damageStats);
@@ -26,7 +19,7 @@ module.exports = {
     console.log(`📊 [ARENA FINISHER] Награды рассчитаны для ${Object.keys(rewardMap).length} игроков`);
 
     // ========================================================================
-    // 2. СОБИРАЕМ СПИСОК ВСЕХ ИГРОКОВ + ЧИТАЕМ ИХ ПРОФИЛИ ИЗ БД
+    // 2. ЧИТАЕМ ПРОФИЛИ ИЗ БД
     // ========================================================================
     const allFighters = [...room.teamA, ...room.teamB];
     const dbProfiles = {};
@@ -58,28 +51,25 @@ module.exports = {
         continue;
       }
 
-      // Читаем текущие значения из БД
       const currentGold = dbHelper.safeReadField(dbRow, 'gold', 0);
       const currentXp = dbHelper.safeReadField(dbRow, 'xp', 0);
       const currentLevel = dbHelper.safeReadField(dbRow, 'level', 1);
       const pointsKey = dbRow.statpoints !== undefined ? 'statpoints' : 'statPoints';
       const currentStatPoints = dbHelper.safeReadField(dbRow, pointsKey, 0);
 
-      // Новые значения
       const newGold = currentGold + reward.gold;
       const newXp = currentXp + reward.xp;
       const newLevel = dbHelper.getServerCorrectLevelByXp(newXp);
 
-      // Статпоинты за повышение
+      // 🔥 Статпоинты за повышение
       let newStatPoints = currentStatPoints;
-      let levelUpMessage = null;
+      let levelUp = false;
       if (newLevel > currentLevel) {
         const gainedLevels = newLevel - currentLevel;
         newStatPoints += gainedLevels * 5;
-        levelUpMessage = `🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> ${fighter.name} достиг ${newLevel} уровня! (+${gainedLevels * 5} очков)`;
+        levelUp = true;
       }
 
-      // HP — победителю остаток, проигравшему 20%
       const maxHp = dbHelper.getServerMaxHp({
         endurance: dbHelper.safeReadField(dbRow, 'endurance', 1),
         equipped: dbRow.equipped || {}
@@ -92,16 +82,13 @@ module.exports = {
         finalHp = Math.max(1, Math.floor(maxHp * 0.2));
       }
 
-      // Автопополнение банок после боя
+      // Автопополнение банок
       const playerObjForPotion = {
         equipped: dbRow.equipped || {},
         inventory: dbRow.inventory || { equipment: [], resources: [], consumables: [] }
       };
       dbHelper.autoRefillPotionsAfterBattle(playerObjForPotion);
 
-      // ====================================================================
-      // ОБНОВЛЯЕМ БД
-      // ====================================================================
       try {
         await sb.from('players').update({
           gold: newGold,
@@ -124,15 +111,14 @@ module.exports = {
         goldGained: reward.gold,
         xpGained: reward.xp,
         newLevel,
-        levelUp: newLevel > currentLevel,
+        levelUp,
         finalHp,
-        maxHp,
-        breakdown: reward.breakdown
+        maxHp
       });
     }
 
     // ========================================================================
-    // 4. СОБИРАЕМ ЛОГИ ФИНАЛА (для UI)
+    // 4. ЛОГИ ФИНАЛА
     // ========================================================================
     for (const r of applyResults) {
       const tag = r.isWinner ? '🏆 ПОБЕДА' : '💀 ПОРАЖЕНИЕ';
@@ -149,14 +135,12 @@ module.exports = {
       logs.push(line);
     }
 
-    // Отдельно пишем про повышение уровня
     for (const r of applyResults) {
       if (r.levelUp) {
         logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> ${r.name} → ${r.newLevel} уровень!`);
       }
     }
 
-    // Ничья
     if (result === 'draw') {
       logs.push(`🤝 <strong>НИЧЬЯ НА АРЕНЕ!</strong> Силы равны.`);
     }

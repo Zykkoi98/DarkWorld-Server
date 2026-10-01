@@ -1,6 +1,6 @@
 // ============================================================================
-// ===== 🏰 ФИНАЛИЗЕР БАШНИ (TOWER_FINISHER.JS) — v2 =====
-// ===== Награды + возврат в башню + КД =====
+// ===== 🏰 ФИНАЛИЗЕР БАШНИ (TOWER_FINISHER.JS) — v3 =====
+// ===== С applyResults для универсальной модалки наград =====
 // ============================================================================
 
 const dbHelper = require('../../db_helper');
@@ -10,21 +10,19 @@ module.exports = {
     const player = room.teamA[0];
     if (!player) {
       console.error('🚨 [TOWER FINISHER] Нет игрока в комнате');
-      return { rewards: null, logs: [] };
+      return { rewards: null, logs: [], applyResults: [] };
     }
 
     const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-    // Этаж — откуда пришёл бой
     const currentFloor = Number(room.config?.towerFloor || 1);
 
-    // 🔥 Свежий профиль из БД (защита от откатов)
     const { data: freshDb } = await sb.from('players')
       .select('*').eq('id', Number(player.id)).maybeSingle();
 
     if (!freshDb) {
       console.error('🚨 [TOWER FINISHER] Игрок не найден в БД');
-      return { rewards: null, logs: [] };
+      return { rewards: null, logs: [], applyResults: [] };
     }
 
     let baseGold = Number(freshDb.gold || 0);
@@ -32,7 +30,6 @@ module.exports = {
     let baseTowerCoins = Number(freshDb.tower_coins || 0);
     let currentDbLevel = Number(freshDb.level ?? 1);
 
-    // Свежий инвентарь/кукла
     const liveInventory = freshDb.inventory || { equipment: [], resources: [], consumables: [] };
     const liveEquipped = freshDb.equipped || { rings: [null, null, null] };
     player.inventory = liveInventory;
@@ -53,19 +50,18 @@ module.exports = {
       equipped: player.equipped
     };
 
+    let levelUp = false;
+
     if (result === 'win') {
-      // 🔥 РАСЧЁТ НАГРАД
       room.teamB.forEach(m => {
         const mLevel = Number(m.level ?? 1);
         gainedXp += Number(m.rewardXp || (5 + mLevel * 3));
 
-        // 10% золото
         if (rand(1, 100) <= 10) {
           const goldDrop = m.rewardGold !== undefined ? Number(m.rewardGold) : mLevel;
           gainedGold += goldDrop;
         }
 
-        // 30% монеты Башни
         if (rand(1, 100) <= 30) {
           let maxCoins = 1 + Math.floor((mLevel - 1) / 5);
           const isBoss = String(m.id || '').includes('boss');
@@ -74,12 +70,10 @@ module.exports = {
         }
       });
 
-      // Начисляем всё к свежим значениям из БД
       updatePayload.gold = baseGold + gainedGold;
       updatePayload.xp = baseXp + gainedXp;
       updatePayload.tower_coins = baseTowerCoins + gainedCoins;
 
-      // Проверка левелапа
       const correctLevel = dbHelper.getServerCorrectLevelByXp(updatePayload.xp);
       if (correctLevel > currentDbLevel) {
         updatePayload[pointsKey] = currentDbStatPoints + (correctLevel - currentDbLevel) * 5;
@@ -88,6 +82,7 @@ module.exports = {
           endurance: Number(freshDb.endurance || 1),
           equipped: player.equipped
         });
+        levelUp = true;
         logs.push(`🎉 <strong>УРОВЕНЬ ПОВЫШЕН!</strong> Вы достигли ${correctLevel} уровня!`);
       } else {
         updatePayload.level = currentDbLevel;
@@ -95,7 +90,6 @@ module.exports = {
         updatePayload.hp = player.currentHp;
       }
 
-      // 🔥 Открываем следующий этаж
       updatePayload.tower_floor = currentFloor + 1;
 
       let rewardText = `🏁 <strong>ПОБЕДА В БАШНЕ!</strong> Этаж ${currentFloor}. Награда: ✨ +${gainedXp} опыта`;
@@ -105,7 +99,6 @@ module.exports = {
       logs.push(rewardText);
 
     } else {
-      // 🔥 ПОРАЖЕНИЕ — КД 3 часа
       const cooldownTime = new Date(Date.now() + 3 * 60 * 60 * 1000);
 
       await sb.from('player_timers').upsert({
@@ -128,11 +121,23 @@ module.exports = {
       logs.push(`🏁 <strong>ВАС ОДОЛЕЛИ...</strong> Башня сброшена на 1 этаж. КД 3 часа.`);
     }
 
-    // Запись в БД
     await sb.from('players').update(updatePayload).eq('id', Number(player.id));
 
     return {
       rewards: { xp: gainedXp, gold: gainedGold, coins: gainedCoins },
+      applyResults: [{
+        uuid: player.uuid,
+        name: player.name,
+        level: currentDbLevel,
+        isWinner: result === 'win',
+        goldGained: gainedGold,
+        xpGained: gainedXp,
+        towerCoinsGained: gainedCoins,
+        newLevel: updatePayload.level,
+        levelUp: levelUp,
+        finalHp: updatePayload.hp || 0,
+        maxHp: 0
+      }],
       logs
     };
   }

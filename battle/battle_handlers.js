@@ -566,7 +566,7 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
   }
 
-  // ==========================================================================
+    // ==========================================================================
   // 11. ФИНАЛИЗАЦИЯ
   // ==========================================================================
   async function finishBattle(room, result) {
@@ -587,7 +587,7 @@ module.exports = function(io, socket, sb, activeRooms) {
         io.to(room.id).emit('battle_final_logs', { logs: finalData.logs });
       }
 
-      // 🔥 НОВОЕ: рассылаем каждому игроку ПЕРСОНАЛЬНЫЕ награды
+      // 🔥 УНИВЕРСАЛЬНО: рассылаем награды всем игрокам (все режимы)
       if (finalData.applyResults && Array.isArray(finalData.applyResults)) {
         for (const applyResult of finalData.applyResults) {
           const fighter = [...room.teamA, ...room.teamB].find(f => f.uuid === applyResult.uuid);
@@ -595,15 +595,18 @@ module.exports = function(io, socket, sb, activeRooms) {
 
           io.to(fighter.socketId).emit('battle_final_rewards', {
             myUuid: fighter.uuid,
+            battleType: room.battleType,
             result: result.result,
             isWinner: applyResult.isWinner,
-            goldGained: applyResult.goldGained,
-            xpGained: applyResult.xpGained,
+            goldGained: applyResult.goldGained || 0,
+            xpGained: applyResult.xpGained || 0,
+            towerCoinsGained: applyResult.towerCoinsGained || 0,
+            items: applyResult.items || [],
+            resources: applyResult.resources || [],
             newLevel: applyResult.newLevel,
-            levelUp: applyResult.levelUp,
+            levelUp: !!applyResult.levelUp,
             finalHp: applyResult.finalHp,
-            maxHp: applyResult.maxHp,
-            breakdown: applyResult.breakdown || []
+            maxHp: applyResult.maxHp
           });
         }
       }
