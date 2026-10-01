@@ -1,15 +1,27 @@
 // ============================================================================
-// ===== 🧠 ЯДРО БОЯ (BATTLE_CORE.JS) — v2 (со зрителями) =====
-// ===== Управление комнатами + логи + зрители =====
+// ===== 🧠 ЯДРО БОЯ (BATTLE_CORE.JS) — v3 (со сбором damageStats) =====
+// ===== Управление комнатами + логи + зрители + статистика урона =====
 // ============================================================================
 
 const engine = require('./battle_engine');
 const state = require('./battle_state');
 
 // ============================================================================
+// 🔥 НАКОПЛЕНИЕ СТАТИСТИКИ УРОНА
+// ============================================================================
+function addDamage(room, attackerUuid, targetUuid, damage) {
+  if (!room.damageStats) room.damageStats = {};
+  if (!room.damageStats[attackerUuid]) {
+    room.damageStats[attackerUuid] = { damageByTarget: {}, totalDamage: 0 };
+  }
+  const stats = room.damageStats[attackerUuid];
+  stats.damageByTarget[targetUuid] = (stats.damageByTarget[targetUuid] || 0) + damage;
+  stats.totalDamage += damage;
+}
+
+// ============================================================================
 // СОЗДАНИЕ КОМНАТЫ
 // ============================================================================
-
 function createRoom({ battleType, teamA, teamB, config, params = {} }) {
   const roomId = params.roomId || `room_${battleType}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
@@ -45,7 +57,11 @@ function createRoom({ battleType, teamA, teamB, config, params = {} }) {
     logs: [],
 
     // 🔥 ЗРИТЕЛИ
-    spectators: new Set()   // socketId зрителей
+    spectators: new Set(),
+
+    // 🔥 СТАТИСТИКА УРОНА (для расчёта наград PvP)
+    // Формат: { [attacker_uuid]: { damageByTarget: { [target_uuid]: N }, totalDamage: N } }
+    damageStats: {}
   };
 
   return room;
@@ -54,7 +70,6 @@ function createRoom({ battleType, teamA, teamB, config, params = {} }) {
 // ============================================================================
 // ЛОГИ РАУНДА
 // ============================================================================
-
 function addRoundLogs(room, roundNumber, logs) {
   if (!room.logs) room.logs = [];
   room.logs.push({
@@ -71,7 +86,6 @@ function getAllLogs(room) {
 // ============================================================================
 // ЗРИТЕЛИ
 // ============================================================================
-
 function addSpectator(room, socketId) {
   if (!room.spectators) room.spectators = new Set();
   room.spectators.add(socketId);
@@ -91,7 +105,6 @@ function getSpectatorCount(room) {
 // ============================================================================
 // ПРИЁМ ХОДА
 // ============================================================================
-
 function submitTurn(room, uuid, payload) {
   if (!room || room.state !== 'active') {
     return { ok: false, error: 'Бой неактивен' };
@@ -136,7 +149,6 @@ function submitTurn(room, uuid, payload) {
 // ============================================================================
 // ГОТОВ ЛИ РАУНД
 // ============================================================================
-
 function isReadyForRound(room) {
   const aliveHumans = [...room.teamA, ...room.teamB]
     .filter(f => !f.isBot && f.currentHp > 0);
@@ -147,7 +159,6 @@ function isReadyForRound(room) {
 // ============================================================================
 // РАСЧЁТ РАУНДА
 // ============================================================================
-
 function executeRound(room) {
   if (!room || room.state !== 'active') {
     return { logs: [], isOver: true, result: 'error', updates: [] };
@@ -250,7 +261,14 @@ function executeRound(room) {
       const result = engine.calculateHit(attacker, target, zone, { rand, damageFactor, zoneNames });
 
       if (result.hit) {
+        // 🔥 Фактический урон (не больше чем оставалось HP у цели)
+        const damageDealt = Math.min(result.damage, Number(target.currentHp || 0));
         target.currentHp = Math.max(0, Number(target.currentHp || 0) - result.damage);
+
+        // 🔥 Пишем урон в статистику (даже если цель выжила)
+        if (damageDealt > 0) {
+          addDamage(room, attacker.uuid, target.uuid, damageDealt);
+        }
       }
 
       logs.push(result.log);
@@ -267,7 +285,6 @@ function executeRound(room) {
 // ============================================================================
 // ФИНАЛИЗАЦИЯ РАУНДА
 // ============================================================================
-
 function finalizeRound(room, logs) {
   const isATeamDead = !state.isTeamAlive(room, 'A');
   const isBTeamDead = !state.isTeamAlive(room, 'B');
@@ -301,14 +318,14 @@ function finalizeRound(room, logs) {
     turnCount: currentRound,
     updates,
     teamA: state.serializeTeam(room.teamA),
-    teamB: state.serializeTeam(room.teamB)
+    teamB: state.serializeTeam(room.teamB),
+    damageStats: room.damageStats || {}   // 🔥 передаём статистику урона
   };
 }
 
 // ============================================================================
 // СОСТОЯНИЕ БОЯ ДЛЯ ЗРИТЕЛЯ
 // ============================================================================
-
 function getBattleState(room) {
   return {
     roomId: room.id,
@@ -325,7 +342,6 @@ function getBattleState(room) {
 // ============================================================================
 // УНИЧТОЖЕНИЕ КОМНАТЫ
 // ============================================================================
-
 function destroyRoom(room) {
   if (!room) return;
   room.state = 'finished';
@@ -338,13 +354,13 @@ function destroyRoom(room) {
 // ============================================================================
 // ЭКСПОРТ
 // ============================================================================
-
 module.exports = {
   createRoom,
   submitTurn,
   isReadyForRound,
   executeRound,
   destroyRoom,
+  addDamage,             // 🔥 НОВОЕ
 
   // Зрители
   addSpectator,
