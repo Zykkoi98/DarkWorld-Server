@@ -13,6 +13,7 @@ const battleHandlers = require('./battle/battle_handlers');   // 🔥 НОВОЕ
 const shopLogic = require('./shop/shop_logic');
 const towerLogic = require('./tower/tower_logic');
 const worldLogic = require('./world/world_logic');
+const arenaLogic = require('./arena/arena_logic');
 
 const app = express();
 app.get('/', (req, res) => res.send('⚔️ Боевое ядро Dark World активно на Render!'));
@@ -257,6 +258,9 @@ io.on('connection', (socket) => {
   if (typeof worldLogic === 'function') {
     worldLogic(io, socket, sb, activeRooms);
   }
+  if (typeof arenaLogic === 'function') {
+  arenaLogic(io, socket, sb, activeRooms);
+  } 
 
   // ==========================================================================
   // DISCONNECT
