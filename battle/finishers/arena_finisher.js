@@ -3,8 +3,8 @@
 // ===== Использует новые формулы наград через arena_rewards.js =====
 // ============================================================================
 
-const dbHelper = require('./../db_helper');
-const rewards = require('./arena_rewards');
+const dbHelper = require('./../../db_helper');
+const rewards = require('./../../arena/arena_rewards');
 
 module.exports = {
   /**
