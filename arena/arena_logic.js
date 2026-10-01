@@ -491,26 +491,40 @@ module.exports = function(io, socket, sb, activeRooms) {
   // --------------------------------------------------------------------------
   // 9. ПРОВЕРКА — я в лобби? (для восстановления после F5)
   // --------------------------------------------------------------------------
-  socket.on('arena_check_my_request', () => {
+  socket.on('arena_check_my_request', (arg1, arg2) => {
     try {
+      // 🔥 Поддержка обеих форм вызова:
+      // socket.emit('arena_check_my_request')            → arg1 = undefined
+      // socket.emit('arena_check_my_request', callback)  → arg1 = callback
+      const callback = (typeof arg1 === 'function') ? arg1
+                     : (typeof arg2 === 'function') ? arg2
+                     : null;
+
       const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
-      if (!userId) return;
+      if (!userId) {
+        if (callback) callback({ restored: false });
+        return;
+      }
 
       const entry = arenaLobby.get(userId);
       if (!entry) {
+        console.log(`ℹ️ [ARENA] Игрок ${userId} не в лобби`);
+        if (callback) callback({ restored: false });
         socket.emit('arena_lobby_updated_self', { restored: false });
         return;
       }
 
-      // 🔥 Восстанавливаем: обновляем socketId и снимаем пометку disconnect
       console.log(`♻️ [ARENA] ${entry.name} вернулся после F5 — восстанавливаем заявку`);
       entry.socketId = socket.id;
       entry.disconnectedAt = null;
 
+      if (callback) callback({ restored: true });
       socket.emit('arena_lobby_updated_self', { restored: true });
       io.emit('arena_lobby_updated');
     } catch (err) {
       console.error('🚨 [arena_check_my_request]', err.message);
+      if (typeof arg1 === 'function') arg1({ restored: false });
+      else if (typeof arg2 === 'function') arg2({ restored: false });
     }
   });
 };
