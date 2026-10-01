@@ -581,14 +581,34 @@ module.exports = function(io, socket, sb, activeRooms) {
     try {
       const finalData = await finisher.finalize(room, result.result, sb);
 
+      // Логи финала
       if (finalData.logs && finalData.logs.length > 0) {
-        // Добавляем финальные логи в архив
         core.addRoundLogs(room, 'final', finalData.logs);
         io.to(room.id).emit('battle_final_logs', { logs: finalData.logs });
       }
 
+      // 🔥 НОВОЕ: рассылаем каждому игроку ПЕРСОНАЛЬНЫЕ награды
+      if (finalData.applyResults && Array.isArray(finalData.applyResults)) {
+        for (const applyResult of finalData.applyResults) {
+          const fighter = [...room.teamA, ...room.teamB].find(f => f.uuid === applyResult.uuid);
+          if (!fighter || !fighter.socketId) continue;
+
+          io.to(fighter.socketId).emit('battle_final_rewards', {
+            myUuid: fighter.uuid,
+            result: result.result,
+            isWinner: applyResult.isWinner,
+            goldGained: applyResult.goldGained,
+            xpGained: applyResult.xpGained,
+            newLevel: applyResult.newLevel,
+            levelUp: applyResult.levelUp,
+            finalHp: applyResult.finalHp,
+            maxHp: applyResult.maxHp,
+            breakdown: applyResult.breakdown || []
+          });
+        }
+      }
+
       console.log(`🏁 [ФИНАЛ] ${room.battleType} | ${result.result} | Комната: ${room.id}`);
-      console.log(`📊 [DAMAGE STATS]`, JSON.stringify(room.damageStats, null, 2));
 
     } catch (err) {
       console.error('🚨 [finishBattle]', err.message);
