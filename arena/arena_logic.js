@@ -376,32 +376,65 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     console.log(`🎬 [ARENA] Комната ${ownerId} набрала ${members.length}/${maxPlayers}. Стартуем!`);
 
+    // 🔥 ЧИТАЕМ СВЕЖИЕ ПРОФИЛИ ИЗ БД (реген мог изменить HP)
+    const freshProfiles = {};
+    for (const m of members) {
+      try {
+        const { data } = await sb.from('players')
+          .select('hp, level, strength, agility, endurance, luck, equipped, inventory')
+          .eq('id', Number(m.id))
+          .maybeSingle();
+        if (data) freshProfiles[m.id] = data;
+      } catch (err) {
+        console.error(`🚨 [ARENA] Не удалось прочитать свежий профиль ${m.name}:`, err.message);
+      }
+    }
+
     // Удаляем из лобби
     for (const m of members) {
       arenaLobby.delete(m.id);
     }
     await deleteLobbyFromDb(sb, ownerId);
 
-    // Собираем бойцов
-    const buildFighter = (entry) => ({
-      uuid: `player_${entry.id}`,
-      id: String(entry.id),
-      name: entry.name,
-      icon: '👤',
-      isBot: false,
-      level: entry.level,
-      strength: entry.playerData.stats.strength,
-      agility: entry.playerData.stats.agility,
-      endurance: entry.playerData.stats.endurance,
-      luck: entry.playerData.stats.luck,
-      currentHp: entry.hp,
-      maxHp: entry.maxHp,
-      equipped: entry.playerData.equipped,
-      inventory: entry.playerData.inventory,
-      turn: null,
-      afkTurns: 0,
-      socketId: entry.socketId
-    });
+    // 🔥 Собираем бойцов со свежими данными
+    const buildFighter = (entry) => {
+      const fresh = freshProfiles[entry.id] || {};
+
+      const freshLevel = Number(fresh.level || entry.level);
+      const freshEndurance = Number(fresh.endurance ?? entry.playerData.stats.endurance);
+      const freshEquipped = fresh.equipped || entry.playerData.equipped;
+
+      const freshMaxHp = dbHelper.getServerMaxHp({
+        level: freshLevel,
+        endurance: freshEndurance,
+        equipped: freshEquipped
+      });
+
+      const freshHp = Math.min(
+        Number(fresh.hp ?? entry.hp),
+        freshMaxHp
+      );
+
+      return {
+        uuid: `player_${entry.id}`,
+        id: String(entry.id),
+        name: entry.name,
+        icon: '👤',
+        isBot: false,
+        level: freshLevel,
+        strength: Number(fresh.strength ?? entry.playerData.stats.strength),
+        agility: Number(fresh.agility ?? entry.playerData.stats.agility),
+        endurance: freshEndurance,
+        luck: Number(fresh.luck ?? entry.playerData.stats.luck),
+        currentHp: freshHp,
+        maxHp: freshMaxHp,
+        equipped: freshEquipped,
+        inventory: fresh.inventory || entry.playerData.inventory,
+        turn: null,
+        afkTurns: 0,
+        socketId: entry.socketId
+      };
+    };
 
     const teamAFighters = teamA.map(buildFighter);
     const teamBFighters = teamB.map(buildFighter);
@@ -460,12 +493,24 @@ module.exports = function(io, socket, sb, activeRooms) {
         const teamSize = owner.teamSize;
         const maxPlayers = owner.maxPlayers;
 
-        // 🔥 Считаем по командам
         const teamA = members.filter(m => m.team === 'A');
         const teamB = members.filter(m => m.team === 'B');
 
-        // 🔥 Заполняем ботами ВСЕГДА (и 1×1, и N×N) — это фарм-заполнитель
         console.log(`⏰ [ARENA] Заявка ${ownerId} истекла. Заполняем ботами: A=${teamA.length}/${teamSize}, B=${teamB.length}/${teamSize}`);
+
+        // 🔥 ЧИТАЕМ СВЕЖИЕ ПРОФИЛИ ИЗ БД
+        const freshProfiles = {};
+        for (const m of members) {
+          try {
+            const { data } = await sb.from('players')
+              .select('hp, level, strength, agility, endurance, luck, equipped, inventory')
+              .eq('id', Number(m.id))
+              .maybeSingle();
+            if (data) freshProfiles[m.id] = data;
+          } catch (err) {
+            console.error(`🚨 [ARENA] Не удалось прочитать свежий профиль ${m.name}:`, err.message);
+          }
+        }
 
         // Удаляем из лобби
         for (const m of members) {
@@ -478,36 +523,52 @@ module.exports = function(io, socket, sb, activeRooms) {
           members.reduce((sum, m) => sum + m.level, 0) / members.length
         ));
 
-        // 🔥 Создаём ботов в пустые слоты команд
         const arenaBots = require('./arena_bots');
+
+        // 🔥 Функция сборки игрока со свежими данными
+        const buildPlayerFighter = (entry) => {
+          const fresh = freshProfiles[entry.id] || {};
+          const freshLevel = Number(fresh.level || entry.level);
+          const freshEndurance = Number(fresh.endurance ?? entry.playerData.stats.endurance);
+          const freshEquipped = fresh.equipped || entry.playerData.equipped;
+
+          const freshMaxHp = dbHelper.getServerMaxHp({
+            level: freshLevel,
+            endurance: freshEndurance,
+            equipped: freshEquipped
+          });
+
+          const freshHp = Math.min(Number(fresh.hp ?? entry.hp), freshMaxHp);
+
+          return {
+            uuid: `player_${entry.id}`,
+            id: String(entry.id),
+            name: entry.name,
+            icon: '👤',
+            isBot: false,
+            level: freshLevel,
+            strength: Number(fresh.strength ?? entry.playerData.stats.strength),
+            agility: Number(fresh.agility ?? entry.playerData.stats.agility),
+            endurance: freshEndurance,
+            luck: Number(fresh.luck ?? entry.playerData.stats.luck),
+            currentHp: freshHp,
+            maxHp: freshMaxHp,
+            equipped: freshEquipped,
+            inventory: fresh.inventory || entry.playerData.inventory,
+            turn: null,
+            afkTurns: 0,
+            socketId: entry.socketId
+          };
+        };
+
         const teamAFighters = [];
         const teamBFighters = [];
 
         // Заполняем команду A
         for (let i = 0; i < teamSize; i++) {
           if (i < teamA.length) {
-            const entry = teamA[i];
-            teamAFighters.push({
-              uuid: `player_${entry.id}`,
-              id: String(entry.id),
-              name: entry.name,
-              icon: '👤',
-              isBot: false,
-              level: entry.level,
-              strength: entry.playerData.stats.strength,
-              agility: entry.playerData.stats.agility,
-              endurance: entry.playerData.stats.endurance,
-              luck: entry.playerData.stats.luck,
-              currentHp: entry.hp,
-              maxHp: entry.maxHp,
-              equipped: entry.playerData.equipped,
-              inventory: entry.playerData.inventory,
-              turn: null,
-              afkTurns: 0,
-              socketId: entry.socketId
-            });
+            teamAFighters.push(buildPlayerFighter(teamA[i]));
           } else {
-            // 🔥 Пустой слот — бот
             const bot = await arenaBots.createBotForLevel(avgLevel, i);
             teamAFighters.push(bot);
           }
@@ -516,33 +577,13 @@ module.exports = function(io, socket, sb, activeRooms) {
         // Заполняем команду B
         for (let i = 0; i < teamSize; i++) {
           if (i < teamB.length) {
-            const entry = teamB[i];
-            teamBFighters.push({
-              uuid: `player_${entry.id}`,
-              id: String(entry.id),
-              name: entry.name,
-              icon: '👤',
-              isBot: false,
-              level: entry.level,
-              strength: entry.playerData.stats.strength,
-              agility: entry.playerData.stats.agility,
-              endurance: entry.playerData.stats.endurance,
-              luck: entry.playerData.stats.luck,
-              currentHp: entry.hp,
-              maxHp: entry.maxHp,
-              equipped: entry.playerData.equipped,
-              inventory: entry.playerData.inventory,
-              turn: null,
-              afkTurns: 0,
-              socketId: entry.socketId
-            });
+            teamBFighters.push(buildPlayerFighter(teamB[i]));
           } else {
             const bot = await arenaBots.createBotForLevel(avgLevel, i + teamSize);
             teamBFighters.push(bot);
           }
         }
 
-        // 🔥 Создаём бой
         const config = router.getConfig('arena_pvp');
         const room = core.createRoom({
           battleType: 'arena_pvp',
@@ -554,7 +595,6 @@ module.exports = function(io, socket, sb, activeRooms) {
 
         activeRooms[room.id] = room;
 
-        // Регистрируем только игроков (не ботов)
         for (const entry of members) {
           const fighter = [...teamAFighters, ...teamBFighters].find(f =>
             !f.isBot && f.id === String(entry.id)
