@@ -117,7 +117,12 @@ function calculateBattleRewards(room, damageStats) {
 
       const baseXp = getBaseXp(enemy.level);
       const mult = getCpMultiplier(cpMe, cpEnemy);
-      const potentialXp = baseXp * mult;
+      let potentialXp = baseXp * mult;
+
+      // 🔥 XP за ботов режется в 2 раза
+      if (enemy.isPvpBot || enemy.isBot) {
+        potentialXp *= 0.5;
+      }
 
       const xpForThisEnemy = potentialXp * contribution;
       totalXp += xpForThisEnemy;

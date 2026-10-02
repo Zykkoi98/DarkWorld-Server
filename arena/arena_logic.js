@@ -13,7 +13,7 @@ const arenaLobby = new Map();
 global.arenaLobby = arenaLobby;
 
 // TTL заявки
-const REQUEST_TTL_MS = 5 * 60 * 1000;   // 5 минут
+const REQUEST_TTL_MS = 1 * 60 * 1000;   // 5 минут(для тестов сделали 1 мин)
 
 // ============================================================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -410,7 +410,7 @@ module.exports = function(io, socket, sb, activeRooms) {
   // --------------------------------------------------------------------------
   // 7. АВТООЧИСТКА ПРОСРОЧЕННЫХ ЗАЯВОК
   // --------------------------------------------------------------------------
-  setInterval(async () => {
+ setInterval(async () => {
     try {
       const now = Date.now();
       const expiredOwners = new Set();
@@ -423,7 +423,78 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       for (const ownerId of expiredOwners) {
         const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === ownerId);
+        if (members.length === 0) continue;
 
+        const owner = members[0];
+        const maxPlayers = owner.maxPlayers;
+
+        // 🔥 Если в заявке 1 игрок (для 1×1) — заполняем ботом и стартуем
+        if (members.length < maxPlayers && owner.mode === 'duel_1v1') {
+          console.log(`⏰ [ARENA] Заявка ${ownerId} истекла, но 1×1 — добавляем бота вместо отмены`);
+
+          for (const m of members) {
+            arenaLobby.delete(m.id);
+          }
+          await deleteLobbyFromDb(sb, ownerId);
+
+          // Создаём бота
+          const arenaBots = require('./arena_bots');
+          const botFighter = await arenaBots.createBotForLevel(owner.level, 0);
+
+          // Формируем команду игрока
+          const playerFighter = {
+            uuid: `player_${owner.id}`,
+            id: String(owner.id),
+            name: owner.name,
+            icon: '👤',
+            isBot: false,
+            level: owner.level,
+            strength: owner.playerData.stats.strength,
+            agility: owner.playerData.stats.agility,
+            endurance: owner.playerData.stats.endurance,
+            luck: owner.playerData.stats.luck,
+            currentHp: owner.hp,
+            maxHp: owner.maxHp,
+            equipped: owner.playerData.equipped,
+            inventory: owner.playerData.inventory,
+            turn: null,
+            afkTurns: 0,
+            socketId: owner.socketId
+          };
+
+          // Создаём бой
+          const config = router.getConfig('arena_pvp');
+          const room = core.createRoom({
+            battleType: 'arena_pvp',
+            teamA: [playerFighter],
+            teamB: [botFighter],
+            config,
+            params: {}
+          });
+
+          activeRooms[room.id] = room;
+
+          // Регистрируем игрока
+          const fighterSocket = io.sockets.sockets.get(owner.socketId);
+          if (fighterSocket) {
+            fighterSocket.join(room.id);
+          }
+
+          if (!global.activeBattlesByUser) global.activeBattlesByUser = new Map();
+          global.activeBattlesByUser.set(String(owner.id), room.id);
+
+          io.to(owner.socketId).emit('arena_redirect_to_battle', {
+            roomId: room.id,
+            battleType: 'arena_pvp'
+          });
+
+          console.log(`🤖 [ARENA] Создан бой с ботом. roomId=${room.id}, botLevel=${botFighter.level}`);
+
+          io.emit('arena_lobby_updated');
+          continue;
+        }
+
+        // Иначе — просто отменяем
         console.log(`⏰ [ARENA] Заявка ${ownerId} истекла. Отменяем ${members.length} участников.`);
 
         for (const m of members) {
@@ -441,7 +512,7 @@ module.exports = function(io, socket, sb, activeRooms) {
     } catch (err) {
       console.error('🚨 [ARENA] Ошибка очистки:', err.message);
     }
-  }, 30 * 1000);   // каждые 30 секунд
+  }, 30 * 1000);
  // --------------------------------------------------------------------------
   // 8. DISCONNECT — заявку НЕ удаляем сразу (даём время на F5)
   // --------------------------------------------------------------------------
