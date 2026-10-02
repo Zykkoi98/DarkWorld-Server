@@ -66,11 +66,25 @@ async function registerPlayerForRegen(userId, socketId, sb, io) {
   const key = String(nUserId);
 
   if (global.onlinePlayers.has(key)) {
-    const existing = global.onlinePlayers.get(key);
-    existing.socketIds.add(socketId);
-    console.log(`♻️ [РЕГЕН] ${existing.name} уже в очереди (сокетов: ${existing.socketIds.size})`);
-    return;
-  }
+      const existing = global.onlinePlayers.get(key);
+      existing.socketIds.add(socketId);
+
+      // 🔥 Обновляем HP и maxHp из БД (могли измениться после боя)
+      try {
+        const { data: row } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
+        if (row) {
+          const maxHp = dbHelper.getServerMaxHp(row);
+          existing.hp = Math.min(Number(row.hp || 10), maxHp);
+          existing.maxHp = maxHp;
+          existing.level = Number(row.level || 1);
+          console.log(`♻️ [РЕГЕН] ${existing.name} уже в очереди — HP обновлён: ${existing.hp}/${existing.maxHp}`);
+        }
+      } catch (e) {
+        console.error('🚨 Ошибка обновления HP в регене:', e.message);
+      }
+
+      return;
+    }
 
   try {
     const { data: row } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
@@ -140,6 +154,8 @@ setInterval(() => {
       const isInBattle = Object.keys(global.activeRooms || {}).some(roomId => {
         const room = global.activeRooms[roomId];
         if (!room) return false;
+        // 🔥 Пропускаем завершённые комнаты
+        if (room.state === 'finished') return false;
         return (room.teamA && room.teamA.some(f => f && String(f.id) === String(userId)))
             || (room.teamB && room.teamB.some(f => f && String(f.id) === String(userId)));
       });
