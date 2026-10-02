@@ -177,12 +177,16 @@ function calculateHit(attacker, defender, zone, options = {}) {
   const critChance = Math.min(65, Math.max(5, finalCrit));
   const isCrit = rand(1, 100) <= critChance;
 
-  // 4. РАСЧЁТ УРОНА
-  let dmg = Math.floor(getAtk(attacker) / damageFactor);
-  if (isCrit) dmg = Math.floor(dmg * 2.0);
+ // 4. РАСЧЁТ УРОНА
+  // 🔥 КОМБИНИРОВАННАЯ ФОРМУЛА: процентный DEF + минимум 15% ATK
+  let dmgRaw = Math.floor(getAtk(attacker) / damageFactor);
+  if (isCrit) dmgRaw = Math.floor(dmgRaw * 2.0);
 
   const defTotal = getDef(defender);
-  dmg = Math.max(1, dmg - defTotal);
+  const defReduction = defTotal / (defTotal + 100);
+
+  const minDmg = Math.max(1, Math.floor(dmgRaw * 0.15));
+  let dmg = Math.max(minDmg, Math.floor(dmgRaw * (1 - defReduction)));
 
   return {
     hit: true,

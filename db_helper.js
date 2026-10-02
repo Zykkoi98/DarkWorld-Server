@@ -87,16 +87,22 @@ function getEquipmentBonus(equipped, bonusKey) {
 function getServerMaxHp(fighter) {
   if (!fighter) return 10;
   
-  // Читаем выносливость с любого уровня: fighter.endurance или fighter.stats.endurance
   const rawEndurance = fighter.endurance 
                     ?? (fighter.stats && fighter.stats.endurance) 
                     ?? 1;
   const baseEndurance = Number(rawEndurance);
   
+  const level = Number(fighter.level || 1);
   const gearEnduranceBonus = getEquipmentBonus(fighter.equipped, 'endurance');
   const flatHpBonus = getEquipmentBonus(fighter.equipped, 'hp') || 0;
   
-  return ((baseEndurance + gearEnduranceBonus) * 10) + flatHpBonus;
+  const totalEndurance = baseEndurance + gearEnduranceBonus;
+  
+  // 🔥 НОВАЯ ФОРМУЛА: база за уровень + бонус от END
+  const baseHp = 30 + (level * 15);
+  const endBonus = totalEndurance * 4;
+  
+  return Math.floor(baseHp + endBonus + flatHpBonus);
 }
 
 function getServerDef(fighter) {
