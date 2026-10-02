@@ -442,54 +442,53 @@ module.exports = {
     });
 
     // ОБРАБОТЧИК: БЕЗОПАСНОЕ СОХРАНЕНИЕ / СОЗДАНИЕ ПЕРСОНАЖА В БД
-        socket.on('save_game_secure', async ({ player }) => {
-        try {
-          if (!player || !player.id) return;
-          const nUserId = Number(player.id);
-          
-          // 🔥 ФИКС: сначала читаем текущую запись из БД, чтобы не перезаписать корректные данные мусором
-          const { data: currentRow } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
-          if (!currentRow) {
-            console.warn(`⚠️ [БД] save_game_secure: игрок ${nUserId} не найден, пропускаем`);
-            return;
-          }
+socket.on('save_game_secure', async ({ player }) => {
+  try {
+    if (!player || !player.id) return;
+    const nUserId = Number(player.id);
 
-          // 🔥 ФИКС: используем ?? вместо ||, чтобы 0 не превращался в дефолт
-          const payload = {
-            id: nUserId,
-            name: player.name || currentRow.name,
-            avatar: player.avatar || currentRow.avatar || "assets/avatars/hero1.png",
-            level: Number(player.level ?? currentRow.level ?? 1),
-            gold: Number(player.gold ?? currentRow.gold ?? 0),
-            xp: Number(player.xp ?? currentRow.xp ?? 0),
-            hp: Number(player.hp ?? currentRow.hp ?? 10),
-            // 🔥 ВАЖНО: берём statpoints из currentRow, если на клиенте undefined
-            statpoints: Number(player.statPoints ?? player.statpoints ?? currentRow.statpoints ?? currentRow.statPoints ?? 0),
-            currenttownindex: Number(player.currentTownIndex ?? currentRow.currenttownindex ?? 0),
-            strength: Number(player.stats?.strength ?? currentRow.strength ?? 1),
-            agility: Number(player.stats?.agility ?? currentRow.agility ?? 1),
-            endurance: Number(player.stats?.endurance ?? currentRow.endurance ?? 1),
-            luck: Number(player.stats?.luck ?? currentRow.luck ?? 1),
-            inventory: player.inventory || currentRow.inventory || { equipment: [], resources: [], consumables: [] },
-            equipped: player.equipped || currentRow.equipped || { 
-              head: null, body: null, legs: null, neck: null, gloves: null,
-              mainHand: null, offHand: null, potion: null, scroll: null,
-              rings: [null, null, null] 
-            },
-            tower_floor: Number(player.tower_floor ?? currentRow.tower_floor ?? 1)
-          };
+    // 🔥 Читаем текущую запись из БД
+    const { data: currentRow } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
 
-          const { error } = await sb.from('players').upsert(payload).eq('id', nUserId);
-          
-          if (error) {
-            console.error(`🚨 Ошибка сохранения в Supabase для ID ${nUserId}:`, error.message);
-          } else {
-            console.log(`✨ [БД УСПЕХ] Персонаж ${player.name} сохранён/создан.`);
-          }
-        } catch (err) {
-          console.error("❌ Критический сбой в save_game_secure:", err);
-        }
-      });
+    // 🔥 Если игрок НОВЫЙ — используем значения из player, а не из currentRow
+    const payload = {
+      id: nUserId,
+      name: player.name || (currentRow && currentRow.name) || 'Новичок',
+      avatar: player.avatar || (currentRow && currentRow.avatar) || 'assets/avatars/hero1.png',
+      level: Number(player.level ?? (currentRow && currentRow.level) ?? 1),
+      gold: Number(player.gold ?? (currentRow && currentRow.gold) ?? 200),
+      xp: Number(player.xp ?? (currentRow && currentRow.xp) ?? 0),
+      hp: Number(player.hp ?? (currentRow && currentRow.hp) ?? 10),
+      statpoints: Number(
+        player.statPoints ?? player.statpoints ??
+        (currentRow && (currentRow.statpoints ?? currentRow.statPoints)) ??
+        5
+      ),
+      currenttownindex: Number(player.currentTownIndex ?? (currentRow && currentRow.currenttownindex) ?? 0),
+      strength: Number(player.stats?.strength ?? (currentRow && currentRow.strength) ?? 1),
+      agility: Number(player.stats?.agility ?? (currentRow && currentRow.agility) ?? 1),
+      endurance: Number(player.stats?.endurance ?? (currentRow && currentRow.endurance) ?? 1),
+      luck: Number(player.stats?.luck ?? (currentRow && currentRow.luck) ?? 1),
+      inventory: player.inventory || (currentRow && currentRow.inventory) || { equipment: [], resources: [], consumables: [] },
+      equipped: player.equipped || (currentRow && currentRow.equipped) || {
+        head: null, body: null, legs: null, neck: null, gloves: null,
+        mainHand: null, offHand: null, potion: null, scroll: null,
+        rings: [null, null, null]
+      },
+      tower_floor: Number(player.tower_floor ?? (currentRow && currentRow.tower_floor) ?? 1)
+    };
+
+    const { error } = await sb.from('players').upsert(payload, { onConflict: 'id' });
+
+    if (error) {
+      console.error(`🚨 Ошибка сохранения в Supabase для ID ${nUserId}:`, error.message);
+    } else {
+      console.log(`✨ [БД УСПЕХ] ${currentRow ? 'Обновлён' : 'СОЗДАН НОВЫЙ'} персонаж ${payload.name} (ID ${nUserId})`);
+    }
+  } catch (err) {
+    console.error("❌ Критический сбой в save_game_secure:", err);
+  }
+});
 
     // --- 2. БЕЗОПАСНОЕ РАСПРЕДЕЛЕНИЕ ХАРАКТЕРИСТИК ИЗ БУФЕРА ---
     socket.on('confirm_stat_distribution_secure', async ({ userId, distribution }) => {
