@@ -14,11 +14,79 @@ function getEquipmentBonus(fighter, bonusKey) {
   return dbHelper.getEquipmentBonus(fighter.equipped || {}, bonusKey);
 }
 
+// 🔥 Считает суммарный ATK-бонус от шмота (средний для отображения)
+function getStaticAtkBonus(fighter) {
+  const equipped = fighter.equipped || {};
+  let total = 0;
+
+  const processItem = (raw) => {
+    const itemId = (raw && typeof raw === 'object') ? raw.id : raw;
+    if (!itemId) return;
+    const item = dbHelper.findItemInAnyDatabase(itemId);
+    if (!item || !item.bonus) return;
+
+    if (item.bonus.atkMin !== undefined && item.bonus.atkMax !== undefined) {
+      // Средний ATK
+      total += Math.floor((item.bonus.atkMin + item.bonus.atkMax) / 2);
+    } else if (item.bonus.atk !== undefined) {
+      total += item.bonus.atk;
+    }
+  };
+
+  ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand'].forEach(slot => {
+    processItem(equipped[slot]);
+  });
+  if (Array.isArray(equipped.rings)) {
+    equipped.rings.forEach(processItem);
+  }
+
+  return total;
+}
+
+// 🔥 Считает РАНДОМНЫЙ ATK-бонус от шмота (для боя)
+function getRandomAtkBonus(fighter) {
+  const equipped = fighter.equipped || {};
+  let total = 0;
+
+  const processItem = (raw) => {
+    const itemId = (raw && typeof raw === 'object') ? raw.id : raw;
+    if (!itemId) return;
+    const item = dbHelper.findItemInAnyDatabase(itemId);
+    if (!item || !item.bonus) return;
+
+    if (item.bonus.atkMin !== undefined && item.bonus.atkMax !== undefined) {
+      const min = item.bonus.atkMin;
+      const max = item.bonus.atkMax;
+      total += Math.floor(Math.random() * (max - min + 1)) + min;
+    } else if (item.bonus.atk !== undefined) {
+      total += item.bonus.atk;
+    }
+  };
+
+  ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand'].forEach(slot => {
+    processItem(equipped[slot]);
+  });
+  if (Array.isArray(equipped.rings)) {
+    equipped.rings.forEach(processItem);
+  }
+
+  return total;
+}
+
+// 🔥 Базовый ATK (средний — для отображения)
 function getAtk(fighter) {
   const rawStr = fighter.strength ?? (fighter.stats?.strength) ?? 1;
   const totalStr = Number(rawStr) + getEquipmentBonus(fighter, 'strength');
   const baseAtk = Math.floor(2 + (totalStr * 1.5));
-  return baseAtk + getEquipmentBonus(fighter, 'atk');
+  return baseAtk + getStaticAtkBonus(fighter);
+}
+
+// 🔥 Рандомный ATK (для расчёта урона)
+function getRandomAtk(fighter) {
+  const rawStr = fighter.strength ?? (fighter.stats?.strength) ?? 1;
+  const totalStr = Number(rawStr) + getEquipmentBonus(fighter, 'strength');
+  const baseAtk = Math.floor(2 + (totalStr * 1.5));
+  return baseAtk + getRandomAtkBonus(fighter);
 }
 
 function getDef(fighter) {
@@ -178,8 +246,8 @@ function calculateHit(attacker, defender, zone, options = {}) {
   const isCrit = rand(1, 100) <= critChance;
 
  // 4. РАСЧЁТ УРОНА
-  // 🔥 КОМБИНИРОВАННАЯ ФОРМУЛА: процентный DEF + минимум 15% ATK
-  let dmgRaw = Math.floor(getAtk(attacker) / damageFactor);
+  // 🔥 Рандомный ATK от шмота (atkMin..atkMax)
+  let dmgRaw = Math.floor(getRandomAtk(attacker) / damageFactor);
   if (isCrit) dmgRaw = Math.floor(dmgRaw * 2.0);
 
   const defTotal = getDef(defender);
@@ -187,6 +255,11 @@ function calculateHit(attacker, defender, zone, options = {}) {
 
   const minDmg = Math.max(1, Math.floor(dmgRaw * 0.15));
   let dmg = Math.max(minDmg, Math.floor(dmgRaw * (1 - defReduction)));
+
+  // 🔥 РАЗБРОС ±20% на финальный урон
+  const variance = 0.2;
+  const randomFactor = 1 + (Math.random() * 2 - 1) * variance;   // 0.8..1.2
+  dmg = Math.max(1, Math.floor(dmg * randomFactor));
 
   return {
     hit: true,
@@ -205,6 +278,9 @@ function calculateHit(attacker, defender, zone, options = {}) {
 module.exports = {
   // Статы
   getAtk,
+  getRandomAtk,           // 🔥 НОВОЕ
+  getStaticAtkBonus,      // 🔥 НОВОЕ
+  getRandomAtkBonus,      // 🔥 НОВОЕ
   getDef,
   getAgility,
   getLuck,
