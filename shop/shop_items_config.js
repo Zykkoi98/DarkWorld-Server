@@ -5,8 +5,8 @@ const GAME_ITEMS_DATABASE = {
   'fish_soup':       { name: 'Уха из таверны', icon: '🥣', slotType: 'potion', price: 10, level: 1, desc: 'Сытный перекус. Восстанавливает +40 HP.' },
   'blessing_scroll': { name: 'Свиток Благословения', icon: '📜', slotType: 'scroll', price: 20, level: 1, desc: 'Древний свиток для будущих тактических бонусов.' },
    // === УРОВЕНЬ 1: СЕТ ПЛУТА ===
-  'rogue_knife_1': { name: 'Нож Плута', icon: '🗡️', slotType: 'mainHand', price: 10, level: 1, req: { agility: 3 }, desc: 'Легкий нож для финтов.', bonus: { atk: 2, mf_antiinv: 10 } },
-  'rogue_offknife_1': { name: 'Левый Нож Плута', icon: '🗡️', slotType: 'offHand', price: 10, level: 1, req: { agility: 3 }, desc: 'Нож в левую руку. Повышает Ловкость.', bonus: { atk: 1, stats: { agility: 1 } } },
+  'rogue_knife_1': { name: 'Нож Плута', icon: '🗡️', slotType: 'mainHand', price: 10, level: 1, req: { agility: 3 }, desc: 'Легкий нож для финтов.', bonus: { atkMin: 1, atkMax: 3, mf_antiinv: 10 } },
+  'rogue_offknife_1': { name: 'Левый Нож Плута', icon: '🗡️', slotType: 'offHand', price: 10, level: 1, req: { agility: 3 }, desc: 'Нож в левую руку. Повышает Ловкость.', bonus: { atkMin: 1, atkMax: 2, stats: { agility: 1 } } },
   'rogue_buckler_1': { name: 'Баклер Плута', icon: '🛡️', slotType: 'offHand', price: 8, level: 1, req: { agility: 2 }, desc: 'Легкий круглый щиток. Открывает 3 блока.', bonus: { def: 1, mf_inv: 5 } },
   'rogue_bandana_1': { name: 'Бандана Плута', icon: '🥻', slotType: 'head', price: 8, level: 1, req: { agility: 2 }, desc: 'Повязка, улучшающая обзор.', bonus: { def: 1, stats: { agility: 1 }, mf_inv: 5 } },
   'rogue_vest_1': { name: 'Жилет Плута', icon: '👕', slotType: 'body', price: 12, level: 1, req: { agility: 3 }, desc: 'Легкая кожаная безрукавка.', bonus: { def: 2, stats: { agility: 1 }, mf_inv: 10 } },
@@ -16,8 +16,8 @@ const GAME_ITEMS_DATABASE = {
   'rogue_ring_1': { name: 'Кольцо Плута', icon: '💍', slotType: 'ring', price: 7, level: 1, req: { agility: 2 }, desc: 'Универсальное кольцо уклонения.', bonus: { stats: { agility: 1 }, mf_inv: 5 } },
 
   // === УРОВЕНЬ 3: СЕТ БРОДЯГИ ===
-  'bandit_dagger_2': { name: 'Кортик Бродяги', icon: '⚔️', slotType: 'mainHand', price: 25, level: 3, req: { agility: 6 }, desc: 'Зазубренный воровской кортик.', bonus: { atk: 5, mf_antiinv: 15 } },
-  'bandit_offdagger_2': { name: 'Кинжал Бродяги (Л)', icon: '⚔️', slotType: 'offHand', price: 25, level: 3, req: { agility: 6 }, desc: 'Леворучный кинжал для уверток.', bonus: { atk: 3, stats: { agility: 2 }, mf_inv: 10 } },
+  'bandit_dagger_2': { name: 'Кортик Бродяги', icon: '⚔️', slotType: 'mainHand', price: 25, level: 3, req: { agility: 6 }, desc: 'Зазубренный воровской кортик.', bonus: { atkMin: 3, atkMax: 7, mf_antiinv: 15 } },
+  'bandit_offdagger_2': { name: 'Кинжал Бродяги (Л)', icon: '⚔️', slotType: 'offHand', price: 25, level: 3, req: { agility: 6 }, desc: 'Леворучный кинжал для уверток.', bonus: { atkMin: 2, atkMax: 4, stats: { agility: 2 }, mf_inv: 10 } },
   'bandit_shield_2': { name: 'Плетеный щит', icon: '🛡️', slotType: 'offHand', price: 20, level: 3, req: { agility: 5 }, desc: 'Легкий щит из лозы и кожи.', bonus: { def: 2, mf_inv: 15 } },
   'bandit_hood_2': { name: 'Капюшон Бродяги', icon: '🪖', slotType: 'head', price: 18, level: 3, req: { agility: 5 }, desc: 'Скрывает лицо в тени.', bonus: { def: 2, stats: { agility: 1 }, mf_inv: 15 } },
   'bandit_jacket_2': { name: 'Куртка Бродяги', icon: '👕', slotType: 'body', price: 30, level: 3, req: { agility: 7 }, desc: 'Клепаная куртка разбойников.', bonus: { def: 4, stats: { agility: 2 }, mf_inv: 20 } },
@@ -26,8 +26,8 @@ const GAME_ITEMS_DATABASE = {
   'bandit_talisman_2': { name: 'Талисман Бродяги', icon: '📿', slotType: 'neck', price: 22, level: 3, req: { agility: 5 }, desc: 'Оберег от критических стрел.', bonus: { stats: { endurance: 1 }, mf_anticrit: 10 } },
   'bandit_ring_2': { name: 'Кольцо Бродяги', icon: '💍', slotType: 'ring', price: 15, level: 3, req: { agility: 5 }, desc: 'Массивное воровское кольцо.', bonus: { stats: { agility: 2 }, mf_inv: 15 } },
   // === УРОВЕНЬ 5: СЕТ ВОРА ===
-  'thief_blade_3': { name: 'Лезвие Вора', icon: '🗡️', slotType: 'mainHand', price: 50, level: 5, req: { agility: 11 }, desc: 'Сбалансированный стилет.', bonus: { atk: 9, mf_antiinv: 25 } },
-  'thief_offblade_3': { name: 'Кинжал Вора (Л)', icon: '🗡️', slotType: 'offHand', price: 50, level: 5, req: { agility: 11 }, desc: 'Левый кинжал. Усиливает натиск.', bonus: { atk: 5, stats: { agility: 2 }, mf_antiinv: 15 } },
+  'thief_blade_3': { name: 'Лезвие Вора', icon: '🗡️', slotType: 'mainHand', price: 50, level: 5, req: { agility: 11 }, desc: 'Сбалансированный стилет.', bonus: { atkMin: 6, atkMax: 12, mf_antiinv: 25 } },
+  'thief_offblade_3': { name: 'Кинжал Вора (Л)', icon: '🗡️', slotType: 'offHand', price: 50, level: 5, req: { agility: 11 }, desc: 'Левый кинжал. Усиливает натиск.', bonus: { atkMin: 3, atkMax: 7, stats: { agility: 2 }, mf_antiinv: 15 } },
   'thief_parry_3': { name: 'Гвардейский баклер', icon: '🛡️', slotType: 'offHand', price: 40, level: 5, req: { agility: 9 }, desc: 'Стальной кулачный щит. Открывает 3 блока.', bonus: { def: 3, mf_inv: 20 } },
   'thief_mask_3': { name: 'Маска Вора', icon: '🥷', slotType: 'head', price: 35, level: 5, req: { agility: 9 }, desc: 'Черная шелковая маска.', bonus: { def: 2, stats: { agility: 2 }, mf_inv: 20 } },
   'thief_armor_3': { name: 'Доспех Вора', icon: '👕', slotType: 'body', price: 60, level: 5, req: { agility: 12 }, desc: 'Анатомический кожаный доспех.', bonus: { def: 6, stats: { agility: 3 }, mf_inv: 30 } },
@@ -37,8 +37,8 @@ const GAME_ITEMS_DATABASE = {
   'thief_ring_3': { name: 'Кольцо Вора', icon: '💍', slotType: 'ring', price: 30, level: 5, req: { agility: 10 }, desc: 'Кольцо с ограненным агатом.', bonus: { stats: { agility: 2 }, mf_inv: 20 } },
 
   // === УРОВЕНЬ 7: СЕТ НАЕМНИКА ===
-  'mercenary_kris_4': { name: 'Крис Наемника', icon: '⚔️', slotType: 'mainHand', price: 90, level: 7, req: { agility: 16 }, desc: 'Волнистое лезвие для обхода блоков.', bonus: { atk: 14, mf_antiinv: 35 } },
-  'mercenary_offkris_4': { name: 'Крис Наемника (Л)', icon: '⚔️', slotType: 'offHand', price: 90, level: 7, req: { agility: 16 }, desc: 'Второй крис для шквала атак.', bonus: { atk: 8, stats: { agility: 3 }, mf_antiinv: 25 } },
+  'mercenary_kris_4': { name: 'Крис Наемника', icon: '⚔️', slotType: 'mainHand', price: 90, level: 7, req: { agility: 16 }, desc: 'Волнистое лезвие для обхода блоков.', bonus: { atkMin: 10, atkMax: 18, mf_antiinv: 35 } },
+  'mercenary_offkris_4': { name: 'Крис Наемника (Л)', icon: '⚔️', slotType: 'offHand', price: 90, level: 7, req: { agility: 16 }, desc: 'Второй крис для шквала атак.', bonus: { atkMin: 6, atkMax: 10, stats: { agility: 3 }, mf_antiinv: 25 } },
   'mercenary_shield_4': { name: 'Тарч Наемника', icon: '🛡️', slotType: 'offHand', price: 70, level: 7, req: { agility: 14 }, desc: 'Фехтовальный щит. Открывает 3 блока.', bonus: { def: 4, mf_inv: 25 } },
   'mercenary_cap_4': { name: 'Чепец Наемника', icon: '🪖', slotType: 'head', price: 65, level: 7, req: { agility: 14 }, desc: 'Армированный кожаный шлем.', bonus: { def: 4, stats: { agility: 3 }, mf_inv: 25 } },
   'mercenary_coat_4': { name: 'Колет Наемника', icon: '👕', slotType: 'body', price: 110, level: 7, req: { agility: 18 }, desc: 'Плотный колет из буйволиной кожи.', bonus: { def: 9, stats: { agility: 4, endurance: 1 }, mf_inv: 35 } },
@@ -48,8 +48,8 @@ const GAME_ITEMS_DATABASE = {
   'mercenary_ring_4': { name: 'Перстень Наемника', icon: '💍', slotType: 'ring', price: 55, level: 7, req: { agility: 15 }, desc: 'Стальной обод контрактника.', bonus: { stats: { agility: 3 }, mf_inv: 25 } },
 
   // === УРОВЕНЬ 9: СЕТ АССАСИНА ===
-  'assassin_stiletto_5': { name: 'Стилет Ассасина', icon: '🗡️', slotType: 'mainHand', price: 160, level: 9, req: { agility: 22 }, desc: 'Тонкое граненое жало ордена.', bonus: { atk: 20, mf_antiinv: 50 } },
-  'assassin_offdagger_5': { name: 'Кинжал Ассасина (Л)', icon: '🗡️', slotType: 'offHand', price: 160, level: 9, req: { agility: 22 }, desc: 'Змеиный кинжал левой руки.', bonus: { atk: 12, stats: { agility: 4 }, mf_inv: 20 } },
+  'assassin_stiletto_5': { name: 'Стилет Ассасина', icon: '🗡️', slotType: 'mainHand', price: 160, level: 9, req: { agility: 22 }, desc: 'Тонкое граненое жало ордена.', bonus: { atkMin: 15, atkMax: 25, mf_antiinv: 50 } },
+  'assassin_offdagger_5': { name: 'Кинжал Ассасина (Л)', icon: '🗡️', slotType: 'offHand', price: 160, level: 9, req: { agility: 22 }, desc: 'Змеиный кинжал левой руки.', bonus: { atkMin: 9, atkMax: 15, stats: { agility: 4 }, mf_inv: 20 } },
   'assassin_aegis_5': { name: 'Оберег Ассасина', icon: '🛡️', slotType: 'offHand', price: 130, level: 9, req: { agility: 19 }, desc: 'Локтевой скрытный щит. Открывает 3 блока.', bonus: { def: 5, mf_inv: 35 } },
   'assassin_cowl_5': { name: 'Капюшон Ассасина', icon: '🥷', slotType: 'head', price: 120, level: 9, req: { agility: 19 }, desc: 'Тень полностью скрывает лицо.', bonus: { def: 5, stats: { agility: 4 }, mf_inv: 35 } },
   'assassin_shroud_5': { name: 'Саван Ассасина', icon: '👕', slotType: 'body', price: 190, level: 9, req: { agility: 25 }, desc: 'Магическая легкая куртка.', bonus: { def: 12, stats: { agility: 6 }, mf_inv: 45, mf_anticrit: 20 } },
@@ -58,8 +58,8 @@ const GAME_ITEMS_DATABASE = {
   'assassin_collar_5': { name: 'Ворот Ассасина', icon: '📿', slotType: 'neck', price: 140, level: 9, req: { agility: 20 }, desc: 'Стальной защитный шейный воротник.', bonus: { def: 3, stats: { agility: 3 }, mf_anticrit: 25 } },
   'assassin_band_5': { name: 'Уза Ассасина', icon: '💍', slotType: 'ring', price: 130, level: 9, req: { agility: 20 }, desc: 'Кольцо со скрытым ядовитым шипом.', bonus: { stats: { agility: 4 }, mf_inv: 35 } },
   // === УРОВЕНЬ 11: СЕТ СТАЛКЕРА ===
-  'stalker_fang_6': { name: 'Клык Сталкера', icon: '⚔️', slotType: 'mainHand', price: 240, level: 11, req: { agility: 29 }, desc: 'Особое выгнутое лезвие.', bonus: { atk: 25, mf_antiinv: 60 } },
-  'stalker_offfang_6': { name: 'Клык Сталкера (Л)', icon: '⚔️', slotType: 'offHand', price: 240, level: 11, req: { agility: 29 }, desc: 'Левый клинок для яростных финтов.', bonus: { atk: 15, stats: { agility: 4 }, mf_antiinv: 30 } },
+  'stalker_fang_6': { name: 'Клык Сталкера', icon: '⚔️', slotType: 'mainHand', price: 240, level: 11, req: { agility: 29 }, desc: 'Особое выгнутое лезвие.', bonus: { atkMin: 18, atkMax: 32, mf_antiinv: 60 } },
+  'stalker_offfang_6': { name: 'Клык Сталкера (Л)', icon: '⚔️', slotType: 'offHand', price: 240, level: 11, req: { agility: 29 }, desc: 'Левый клинок для яростных финтов.', bonus: { atkMin: 11, atkMax: 19, stats: { agility: 4 }, mf_antiinv: 30 } },
   'stalker_screen_6': { name: 'Сетчатый щит', icon: '🛡️', slotType: 'offHand', price: 190, level: 11, req: { agility: 25 }, desc: 'Легкий сетчатый баклер. Открывает 3 блока.', bonus: { def: 6, mf_inv: 40 } },
   'stalker_goggles_6': { name: 'Окуляры Сталкера', icon: '🥽', slotType: 'head', price: 180, level: 11, req: { agility: 25 }, desc: 'Линзы, просчитывающие движения врагов.', bonus: { def: 6, stats: { agility: 5 }, mf_inv: 40 } },
   'stalker_harness_6': { name: 'Жилет Сталкера', icon: '👕', slotType: 'body', price: 290, level: 11, req: { agility: 32 }, desc: 'Разгрузочный жилет на ремнях для маневров.', bonus: { def: 15, stats: { agility: 7, endurance: 2 }, mf_inv: 50 } },
@@ -69,8 +69,8 @@ const GAME_ITEMS_DATABASE = {
   'stalker_ring_6': { name: 'Кольцо Сталкера', icon: '💍', slotType: 'ring', price: 140, level: 11, req: { agility: 27 }, desc: 'Кольцо с мерцающим кошачьим глазом.', bonus: { stats: { agility: 5 }, mf_inv: 45 } },
 
   // === УРОВЕНЬ 13: СЕТ ТЕНИ ===
-  'shadow_wakizashi_7': { name: 'Вакидзаси Тени', icon: '🗡️', slotType: 'mainHand', price: 360, level: 13, req: { agility: 37 }, desc: 'Короткий меч, рассекающий воздух.', bonus: { atk: 32, mf_antiinv: 75 } },
-  'shadow_offwaki_7': { name: 'Вакидзаси Тени (Л)', icon: '🗡️', slotType: 'offHand', price: 360, level: 13, req: { agility: 37 }, desc: 'Призрачный парный клинок левой руки.', bonus: { atk: 18, stats: { agility: 6 }, mf_inv: 25 } },
+  'shadow_wakizashi_7': { name: 'Вакидзаси Тени', icon: '🗡️', slotType: 'mainHand', price: 360, level: 13, req: { agility: 37 }, desc: 'Короткий меч, рассекающий воздух.', bonus: { atkMin: 24, atkMax: 40, mf_antiinv: 75 } },
+  'shadow_offwaki_7': { name: 'Вакидзаси Тени (Л)', icon: '🗡️', slotType: 'offHand', price: 360, level: 13, req: { agility: 37 }, desc: 'Призрачный парный клинок левой руки.', bonus: { atkMin: 13, atkMax: 23, stats: { agility: 6 }, mf_inv: 25 } },
   'shadow_mirror_7': { name: 'Зеркальный щит', icon: '🛡️', slotType: 'offHand', price: 290, level: 13, req: { agility: 32 }, desc: 'Блестящий щит. Открывает 3 зоны блока.', bonus: { def: 7, mf_inv: 50 } },
   'shadow_visage_7': { name: 'Лик Тени', icon: '🥷', slotType: 'head', price: 270, level: 13, req: { agility: 32 }, desc: 'Иллюзорная маска полупризрака.', bonus: { def: 8, stats: { agility: 6 }, mf_inv: 50, mf_anticrit: 25 } },
   'shadow_garb_7': { name: 'Одеяния Тени', icon: '👕', slotType: 'body', price: 420, level: 13, req: { agility: 40 }, desc: 'Шелковые одежды, размывающие контуры.', bonus: { def: 18, stats: { agility: 8, endurance: 3 }, mf_inv: 60 } },
@@ -80,8 +80,8 @@ const GAME_ITEMS_DATABASE = {
   'shadow_ring_7': { name: 'Печать Тени', icon: '💍', slotType: 'ring', price: 200, level: 13, req: { agility: 35 }, desc: 'Обсидиановый перстень, засасывающий свет.', bonus: { stats: { agility: 7 }, mf_inv: 55 } },
 
   // === УРОВЕНЬ 15: СЕТ ПРИЗРАКА ===
-  'phantom_edge_8': { name: 'Грань Призрака', icon: '⚔️', slotType: 'mainHand', price: 500, level: 15, req: { agility: 46 }, desc: 'Иллюзорный мерцающий клинок.', bonus: { atk: 40, mf_antiinv: 90 } },
-  'phantom_offedge_8': { name: 'Грань Призрака (Л)', icon: '⚔️', slotType: 'offHand', price: 500, level: 15, req: { agility: 46 }, desc: 'Призрачный левый клинок.', bonus: { atk: 25, stats: { agility: 7 }, mf_antiinv: 45 } },
+  'phantom_edge_8': { name: 'Грань Призрака', icon: '⚔️', slotType: 'mainHand', price: 500, level: 15, req: { agility: 46 }, desc: 'Иллюзорный мерцающий клинок.', bonus: { atkMin: 30, atkMax: 50, mf_antiinv: 90 } },
+  'phantom_offedge_8': { name: 'Грань Призрака (Л)', icon: '⚔️', slotType: 'offHand', price: 500, level: 15, req: { agility: 46 }, desc: 'Призрачный левый клинок.', bonus: { atkMin: 18, atkMax: 32, stats: { agility: 7 }, mf_antiinv: 45 } },
   'phantom_wall_8': { name: 'Фантомный блок', icon: '🛡️', slotType: 'offHand', price: 390, level: 15, req: { agility: 40 }, desc: 'Щит из чистой эктоплазмы. Дает 3 блока.', bonus: { def: 8, mf_inv: 60 } },
   'phantom_hood_8': { name: 'Вуаль Призрака', icon: '🥷', slotType: 'head', price: 380, level: 15, req: { agility: 40 }, desc: 'Капюшон из призрачной ткани, гасящий криты врагов.', bonus: { def: 10, stats: { agility: 7 }, mf_inv: 60, mf_anticrit: 35 } },
   'phantom_robes_8': { name: 'Мантия Призрака', icon: '👕', slotType: 'body', price: 580, level: 15, req: { agility: 50 }, desc: 'Облачение, превращающее тело в полупрозрачный дым.', bonus: { def: 22, stats: { agility: 10, endurance: 4 }, mf_inv: 70 } },
@@ -90,8 +90,8 @@ const GAME_ITEMS_DATABASE = {
   'phantom_chain_8': { name: 'Цепь Призрака', icon: '📿', slotType: 'neck', price: 440, level: 15, req: { agility: 43 }, desc: 'Амулет вечного сквозняка, дающий Ловкость.', bonus: { stats: { agility: 6, luck: 4 }, mf_inv: 30 } },
   'phantom_ring_8': { name: 'Спираль Призрака', icon: '💍', slotType: 'ring', price: 280, level: 15, req: { agility: 43 }, desc: 'Эфирный перстень из белого золота.', bonus: { stats: { agility: 8 }, mf_inv: 60 } },
   // === УРОВЕНЬ 17: СЕТ ВЕТРА ===
-  'gale_scimitar_9': { name: 'Сцимитар Урагана', icon: '⚔️', slotType: 'mainHand', price: 720, level: 17, req: { agility: 56 }, desc: 'Оружие, бьющее со скоростью звука.', bonus: { atk: 52, mf_antiinv: 110 } },
-  'gale_offscimitar_9': { name: 'Сцимитар Урагана (Л)', icon: '⚔️', slotType: 'offHand', price: 720, level: 17, req: { agility: 56 }, desc: 'Парный клинок. Наносится урон правой руки в левый слот.', bonus: { atk: 35, stats: { agility: 8 }, mf_antiinv: 50 } },
+  'gale_scimitar_9': { name: 'Сцимитар Урагана', icon: '⚔️', slotType: 'mainHand', price: 720, level: 17, req: { agility: 56 }, desc: 'Оружие, бьющее со скоростью звука.', bonus: { atkMin: 39, atkMax: 65, mf_antiinv: 110 } },
+  'gale_offscimitar_9': { name: 'Сцимитар Урагана (Л)', icon: '⚔️', slotType: 'offHand', price: 720, level: 17, req: { agility: 56 }, desc: 'Парный клинок. Наносится урон правой руки в левый слот.', bonus: { atkMin: 26, atkMax: 44, stats: { agility: 8 }, mf_antiinv: 50 } },
   'gale_shield_9': { name: 'Эгида Ветров', icon: '🛡️', slotType: 'offHand', price: 550, level: 17, req: { agility: 50 }, desc: 'Щит из спрессованного воздуха. Открывает 3 блока.', bonus: { def: 10, mf_inv: 70 } },
   'gale_crown_9': { name: 'Венец Бури', icon: '👑', slotType: 'head', price: 520, level: 17, req: { agility: 50 }, desc: 'Диадема, обостряющая реакцию до максимума.', bonus: { def: 12, stats: { agility: 9 }, mf_inv: 70, mf_anticrit: 40 } },
   'gale_cuirass_9': { name: 'Кираса Урагана', icon: '👕', slotType: 'body', price: 850, level: 17, req: { agility: 62 }, desc: 'Доспех, сотканый из потоков горной бури.', bonus: { def: 28, stats: { agility: 12, endurance: 5 }, mf_inv: 80 } },
@@ -101,8 +101,8 @@ const GAME_ITEMS_DATABASE = {
   'gale_ring_9': { name: 'Кольцо Циклона', icon: '💍', slotType: 'ring', price: 380, level: 17, req: { agility: 53 }, desc: 'Эпический артефакт стихии воздуха.', bonus: { stats: { agility: 10 }, mf_inv: 65 } },
 
   // === УРОВЕНЬ 19: СЕТ ВЕЛИКОГО МАСТЕРА УВОР ОТЧИКА ===
-  'grandmaster_kris_10': { name: 'Крис Патриарха', icon: '🗡️', slotType: 'mainHand', price: 1000, level: 19, req: { agility: 70 }, desc: 'Абсолютное оружие. Игнорирует уворот любого врага.', bonus: { atk: 65, stats: { agility: 12 }, mf_antiinv: 140 } },
-  'grandmaster_offkris_10': { name: 'Крис Патриарха (Л)', icon: '🗡️', slotType: 'offHand', price: 1000, level: 19, req: { agility: 70 }, desc: 'Второй легендарный клинок. Идеальный стиль парных ножей БК.', bonus: { atk: 45, stats: { agility: 10 }, mf_antiinv: 90 } },
+  'grandmaster_kris_10': { name: 'Крис Патриарха', icon: '🗡️', slotType: 'mainHand', price: 1000, level: 19, req: { agility: 70 }, desc: 'Абсолютное оружие. Игнорирует уворот любого врага.', bonus: { atkMin: 48, atkMax: 82, stats: { agility: 12 }, mf_antiinv: 140 } },
+  'grandmaster_offkris_10': { name: 'Крис Патриарха (Л)', icon: '🗡️', slotType: 'offHand', price: 1000, level: 19, req: { agility: 70 }, desc: 'Второй легендарный клинок. Идеальный стиль парных ножей БК.', bonus: { atkMin: 33, atkMax: 57, stats: { agility: 10 }, mf_antiinv: 90 } },
   'grandmaster_wall_10': { name: 'Зеркало Мастера', icon: '🛡️', slotType: 'offHand', price: 800, level: 19, req: { agility: 60 }, desc: 'Размывает защиты соперников. Открывает 3 зоны блока.', bonus: { def: 15, mf_inv: 80 } },
   'grandmaster_mask_10': { name: 'Тень Патриарха', icon: '🥷', slotType: 'head', price: 800, level: 19, req: { agility: 60 }, desc: 'Маска главы скрытного клана. Полный антикрит.', bonus: { def: 15, stats: { agility: 10 }, mf_inv: 85, mf_anticrit: 60 } },
   'grandmaster_gi_10': { name: 'Доги Патриарха', icon: '⚡', slotType: 'body', price: 1200, level: 19, req: { agility: 75 }, desc: 'Легендарное кимоно. Размывает тело на атомы при замахах.', bonus: { def: 35, stats: { agility: 15, endurance: 8 }, mf_inv: 100, mf_anticrit: 40 } },
@@ -111,9 +111,9 @@ const GAME_ITEMS_DATABASE = {
   'grandmaster_amulet_10': { name: 'Реликвия Патриарха', icon: '📿', slotType: 'neck', price: 950, level: 19, req: { agility: 65 }, desc: 'Изумрудный старинный венец древних мастеров.', bonus: { def: 8, stats: { agility: 10, strength: 5 } } },
   'grandmaster_ring_10': { name: 'Кольцо Патриарха', icon: '💍', slotType: 'ring', price: 900, level: 19, req: { agility: 65 }, desc: 'Шедевр ювелиров древности. Венец эволюции уворотчиков.', bonus: { stats: { agility: 12 }, mf_inv: 75 } },
   // === УРОВЕНЬ 1: СЕТ ДИКАРЯ ===
-  'scratched_axe_1': { name: 'Поцарапанный топор', icon: '🪓', slotType: 'mainHand', price: 12, level: 1, req: { luck: 3 }, desc: 'Старый топор дровосека. Повышает крит.', bonus: { atk: 3, mf_crit: 10 } },
-  'scratched_club_1': { name: 'Шипастая заноза (Л)', icon: '🪵', slotType: 'offHand', price: 12, level: 1, req: { luck: 3 }, desc: 'Оружие в левую руку. Добавляет ярости.', bonus: { atk: 1, mf_crit: 5 } },
-  'rusty_splitter_1': { name: 'Ржавый Колун', icon: '🪓', slotType: 'twoHanded', price: 20, level: 1, req: { luck: 4 }, desc: 'Тяжелый двуручник.', bonus: { atk: 5, mf_crit: 15 } },
+  'scratched_axe_1': { name: 'Поцарапанный топор', icon: '🪓', slotType: 'mainHand', price: 12, level: 1, req: { luck: 3 }, desc: 'Старый топор дровосека. Повышает крит.', bonus: { atkMin: 2, atkMax: 4, mf_crit: 10 } },
+  'scratched_club_1': { name: 'Шипастая заноза (Л)', icon: '🪵', slotType: 'offHand', price: 12, level: 1, req: { luck: 3 }, desc: 'Оружие в левую руку. Добавляет ярости.', bonus: { atkMin: 1, atkMax: 2, mf_crit: 5 } },
+  'rusty_splitter_1': { name: 'Ржавый Колун', icon: '🪓', slotType: 'twoHanded', price: 20, level: 1, req: { luck: 4 }, desc: 'Тяжелый двуручник.', bonus: { atkMin: 3, atkMax: 7, mf_crit: 15 } },
   'savage_band_1': { name: 'Повязка Дикаря', icon: '🥻', slotType: 'head', price: 8, level: 1, req: { luck: 2 }, desc: 'Кожаный ремешок, стягивающий волосы.', bonus: { def: 1, stats: { luck: 1 }, mf_crit: 5 } },
   'savage_vest_1': { name: 'Обрез Дикаря', icon: '👕', slotType: 'body', price: 14, level: 1, req: { luck: 3 }, desc: 'Грубая меховая накидка.', bonus: { def: 2, stats: { luck: 1 }, mf_crit: 10 } },
   'savage_boots_1': { name: 'Обмотки Дикаря', icon: '🥾', slotType: 'legs', price: 8, level: 1, req: { luck: 2 }, desc: 'Шкуры, намотанные на ноги.', bonus: { def: 1, mf_crit: 5 } },
@@ -122,9 +122,9 @@ const GAME_ITEMS_DATABASE = {
   'savage_ring_1': { name: 'Кольцо Дикаря', icon: '💍', slotType: 'ring', price: 8, level: 1, req: { luck: 2 }, desc: 'Костяной перстень, обостряющий интуицию.', bonus: { stats: { luck: 1 }, mf_crit: 5 } },
 
   // === УРОВЕНЬ 3: СЕТ ВАРВАРА ===
-  'barbarian_axe_2': { name: 'Секира Варвара', icon: '🪓', slotType: 'mainHand', price: 28, level: 3, req: { luck: 6 }, desc: 'Боевой топор с широким лезвием.', bonus: { atk: 6, mf_crit: 15 } },
-  'barbarian_blade_2': { name: 'Тесак Варвара (Л)', icon: '⚔️', slotType: 'offHand', price: 28, level: 3, req: { luck: 6 }, desc: 'Тяжелый тесак для левой руки.', bonus: { atk: 3, stats: { luck: 1 }, mf_crit: 10 } },
-  'scrappy_cleaver_2': { name: 'Орочий Расчленитель', icon: '🔱', slotType: 'twoHanded', price: 45, level: 3, req: { luck: 7 }, desc: 'Двуручная огромная сабля. Бьет в 2 ЗОНЫ АТАК И.', bonus: { atk: 10, mf_crit: 25 } },
+  'barbarian_axe_2': { name: 'Секира Варвара', icon: '🪓', slotType: 'mainHand', price: 28, level: 3, req: { luck: 6 }, desc: 'Боевой топор с широким лезвием.', bonus: { atkMin: 4, atkMax: 8, mf_crit: 15 } },
+  'barbarian_blade_2': { name: 'Тесак Варвара (Л)', icon: '⚔️', slotType: 'offHand', price: 28, level: 3, req: { luck: 6 }, desc: 'Тяжелый тесак для левой руки.', bonus: { atkMin: 2, atkMax: 4, stats: { luck: 1 }, mf_crit: 10 } },
+  'scrappy_cleaver_2': { name: 'Орочий Расчленитель', icon: '🔱', slotType: 'twoHanded', price: 45, level: 3, req: { luck: 7 }, desc: 'Двуручная огромная сабля. Бьет в 2 ЗОНЫ АТАК И.', bonus: { atkMin: 7, atkMax: 13, mf_crit: 25 } },
   'barbarian_helm_2': { name: 'Рогатый шлем', icon: '🪖', slotType: 'head', price: 18, level: 3, req: { luck: 5 }, desc: 'Шлем, внушающий страх.', bonus: { def: 2, stats: { luck: 1 }, mf_crit: 10 } },
   'barbarian_jacket_2': { name: 'Жилет Варвара', icon: '👕', slotType: 'body', price: 35, level: 3, req: { luck: 7 }, desc: 'Кожаная броня, украшенная черепами мелких ботов.', bonus: { def: 4, stats: { luck: 2 }, mf_crit: 15 } },
   'barbarian_boots_2': { name: 'Сапоги Варвара', icon: '🥾', slotType: 'legs', price: 18, level: 3, req: { luck: 5 }, desc: 'Тяжелые сапоги из шкуры медведя.', bonus: { def: 2, stats: { strength: 1 }, mf_crit: 10 } },
@@ -132,9 +132,9 @@ const GAME_ITEMS_DATABASE = {
   'fury_pendant_2': { name: 'Амулет Ярости', icon: '📿', slotType: 'neck', price: 24, level: 3, req: { luck: 5 }, desc: 'Ожерелье, заставляющее бить по уязвимым местам.', bonus: { stats: { strength: 1, luck: 1 } } },
   'fury_ring_2': { name: 'Перстень Ярости', icon: '💍', slotType: 'ring', price: 16, level: 3, req: { luck: 5 }, desc: 'Рубиновое кольцо, пульсирующее в такт ударам.', bonus: { stats: { luck: 2 }, mf_crit: 10 } },
   // === УРОВЕНЬ 5: СЕТ ИСКАТЕЛЯ ===
-  'seeker_axe_3': { name: 'Топор Искателя', icon: '🪓', slotType: 'mainHand', price: 55, level: 5, req: { luck: 11 }, desc: 'Пластинчатый топор.', bonus: { atk: 8, mf_crit: 20 } },
-  'seeker_fist_3': { name: 'Шип Искателя (Л)', icon: '🗡️', slotType: 'offHand', price: 55, level: 5, req: { luck: 11 }, desc: 'Оружие левой руки.', bonus: { atk: 4, stats: { luck: 1 }, mf_crit: 10 } },
-  'heavy_halberd': { name: 'Тяжелая алебарда', icon: '🔱', slotType: 'twoHanded', price: 120, level: 5, req: { luck: 13 }, desc: 'Двуручное древковое оружие. ', bonus: { atk: 14, mf_crit: 40 } },
+  'seeker_axe_3': { name: 'Топор Искателя', icon: '🪓', slotType: 'mainHand', price: 55, level: 5, req: { luck: 11 }, desc: 'Пластинчатый топор.', bonus: { atkMin: 6, atkMax: 10, mf_crit: 20 } },
+  'seeker_fist_3': { name: 'Шип Искателя (Л)', icon: '🗡️', slotType: 'offHand', price: 55, level: 5, req: { luck: 11 }, desc: 'Оружие левой руки.', bonus: { atkMin: 3, atkMax: 5, stats: { luck: 1 }, mf_crit: 10 } },
+  'heavy_halberd': { name: 'Тяжелая алебарда', icon: '🔱', slotType: 'twoHanded', price: 120, level: 5, req: { luck: 13 }, desc: 'Двуручное древковое оружие. ', bonus: { atkMin: 10, atkMax: 18, mf_crit: 40 } },
   'seeker_hood_3': { name: 'Капюшон Искателя', icon: '🥷', slotType: 'head', price: 38, level: 5, req: { luck: 9 }, desc: 'Кожаный шлем.', bonus: { def: 2, stats: { luck: 2 }, mf_crit: 15 } },
   'seeker_hauberk_3': { name: 'Лорка Искателя', icon: '👕', slotType: 'body', price: 65, level: 5, req: { luck: 12 }, desc: 'Усиленная куртка.', bonus: { def: 5, stats: { luck: 3 }, mf_crit: 25 } },
   'seeker_boots_3': { name: 'Сапоги Искателя', icon: '🥾', slotType: 'legs', price: 38, level: 5, req: { luck: 9 }, desc: 'Плотные сапоги.', bonus: { def: 2, stats: { luck: 1 }, mf_crit: 15 } },
@@ -143,9 +143,9 @@ const GAME_ITEMS_DATABASE = {
   'seeker_ring_3': { name: 'Кольцо Искателя', icon: '💍', slotType: 'ring', price: 35, level: 5, req: { luck: 10 }, desc: 'Перстень диких земель.', bonus: { stats: { luck: 2 }, mf_crit: 15 } },
 
   // === УРОВЕНЬ 7: СЕТ ГОРЦА ===
-  'highland_claymore_4': { name: 'Клеймор Горца', icon: '⚔️', slotType: 'mainHand', price: 100, level: 7, req: { luck: 16 }, desc: 'Шотландский палаш.', bonus: { atk: 12, mf_crit: 25 } },
-  'highland_dirk_4': { name: 'Дирк Горца (Л)', icon: '🗡️', slotType: 'offHand', price: 100, level: 7, req: { luck: 16 }, desc: 'Кинжал левой руки.', bonus: { atk: 6, stats: { luck: 2 }, mf_crit: 15 } },
-  'highland_broadsword_4': { name: 'Двуруч Горца', icon: '⚔️', slotType: 'twoHanded', price: 180, level: 7, req: { luck: 18 }, desc: 'Тяжелый меч.', bonus: { atk: 18, mf_crit: 50 } },
+  'highland_claymore_4': { name: 'Клеймор Горца', icon: '⚔️', slotType: 'mainHand', price: 100, level: 7, req: { luck: 16 }, desc: 'Шотландский палаш.', bonus: { atkMin: 9, atkMax: 15, mf_crit: 25 } },
+  'highland_dirk_4': { name: 'Дирк Горца (Л)', icon: '🗡️', slotType: 'offHand', price: 100, level: 7, req: { luck: 16 }, desc: 'Кинжал левой руки.', bonus: { atkMin: 4, atkMax: 8, stats: { luck: 2 }, mf_crit: 15 } },
+  'highland_broadsword_4': { name: 'Двуруч Горца', icon: '⚔️', slotType: 'twoHanded', price: 180, level: 7, req: { luck: 18 }, desc: 'Тяжелый меч.', bonus: { atkMin: 13, atkMax: 23, mf_crit: 50 } },
   'highland_cap_4': { name: 'Берет Горца', icon: '🥻', slotType: 'head', price: 70, level: 7, req: { luck: 14 }, desc: 'Плотный шерстяной берет.', bonus: { def: 3, stats: { luck: 3 }, mf_crit: 20 } },
   'highland_kilt_4': { name: 'Килт Горца', icon: '👕', slotType: 'body', price: 120, level: 7, req: { luck: 18 }, desc: 'Плотная клетчатая тартан-броня.', bonus: { def: 8, stats: { luck: 4 }, mf_crit: 30 } },
   'highland_brogues_4': { name: 'Броги Горца', icon: '🥾', slotType: 'legs', price: 70, level: 7, req: { luck: 14 }, desc: 'Кожаная перфорированная обувь.', bonus: { def: 3, stats: { strength: 2 }, mf_crit: 20 } },
@@ -154,9 +154,9 @@ const GAME_ITEMS_DATABASE = {
   'highland_loop_4': { name: 'Кольцо Горца', icon: '💍', slotType: 'ring', price: 60, level: 7, req: { luck: 15 }, desc: 'Кольцо с кладдахским узором.', bonus: { stats: { luck: 3 }, mf_crit: 20 } },
 
   // === УРОВЕНЬ 9: СЕТ РАЗРУШЕНИЯ ===
-  'slasher_axe_5': { name: 'Топор Мясника', icon: '🪓', slotType: 'mainHand', price: 180, level: 9, req: { luck: 22 }, desc: 'Широкое палаческое лезвие.', bonus: { atk: 18, mf_crit: 35 } },
-  'slasher_spike_5': { name: 'Крюк Мясника (Л)', icon: '⛓️', slotType: 'offHand', price: 180, level: 9, req: { luck: 22 }, desc: 'Серп левой руки.', bonus: { atk: 9, stats: { luck: 3 }, mf_crit: 20 } },
-  'ravager_maul_5': { name: 'Молот Разрушителя', icon: '🔨', slotType: 'twoHanded', price: 300, level: 9, req: { luck: 25 }, desc: 'Огромная кувалда. Бьет в 2 ЗОНЫ АТАК И.', bonus: { atk: 26, mf_crit: 60 } },
+  'slasher_axe_5': { name: 'Топор Мясника', icon: '🪓', slotType: 'mainHand', price: 180, level: 9, req: { luck: 22 }, desc: 'Широкое палаческое лезвие.', bonus: { atkMin: 13, atkMax: 23, mf_crit: 35 } },
+  'slasher_spike_5': { name: 'Крюк Мясника (Л)', icon: '⛓️', slotType: 'offHand', price: 180, level: 9, req: { luck: 22 }, desc: 'Серп левой руки.', bonus: { atkMin: 6, atkMax: 12, stats: { luck: 3 }, mf_crit: 20 } },
+  'ravager_maul_5': { name: 'Молот Разрушителя', icon: '🔨', slotType: 'twoHanded', price: 300, level: 9, req: { luck: 25 }, desc: 'Огромная кувалда. Бьет в 2 ЗОНЫ АТАК И.', bonus: { atkMin: 19, atkMax: 33, mf_crit: 60 } },
   'skull_helmet_5': { name: 'Шлем из черепа', icon: '💀', slotType: 'head', price: 130, level: 9, req: { luck: 19 }, desc: 'Костяной ужасающий шлем.', bonus: { def: 4, stats: { luck: 4 }, mf_crit: 25 } },
   'ravager_plate_5': { name: 'Латы Разрушителя', icon: '👕', slotType: 'body', price: 210, level: 9, req: { luck: 25 }, desc: 'Шипованный нагрудный доспех.', bonus: { def: 11, stats: { luck: 5 }, mf_crit: 35 } },
   'ravager_boots_5': { name: 'Ботфорты Разрушителя', icon: '🥾', slotType: 'legs', price: 130, level: 9, req: { luck: 19 }, desc: 'Кованые тяжелые сапоги.', bonus: { def: 4, stats: { strength: 3 }, mf_crit: 25 } },
@@ -165,9 +165,9 @@ const GAME_ITEMS_DATABASE = {
   'ravager_band_5': { name: 'Кольцо Разрушения', icon: '💍', slotType: 'ring', price: 140, level: 9, req: { luck: 20 }, desc: 'Перстень черного кузнеца.', bonus: { stats: { luck: 4 }, mf_crit: 30 } },
 
   // === УРОВЕНЬ 11: СЕТ БЕРСЕРКА ===
-  'berserk_machete_6': { name: 'Мачете Берсерка', icon: '⚔️', slotType: 'mainHand', price: 260, level: 11, req: { luck: 29 }, desc: 'Широкое кромсающее лезвие.', bonus: { atk: 24, mf_crit: 45 } },
-  'berserk_hook_6': { name: 'Серп Берсерка (Л)', icon: '🗡️', slotType: 'offHand', price: 260, level: 11, req: { luck: 29 }, desc: 'Левый зазубренный тесак ярости.', bonus: { atk: 12, stats: { luck: 4 }, mf_crit: 25 } },
-  'berserk_greataxe_6': { name: 'Секира Раздора', icon: '🪓', slotType: 'twoHanded', price: 420, level: 11, req: { luck: 32 }, desc: 'Огромный боевой топор.', bonus: { atk: 35, mf_crit: 75 } },
+  'berserk_machete_6': { name: 'Мачете Берсерка', icon: '⚔️', slotType: 'mainHand', price: 260, level: 11, req: { luck: 29 }, desc: 'Широкое кромсающее лезвие.', bonus: { atkMin: 18, atkMax: 30, mf_crit: 45 } },
+  'berserk_hook_6': { name: 'Серп Берсерка (Л)', icon: '🗡️', slotType: 'offHand', price: 260, level: 11, req: { luck: 29 }, desc: 'Левый зазубренный тесак ярости.', bonus: { atkMin: 9, atkMax: 15, stats: { luck: 4 }, mf_crit: 25 } },
+  'berserk_greataxe_6': { name: 'Секира Раздора', icon: '🪓', slotType: 'twoHanded', price: 420, level: 11, req: { luck: 32 }, desc: 'Огромный боевой топор.', bonus: { atkMin: 26, atkMax: 44, mf_crit: 75 } },
   'berserk_crown_6': { name: 'Корона Ярости', icon: '👑', slotType: 'head', price: 190, level: 11, req: { luck: 25 }, desc: 'Венец безумного воителя.', bonus: { def: 5, stats: { luck: 5 }, mf_crit: 30 } },
   'berserk_cuirass_6': { name: 'Кираса Берсерка', icon: '👕', slotType: 'body', price: 310, level: 11, req: { luck: 32 }, desc: 'Изувеченный в боях стальной нагрудник.', bonus: { def: 14, stats: { luck: 6, strength: 2 }, mf_crit: 45 } },
   'berserk_greaves_6': { name: 'Поножи Берсерка', icon: '🥾', slotType: 'legs', price: 190, level: 11, req: { luck: 25 }, desc: 'Латная защита голеней со сколами.', bonus: { def: 5, stats: { strength: 3 }, mf_crit: 30 } },
@@ -175,9 +175,9 @@ const GAME_ITEMS_DATABASE = {
   'berserk_collar_6': { name: 'Цепь Безумия', icon: '📿', slotType: 'neck', price: 240, level: 11, req: { luck: 27 }, desc: 'Ошейник, разжигающий боевой транс.', bonus: { stats: { strength: 3, luck: 3 } } },
   'berserk_signet_6': { name: 'Печать Бешенства', icon: '💍', slotType: 'ring', price: 210, level: 11, req: { luck: 27 }, desc: 'Кольцо, пропитанное дикой силой крови.', bonus: { stats: { luck: 5 }, mf_crit: 40 } },
   // === УРОВЕНЬ 13: СЕТ КРОВИ ===
-  'blood_cleaver_7': { name: 'Мясник Крови', icon: '🪓', slotType: 'mainHand', price: 380, level: 13, req: { luck: 38 }, desc: 'Кровавая секира, разрывающая плоть.', bonus: { atk: 34, mf_crit: 50 } },
-  'blood_hook_7': { name: 'Зацеп Крови (Л)', icon: '⛓️', slotType: 'offHand', price: 380, level: 13, req: { luck: 38 }, desc: 'Левый зазубренный серп для критов.', bonus: { atk: 18, stats: { luck: 4 }, mf_crit: 25 } },
-  'bloodlust_harvester_7': { name: 'Жнец Крови', icon: '🔱', slotType: 'twoHanded', price: 620, level: 13, req: { luck: 42 }, desc: 'Двуручная коса.', bonus: { atk: 45, mf_crit: 85 } },
+  'blood_cleaver_7': { name: 'Мясник Крови', icon: '🪓', slotType: 'mainHand', price: 380, level: 13, req: { luck: 38 }, desc: 'Кровавая секира, разрывающая плоть.', bonus: { atkMin: 25, atkMax: 43, mf_crit: 50 } },
+  'blood_hook_7': { name: 'Зацеп Крови (Л)', icon: '⛓️', slotType: 'offHand', price: 380, level: 13, req: { luck: 38 }, desc: 'Левый зазубренный серп для критов.', bonus: { atkMin: 13, atkMax: 23, stats: { luck: 4 }, mf_crit: 25 } },
+  'bloodlust_harvester_7': { name: 'Жнец Крови', icon: '🔱', slotType: 'twoHanded', price: 620, level: 13, req: { luck: 42 }, desc: 'Двуручная коса.', bonus: { atkMin: 33, atkMax: 57, mf_crit: 85 } },
   'blood_mask_7': { name: 'Маска Крови', icon: '🎭', slotType: 'head', price: 280, level: 13, req: { luck: 34 }, desc: 'Устрашающее забрало культа.', bonus: { def: 6, stats: { luck: 5 }, mf_crit: 35 } },
   'bloodlust_plate_7': { name: 'Латы Кровавого Натиска', icon: '👕', slotType: 'body', price: 450, level: 13, req: { luck: 42 }, desc: 'Стальной нагрудник, закаленный в боях.', bonus: { def: 18, stats: { luck: 7, strength: 4 }, mf_crit: 50 } },
   'blood_boots_7': { name: 'Сапоги Крови', icon: '🥾', slotType: 'legs', price: 280, level: 13, req: { luck: 34 }, desc: 'Кованая тяжелая обувь.', bonus: { def: 6, stats: { strength: 4 }, mf_crit: 30 } },
@@ -186,9 +186,9 @@ const GAME_ITEMS_DATABASE = {
   'doom_ring_7': { name: 'Кольцо Рока', icon: '💍', slotType: 'ring', price: 200, level: 13, req: { luck: 36 }, desc: 'Проклятый артефакт, гарантирующий криты.', bonus: { stats: { luck: 6 }, mf_crit: 45 } },
 
   // === УРОВЕНЬ 15: СЕТ ТЕМНОГО ГЛАДИАТОР А ===
-  'reaper_blade_8': { name: 'Клинок Жнеца', icon: '⚔️', slotType: 'mainHand', price: 520, level: 15, req: { luck: 48 }, desc: 'Тяжелый меч, несущий гибель.', bonus: { atk: 44, mf_crit: 60 } },
-  'reaper_spike_8': { name: 'Шип Жнеца (Л)', icon: '🗡️', slotType: 'offHand', price: 520, level: 15, req: { luck: 48 }, desc: 'Оружие левой руки для пробития уворота.', bonus: { atk: 22, stats: { luck: 5 }, mf_antiinv: 35 } },
-  'oblivion_scythe_8': { name: 'Коса Забвения', icon: '🔱', slotType: 'twoHanded', price: 850, level: 15, req: { luck: 52 }, desc: 'Огромное двуручное лезвие.', bonus: { atk: 58, mf_crit: 100 } },
+  'reaper_blade_8': { name: 'Клинок Жнеца', icon: '⚔️', slotType: 'mainHand', price: 520, level: 15, req: { luck: 48 }, desc: 'Тяжелый меч, несущий гибель.', bonus: { atkMin: 33, atkMax: 55, mf_crit: 60 } },
+  'reaper_spike_8': { name: 'Шип Жнеца (Л)', icon: '🗡️', slotType: 'offHand', price: 520, level: 15, req: { luck: 48 }, desc: 'Оружие левой руки для пробития уворота.', bonus: { atkMin: 16, atkMax: 28, stats: { luck: 5 }, mf_antiinv: 35 } },
+  'oblivion_scythe_8': { name: 'Коса Забвения', icon: '🔱', slotType: 'twoHanded', price: 850, level: 15, req: { luck: 52 }, desc: 'Огромное двуручное лезвие.', bonus: { atkMin: 43, atkMax: 73, mf_crit: 100 } },
   'reaper_helm_8': { name: 'Шлем Жнеца', icon: '🪖', slotType: 'head', price: 390, level: 15, req: { luck: 42 }, desc: 'Глухой шлем паладина тьмы.', bonus: { def: 8, stats: { luck: 6 }, mf_crit: 40 } },
   'reaper_cuirass_8': { name: 'Латы Жнеца', icon: '👕', slotType: 'body', price: 600, level: 15, req: { luck: 52 }, desc: 'Тяжелая литая броня разрушения.', bonus: { def: 24, stats: { luck: 8, strength: 5 }, mf_crit: 60 } },
   'reaper_boots_8': { name: 'Сапоги Жнеца', icon: '🥾', slotType: 'legs', price: 390, level: 15, req: { luck: 42 }, desc: 'Шипованные боевые ботинки.', bonus: { def: 8, stats: { strength: 5 }, mf_crit: 35 } },
@@ -197,9 +197,9 @@ const GAME_ITEMS_DATABASE = {
   'reaper_signet_8': { name: 'Печать Жнеца', icon: '💍', slotType: 'ring', price: 300, level: 15, req: { luck: 45 }, desc: 'Кольцо, крадущее удачу соперника.', bonus: { stats: { luck: 7 }, mf_crit: 50 } },
 
   // === УРОВЕНЬ 17: СЕТ ОГНЯ ===
-  'hellfire_axe_9': { name: 'Топор Адского Пламени', icon: '🪓', slotType: 'mainHand', price: 750, level: 17, req: { luck: 58 }, desc: 'Оружие, раскаленное добела.', bonus: { atk: 56, mf_crit: 75 } },
-  'hellfire_claws_9': { name: 'Когти Пламени (Л)', icon: '🧤', slotType: 'offHand', price: 750, level: 17, req: { luck: 58 }, desc: 'Огненные шипы левой руки.', bonus: { atk: 30, stats: { luck: 6 }, mf_crit: 40 } },
-  'inferno_breaker_9': { name: 'Разрушитель Инферно', icon: '🔨', slotType: 'twoHanded', price: 1100, level: 17, req: { luck: 64 }, desc: 'Двуручный молот преисподней.', bonus: { atk: 75, mf_crit: 120 } },
+  'hellfire_axe_9': { name: 'Топор Адского Пламени', icon: '🪓', slotType: 'mainHand', price: 750, level: 17, req: { luck: 58 }, desc: 'Оружие, раскаленное добела.', bonus: { atkMin: 42, atkMax: 70, mf_crit: 75 } },
+  'hellfire_claws_9': { name: 'Когти Пламени (Л)', icon: '🧤', slotType: 'offHand', price: 750, level: 17, req: { luck: 58 }, desc: 'Огненные шипы левой руки.', bonus: { atkMin: 22, atkMax: 38, stats: { luck: 6 }, mf_crit: 40 } },
+  'inferno_breaker_9': { name: 'Разрушитель Инферно', icon: '🔨', slotType: 'twoHanded', price: 1100, level: 17, req: { luck: 64 }, desc: 'Двуручный молот преисподней.', bonus: { atkMin: 56, atkMax: 94, mf_crit: 120 } },
   'hellfire_crown_9': { name: 'Венец Инферно', icon: '👑', slotType: 'head', price: 540, level: 17, req: { luck: 52 }, desc: 'Корона из застывшей лавы.', bonus: { def: 10, stats: { luck: 8 }, mf_crit: 50 } },
   'hellfire_plate_9': { name: 'Латы Адского Пламени', icon: '👕', slotType: 'body', price: 880, level: 17, req: { luck: 64 }, desc: 'Магматический непробиваемый доспех.', bonus: { def: 30, stats: { luck: 10, strength: 6 }, mf_crit: 70 } },
   'hellfire_boots_9': { name: 'Сапоги Инферно', icon: '🥾', slotType: 'legs', price: 540, level: 17, req: { luck: 52 }, desc: 'Ботинки, оставляющие огненный след.', bonus: { def: 10, stats: { strength: 6 }, mf_crit: 45 } },
@@ -208,9 +208,9 @@ const GAME_ITEMS_DATABASE = {
   'hellfire_loop_9': { name: 'Петля Инферно', icon: '💍', slotType: 'ring', price: 400, level: 17, req: { luck: 55 }, desc: 'Кольцо вечного пламени ярости.', bonus: { stats: { luck: 9 }, mf_crit: 60 } },
 
   // === УРОВЕНЬ 19: СЕТ ПАЛАЧА / ПОВЕЛИТЕЛЯ РОКА ===
-  'executioner_axe_10': { name: 'Топор Воеводы Рока', icon: '🪓', slotType: 'mainHand', price: 1100, level: 19, req: { luck: 72 }, desc: 'Высшее одноручное оружие критовика.', bonus: { atk: 72, mf_crit: 95 } },
-  'executioner_dagger_10': { name: 'Тесак Палача (Л)', icon: '🗡️', slotType: 'offHand', price: 1100, level: 19, req: { luck: 72 }, desc: 'Парное лезвие для левой руки. Бешеный урон.', bonus: { atk: 40, stats: { luck: 8 }, mf_crit: 50 } },
-  'executioner_scythe_10': { name: 'Коса Палача Рока', icon: '🔱', slotType: 'twoHanded', price: 1600, level: 19, req: { luck: 78 }, desc: 'Легендарный двуручник. Косит врагов СДВОЕННЫМИ критическими ударами.', bonus: { atk: 95, stats: { luck: 12 }, mf_crit: 150 } },
+  'executioner_axe_10': { name: 'Топор Воеводы Рока', icon: '🪓', slotType: 'mainHand', price: 1100, level: 19, req: { luck: 72 }, desc: 'Высшее одноручное оружие критовика.', bonus: { atkMin: 54, atkMax: 90, mf_crit: 95 } },
+  'executioner_dagger_10': { name: 'Тесак Палача (Л)', icon: '🗡️', slotType: 'offHand', price: 1100, level: 19, req: { luck: 72 }, desc: 'Парное лезвие для левой руки. Бешеный урон.', bonus: { atkMin: 30, atkMax: 50, stats: { luck: 8 }, mf_crit: 50 } },
+  'executioner_scythe_10': { name: 'Коса Палача Рока', icon: '🔱', slotType: 'twoHanded', price: 1600, level: 19, req: { luck: 78 }, desc: 'Легендарный двуручник. Косит врагов СДВОЕННЫМИ критическими ударами.', bonus: { atkMin: 71, atkMax: 119, stats: { luck: 12 }, mf_crit: 150 } },
   'executioner_mask_10': { name: 'Тень Повелителя Рока', icon: '🥷', slotType: 'head', price: 850, level: 19, req: { luck: 62 }, desc: 'Шлем-маска триумфатора Арены.', bonus: { def: 14, stats: { luck: 10 }, mf_crit: 65 } },
   'warlord_cuirass_10': { name: 'Кираса Повелителя Рока', icon: '🥋', slotType: 'body', price: 1300, level: 19, req: { luck: 78 }, desc: 'Венец эволюции критовиков. Максимальный разгон ярости.', bonus: { def: 38, stats: { strength: 10, luck: 14 }, mf_crit: 100 } },
   'executioner_tabi_10': { name: 'Сапоги Повелителя Рока', icon: '🥾', slotType: 'legs', price: 850, level: 19, req: { luck: 62 }, desc: 'Стальная обувь сокрушительного марша.', bonus: { def: 14, stats: { strength: 8 }, mf_crit: 55 } },
@@ -218,8 +218,8 @@ const GAME_ITEMS_DATABASE = {
   'executioner_collar_10': { name: 'Ошейник Повелителя Рока', icon: '📿', slotType: 'neck', price: 990, level: 19, req: { luck: 66 }, desc: 'Реликвия древних титанов разрушения.', bonus: { def: 6, stats: { strength: 8, luck: 7 } } },
   'executioner_ring_10': { name: 'Кольцо Повелителя Рока', icon: '💍', slotType: 'ring', price: 950, level: 19, req: { luck: 66 }, desc: 'Шедевр темных кузнецов. Идеальный разгон крита.', bonus: { stats: { luck: 12 }, mf_crit: 90 } },
   // === УРОВЕНЬ 1: СЕТ РЕКРУТА ===
-  'wooden_club_1': { name: 'Дубина Рекрута', icon: '🪵', slotType: 'mainHand', price: 10, level: 1, req: { endurance: 3 }, desc: 'Простая деревянная колотушка.', bonus: { atk: 3 } },
-  'recruit_knife_1': { name: 'Нож Рекрута (Л)', icon: '🗡️', slotType: 'offHand', price: 10, level: 1, req: { endurance: 3 }, desc: 'Вспомогательный кинжал стражи.', bonus: { atk: 1, stats: { strength: 1 } } },
+  'wooden_club_1': { name: 'Дубина Рекрута', icon: '🪵', slotType: 'mainHand', price: 10, level: 1, req: { endurance: 3 }, desc: 'Простая деревянная колотушка.', bonus: { atkMin: 2, atkMax: 4 } },
+  'recruit_knife_1': { name: 'Нож Рекрута (Л)', icon: '🗡️', slotType: 'offHand', price: 10, level: 1, req: { endurance: 3 }, desc: 'Вспомогательный кинжал стражи.', bonus: { atkMin: 1, atkMax: 2, stats: { strength: 1 } } },
   'wooden_shield': { name: 'Щит новичка', icon: '🛡️', slotType: 'offHand', price: 15, level: 1, req: { endurance: 2 }, desc: 'Грубые доски. Блокирует сразу 3 ЗОНЫ!', bonus: { def: 2, mf_anticrit: 15 } },
   'recruit_cap_1': { name: 'Шапка Рекрута', icon: '🪖', slotType: 'head', price: 8, level: 1, req: { endurance: 2 }, desc: 'Кожаный подшлемник.', bonus: { def: 1, stats: { endurance: 1 }, mf_anticrit: 5 } },
   'recruit_vest_1': { name: 'Жилет Рекрута', icon: '👕', slotType: 'body', price: 14, level: 1, req: { endurance: 3 }, desc: 'Стеганый матерчатый колет.', bonus: { def: 3, stats: { endurance: 1 } } },
@@ -229,8 +229,8 @@ const GAME_ITEMS_DATABASE = {
   'recruit_ring_1': { name: 'Кольцо Рекрута', icon: '💍', slotType: 'ring', price: 8, level: 1, req: { endurance: 2 }, desc: 'Массивный свинцовый перстень.', bonus: { stats: { endurance: 1 }, mf_anticrit: 5 } },
 
   // === УРОВЕНЬ 3: СЕТ ОПОЛЧЕНЦА ===
-  'iron_mace_2': { name: 'Булава Ополченца', icon: '🔨', slotType: 'mainHand', price: 28, level: 3, req: { endurance: 6 }, desc: 'Железная граненая колотушка.', bonus: { atk: 5, mf_antiinv: 10 } },
-  'militia_dagger_2': { name: 'Кинжал Ополченца (Л)', icon: '⚔️', slotType: 'offHand', price: 25, level: 3, req: { endurance: 6 }, desc: 'Широкий кинжал для левой руки.', bonus: { atk: 2, stats: { strength: 1 } } },
+  'iron_mace_2': { name: 'Булава Ополченца', icon: '🔨', slotType: 'mainHand', price: 28, level: 3, req: { endurance: 6 }, desc: 'Железная граненая колотушка.', bonus: { atkMin: 3, atkMax: 7, mf_antiinv: 10 } },
+  'militia_dagger_2': { name: 'Кинжал Ополченца (Л)', icon: '⚔️', slotType: 'offHand', price: 25, level: 3, req: { endurance: 6 }, desc: 'Широкий кинжал для левой руки.', bonus: { atkMin: 1, atkMax: 3, stats: { strength: 1 } } },
   'militia_shield_2': { name: 'Плотный щит', icon: '🛡️', slotType: 'offHand', price: 24, level: 3, req: { endurance: 5 }, desc: 'Усиленный стальным ободом щит. Дает 3 блока.', bonus: { def: 4, mf_anticrit: 20 } },
   'iron_helm_2': { name: 'Шлем Ополченца', icon: '🪖', slotType: 'head', price: 20, level: 3, req: { endurance: 5 }, desc: 'Железный клепаный чепец.', bonus: { def: 2, stats: { endurance: 1 }, mf_anticrit: 10 } },
   'recruit_chain_2': { name: 'Кольчуга рекрута', icon: '👕', slotType: 'body', price: 45, level: 3, req: { endurance: 7 }, desc: 'Сплетенные кольца гасят криты.', bonus: { def: 5, stats: { endurance: 2 }, mf_anticrit: 20 } },
@@ -240,8 +240,8 @@ const GAME_ITEMS_DATABASE = {
   'militia_ring_2': { name: 'Кольцо Ополченца', icon: '💍', slotType: 'ring', price: 16, level: 3, req: { endurance: 5 }, desc: 'Тяжелое бронзовое кольцо.', bonus: { stats: { endurance: 2 }, mf_anticrit: 15 } },
 
   // === УРОВЕНЬ 5: СЕТ СТРАЖНИКА ===
-  'heavy_flail_3': { name: 'Кистень Стражника', icon: '⚔️', slotType: 'mainHand', price: 60, level: 5, req: { endurance: 11 }, desc: 'Шар на цепи, пробивающий уворот.', bonus: { atk: 8, mf_antiinv: 20 } },
-  'guard_dirk_3': { name: 'Кортик Стражника (Л)', icon: '🗡️', slotType: 'offHand', price: 50, level: 5, req: { endurance: 11 }, desc: 'Левый парадный кортик дозора.', bonus: { atk: 4, stats: { strength: 2 } } },
+  'heavy_flail_3': { name: 'Кистень Стражника', icon: '⚔️', slotType: 'mainHand', price: 60, level: 5, req: { endurance: 11 }, desc: 'Шар на цепи, пробивающий уворот.', bonus: { atkMin: 6, atkMax: 10, mf_antiinv: 20 } },
+  'guard_dirk_3': { name: 'Кортик Стражника (Л)', icon: '🗡️', slotType: 'offHand', price: 50, level: 5, req: { endurance: 11 }, desc: 'Левый парадный кортик дозора.', bonus: { atkMin: 3, atkMax: 5, stats: { strength: 2 } } },
   'knight_shield_3': { name: 'Рыцарский щит', icon: '🛡️', slotType: 'offHand', price: 75, level: 5, req: { endurance: 9 }, desc: 'Стальной каплевидный щит. Дает 3 блока.', bonus: { def: 5, mf_anticrit: 30 } },
   'guard_helm_3': { name: 'Шлем Гвардейца', icon: '🪖', slotType: 'head', price: 40, level: 5, req: { endurance: 9 }, desc: 'Шлем с полузабралом.', bonus: { def: 3, stats: { endurance: 2 }, mf_anticrit: 15 } },
   'guard_cuirass_3': { name: 'Кираса Стражника', icon: '👕', slotType: 'body', price: 80, level: 5, req: { endurance: 12 }, desc: 'Кованый нагрудный полудоспех.', bonus: { def: 8, stats: { endurance: 3 }, mf_anticrit: 25 } },
@@ -251,8 +251,8 @@ const GAME_ITEMS_DATABASE = {
   'guard_signet_3': { name: 'Печатка Стражника', icon: '💍', slotType: 'ring', price: 38, level: 5, req: { endurance: 10 }, desc: 'Серебряное кольцо с гербом города.', bonus: { stats: { endurance: 2 }, mf_anticrit: 20 } },
 
   // === УРОВЕНЬ 7: СЕТ ОРДЕНА ВЕРНОСТИ ===
-  'order_mace_4': { name: 'Шестопер Ордена', icon: '🔨', slotType: 'mainHand', price: 100, level: 7, req: { endurance: 16 }, desc: 'Граненая стальная булава.', bonus: { atk: 11, mf_antiinv: 30 } },
-  'order_blade_4': { name: 'Глефа Ордена (Л)', icon: '⚔️', slotType: 'offHand', price: 90, level: 7, req: { endurance: 16 }, desc: 'Парирующий широкий тесак.', bonus: { atk: 5, stats: { strength: 2 } } },
+  'order_mace_4': { name: 'Шестопер Ордена', icon: '🔨', slotType: 'mainHand', price: 100, level: 7, req: { endurance: 16 }, desc: 'Граненая стальная булава.', bonus: { atkMin: 8, atkMax: 14, mf_antiinv: 30 } },
+  'order_blade_4': { name: 'Глефа Ордена (Л)', icon: '⚔️', slotType: 'offHand', price: 90, level: 7, req: { endurance: 16 }, desc: 'Парирующий широкий тесак.', bonus: { atkMin: 3, atkMax: 7, stats: { strength: 2 } } },
   'order_shield_4': { name: 'Ростовой щит Ордена', icon: '🛡️', slotType: 'offHand', price: 110, level: 7, req: { endurance: 14 }, desc: 'Массивный щит рыцарей. Открывает 3 блока.', bonus: { def: 7, mf_anticrit: 40 } },
   'order_barbute_4': { name: 'Барбют Ордена', icon: '🪖', slotType: 'head', price: 70, level: 7, req: { endurance: 14 }, desc: 'Итальянский глубокий пехотный шлем.', bonus: { def: 4, stats: { endurance: 3 }, mf_anticrit: 25 } },
   'order_breastplate_4': { name: 'Латник Верности', icon: '👕', slotType: 'body', price: 150, level: 7, req: { endurance: 18 }, desc: 'Безупречные полированные латы.', bonus: { def: 12, stats: { endurance: 4, strength: 1 }, mf_anticrit: 35 } },
@@ -262,8 +262,8 @@ const GAME_ITEMS_DATABASE = {
   'order_loop_4': { name: 'Виток Верности', icon: '💍', slotType: 'ring', price: 60, level: 7, req: { endurance: 15 }, desc: 'Железный перстень с печатью клятвы.', bonus: { stats: { endurance: 3 }, mf_anticrit: 25 } },
 
   // === УРОВЕНЬ 9: СЕТ ХРАНИТЕЛЯ БАСТИОНА ===
-  'steel_mace_5': { name: 'Моргенштерн Хранителя', icon: '⚔️', slotType: 'mainHand', price: 180, level: 9, req: { endurance: 22 }, desc: 'Шипастая звезда из закаленной стали.', bonus: { atk: 15, mf_antiinv: 40 } },
-  'guardian_spike_5': { name: 'Кинжал Хранителя (Л)', icon: '🗡️', slotType: 'offHand', price: 160, level: 9, req: { endurance: 22 }, desc: 'Оружие левой руки для контрударов.', bonus: { atk: 7, stats: { strength: 3 } } },
+  'steel_mace_5': { name: 'Моргенштерн Хранителя', icon: '⚔️', slotType: 'mainHand', price: 180, level: 9, req: { endurance: 22 }, desc: 'Шипастая звезда из закаленной стали.', bonus: { atkMin: 11, atkMax: 19, mf_antiinv: 40 } },
+  'guardian_spike_5': { name: 'Кинжал Хранителя (Л)', icon: '🗡️', slotType: 'offHand', price: 160, level: 9, req: { endurance: 22 }, desc: 'Оружие левой руки для контрударов.', bonus: { atkMin: 5, atkMax: 9, stats: { strength: 3 } } },
   'guardian_wall_5': { name: 'Щит-Бастион', icon: '🛡️', slotType: 'offHand', price: 210, level: 9, req: { endurance: 19 }, desc: 'Стена из кованого железа. Дает 3 блока.', bonus: { def: 10, mf_anticrit: 50 } },
   'guardian_visor_5': { name: 'Забрало Бастиона', icon: '🪖', slotType: 'head', price: 130, level: 9, req: { endurance: 19 }, desc: 'Тяжелый глухой турнирный шлем.', bonus: { def: 5, stats: { endurance: 4 }, mf_anticrit: 30 } },
   'guardian_plate_5': { name: 'Доспех Хранителя', icon: '⛓️', slotType: 'body', price: 250, level: 9, req: { endurance: 25 }, desc: 'Монолитные стальные пластины защиты.', bonus: { def: 16, stats: { endurance: 6 }, mf_anticrit: 45 } },
@@ -272,8 +272,8 @@ const GAME_ITEMS_DATABASE = {
   'guardian_torque_5': { name: 'Гривна Хранителя', icon: '📿', slotType: 'neck', price: 160, level: 9, req: { endurance: 20 }, desc: 'Шейный обруч из монолитной платины.', bonus: { def: 3, stats: { endurance: 3 } } },
   'guardian_seal_5': { name: 'Печать Бастиона', icon: '💍', slotType: 'ring', price: 140, level: 9, req: { endurance: 20 }, desc: 'Кольцо, намертво увеличивающее броню.', bonus: { stats: { endurance: 4 }, mf_anticrit: 35 } },
    // === УРОВЕНЬ 11: СЕТ ЦЕНТУРИОНА ===
-  'centurion_gladius_6': { name: 'Гладиус Центуриона', icon: '⚔️', slotType: 'mainHand', price: 250, level: 11, req: { endurance: 29 }, desc: 'Увесистый короткий меч легионов.', bonus: { atk: 18 } },
-  'centurion_pugio_6': { name: 'Пугио Центуриона (Л)', icon: '🗡️', slotType: 'offHand', price: 220, level: 11, req: { endurance: 29 }, desc: 'Левый кинжал легионера.', bonus: { atk: 8, stats: { strength: 2 } } },
+  'centurion_gladius_6': { name: 'Гладиус Центуриона', icon: '⚔️', slotType: 'mainHand', price: 250, level: 11, req: { endurance: 29 }, desc: 'Увесистый короткий меч легионов.', bonus: { atkMin: 13, atkMax: 23 } },
+  'centurion_pugio_6': { name: 'Пугио Центуриона (Л)', icon: '🗡️', slotType: 'offHand', price: 220, level: 11, req: { endurance: 29 }, desc: 'Левый кинжал легионера.', bonus: { atkMin: 6, atkMax: 10, stats: { strength: 2 } } },
   'centurion_scutum_6': { name: 'Скутум Центуриона', icon: '🛡️', slotType: 'offHand', price: 260, level: 1, req: { endurance: 25 }, desc: 'Прямоугольный щит. Открывает 3 блока.', bonus: { def: 10, mf_anticrit: 45 } },
   'centurion_galea_6': { name: 'Шлем Центуриона', icon: '🪖', slotType: 'head', price: 180, level: 11, req: { endurance: 25 }, desc: 'Шлем со знаменитым красным гребнем.', bonus: { def: 5, stats: { endurance: 3 }, mf_anticrit: 20 } },
   'centurion_lorica_6': { name: 'Лорика Центуриона', icon: '👕', slotType: 'body', price: 320, level: 11, req: { endurance: 32 }, desc: 'Пластинчатый римский доспех.', bonus: { def: 16, stats: { endurance: 5 }, mf_anticrit: 35 } },
@@ -283,8 +283,8 @@ const GAME_ITEMS_DATABASE = {
   'centurion_signet_6': { name: 'Печать Легиона', icon: '💍', slotType: 'ring', price: 190, level: 11, req: { endurance: 27 }, desc: 'Кольцо вечного доблестного стража.', bonus: { stats: { endurance: 4 }, mf_anticrit: 30 } },
 
   // === УРОВЕНЬ 13: СЕТ ДРЕВНЕГО СТРАЖА ===
-  'ancient_pillar_7': { name: 'Столп Стража', icon: '🔨', slotType: 'mainHand', price: 370, level: 13, req: { endurance: 38 }, desc: 'Каменное сокрушительное ядро на цепи.', bonus: { atk: 25, mf_antiinv: 35 } },
-  'ancient_spike_7': { name: 'Шип Стража (Л)', icon: '🗡️', slotType: 'offHand', price: 320, level: 13, req: { endurance: 38 }, desc: 'Тяжелое левое граненое острие.', bonus: { atk: 12, stats: { strength: 4 } } },
+  'ancient_pillar_7': { name: 'Столп Стража', icon: '🔨', slotType: 'mainHand', price: 370, level: 13, req: { endurance: 38 }, desc: 'Каменное сокрушительное ядро на цепи.', bonus: { atkMin: 18, atkMax: 32, mf_antiinv: 35 } },
+  'ancient_spike_7': { name: 'Шип Стража (Л)', icon: '🗡️', slotType: 'offHand', price: 320, level: 13, req: { endurance: 38 }, desc: 'Тяжелое левое граненое острие.', bonus: { atkMin: 9, atkMax: 15, stats: { strength: 4 } } },
   'bastion_shield_7': { name: 'Щит-Бастион', icon: '🛡️', slotType: 'offHand', price: 400, level: 13, req: { endurance: 34 }, desc: 'Ростовой щит дозора. Открывает 3 блока.', bonus: { def: 14, mf_anticrit: 60 } },
   'ancient_visage_7': { name: 'Маска Стража', icon: '👺', slotType: 'head', price: 270, level: 13, req: { endurance: 34 }, desc: 'Каменная ритуальная маска.', bonus: { def: 6, stats: { endurance: 4 }, mf_anticrit: 30 } },
   'ancient_carapace_7': { name: 'Панцирь Стража', icon: '👕', slotType: 'body', price: 460, level: 13, req: { endurance: 42 }, desc: 'Тяжелый латный монолит забытых шахт.', bonus: { def: 22, stats: { endurance: 7 }, mf_anticrit: 45 } },
@@ -294,8 +294,8 @@ const GAME_ITEMS_DATABASE = {
   'ancient_seal_7': { name: 'Печать Стража', icon: '💍', slotType: 'ring', price: 240, level: 13, req: { endurance: 36 }, desc: 'Перстень из тяжелой реликтовой платины.', bonus: { stats: { endurance: 5 }, mf_anticrit: 40 } },
 
   // === УРОВЕНЬ 15: СЕТ РЫЦАРЯ СТАЛИ ===
-  'gothic_warhammer_8': { name: 'Готический Чекан', icon: '🔨', slotType: 'mainHand', price: 510, level: 15, req: { endurance: 48 }, desc: 'Клевец, ломающий увороты ловкачей.', bonus: { atk: 35, mf_antiinv: 45 } },
-  'gothic_dagger_8': { name: 'Дага Рыцаря (Л)', icon: '🗡️', slotType: 'offHand', price: 450, level: 15, req: { endurance: 48 }, desc: 'Парирующий стальной левый кинжал.', bonus: { atk: 15, stats: { strength: 4 } } },
+  'gothic_warhammer_8': { name: 'Готический Чекан', icon: '🔨', slotType: 'mainHand', price: 510, level: 15, req: { endurance: 48 }, desc: 'Клевец, ломающий увороты ловкачей.', bonus: { atkMin: 26, atkMax: 44, mf_antiinv: 45 } },
+  'gothic_dagger_8': { name: 'Дага Рыцаря (Л)', icon: '🗡️', slotType: 'offHand', price: 450, level: 15, req: { endurance: 48 }, desc: 'Парирующий стальной левый кинжал.', bonus: { atkMin: 11, atkMax: 19, stats: { strength: 4 } } },
   'gothic_bulwark_8': { name: 'Готический Бастион', icon: '🛡️', slotType: 'offHand', price: 550, level: 15, req: { endurance: 42 }, desc: 'Стальной граненый щит рыцарства. Открывает 3 блока.', bonus: { def: 18, mf_anticrit: 70 } },
   'gothic_armet_8': { name: 'Арме Стального Рыцаря', icon: '🪖', slotType: 'head', price: 380, level: 15, req: { endurance: 42 }, desc: 'Глухой шлем с полным забралом.', bonus: { def: 8, stats: { endurance: 5 }, mf_anticrit: 35 } },
   'gothic_harness_8': { name: 'Полный Рыцарский Доспех', icon: '👕', slotType: 'body', price: 620, level: 15, req: { endurance: 52 }, desc: 'Шедевр миланских кузнецов Арены.', bonus: { def: 30, stats: { endurance: 9, strength: 2 }, mf_anticrit: 55 } },
@@ -304,8 +304,8 @@ const GAME_ITEMS_DATABASE = {
   'gothic_gorget_8': { name: 'Горжет Стального Рыцаря', icon: '📿', slotType: 'neck', price: 440, level: 15, req: { endurance: 45 }, desc: 'Анатомический латный нашейник.', bonus: { def: 5, stats: { endurance: 3 } } },
   'gothic_loop_8': { name: 'Перстень Ордена Стали', icon: '💍', slotType: 'ring', price: 290, level: 15, req: { endurance: 45 }, desc: 'Перстень высших магистров-защитников.', bonus: { stats: { endurance: 6 }, mf_anticrit: 50 } },
   // === УРОВЕНЬ 17: СЕТ ТИТАНА ===
-  'titan_breaker_9': { name: 'Сокрушитель Титанов', icon: '🔨', slotType: 'mainHand', price: 740, level: 17, req: { endurance: 58 }, desc: 'Адамантитовый тяжелый боевой молот.', bonus: { atk: 45, mf_antiinv: 60 } },
-  'titan_dirk_9': { name: 'Кортик Титана (Л)', icon: '🗡️', slotType: 'offHand', price: 650, level: 17, req: { endurance: 58 }, desc: 'Массивный левый кортик пробития уворота.', bonus: { atk: 20, stats: { strength: 5 } } },
+  'titan_breaker_9': { name: 'Сокрушитель Титанов', icon: '🔨', slotType: 'mainHand', price: 740, level: 17, req: { endurance: 58 }, desc: 'Адамантитовый тяжелый боевой молот.', bonus: { atkMin: 33, atkMax: 57, mf_antiinv: 60 } },
+  'titan_dirk_9': { name: 'Кортик Титана (Л)', icon: '🗡️', slotType: 'offHand', price: 650, level: 17, req: { endurance: 58 }, desc: 'Массивный левый кортик пробития уворота.', bonus: { atkMin: 15, atkMax: 25, stats: { strength: 5 } } },
   'titan_wall_9': { name: 'Стена Титанов', icon: '🛡️', slotType: 'offHand', price: 800, level: 17, req: { endurance: 52 }, desc: 'Мифический щит из цельного куска скалы. Дает 3 блока.', bonus: { def: 24, mf_anticrit: 80 } },
   'titan_crown_9': { name: 'Корона Титанов', icon: '👑', slotType: 'head', price: 520, level: 17, req: { endurance: 52 }, desc: 'Тяжелый монолитный венец власти.', bonus: { def: 11, stats: { endurance: 7 }, mf_anticrit: 45 } },
   'titan_cuirass_9': { name: 'Панцирь Титанов', icon: '👕', slotType: 'body', price: 920, level: 17, req: { endurance: 64 }, desc: 'Тяжелая литая броня древних великанов.', bonus: { def: 40, stats: { endurance: 12 }, mf_anticrit: 65 } },
@@ -315,8 +315,8 @@ const GAME_ITEMS_DATABASE = {
   'titan_band_9': { name: 'Виток Титана', icon: '💍', slotType: 'ring', price: 380, level: 17, req: { endurance: 55 }, desc: 'Перстень, колоссально разгоняющий здоровье.', bonus: { stats: { endurance: 8 }, mf_anticrit: 60 } },
 
   // === УРОВЕНЬ 19: СЕТ БЕССМЕРТНОГО ===
-  'paladin_glaive_10': { name: 'Алебарда Бессмертного', icon: '⚔️', slotType: 'mainHand', price: 1000, level: 19, req: { endurance: 72 }, desc: 'Высшее святое оружие танка.', bonus: { atk: 58, mf_antiinv: 80 } },
-  'immortal_parry_10': { name: 'Меч Бессмертного (Л)', icon: '🗡️', slotType: 'offHand', price: 900, level: 19, req: { endurance: 72 }, desc: 'Левый меч для фиксации атак уворотчиков.', bonus: { atk: 25, stats: { strength: 6 } } },
+  'paladin_glaive_10': { name: 'Алебарда Бессмертного', icon: '⚔️', slotType: 'mainHand', price: 1000, level: 19, req: { endurance: 72 }, desc: 'Высшее святое оружие танка.', bonus: { atkMin: 43, atkMax: 73, mf_antiinv: 80 } },
+  'immortal_parry_10': { name: 'Меч Бессмертного (Л)', icon: '🗡️', slotType: 'offHand', price: 900, level: 19, req: { endurance: 72 }, desc: 'Левый меч для фиксации атак уворотчиков.', bonus: { atkMin: 18, atkMax: 32, stats: { strength: 6 } } },
   'aegis_wall_10': { name: 'Эгида Порядка', icon: '🛡️', slotType: 'offHand', price: 1200, level: 19, req: { endurance: 62 }, desc: 'Мифический щит. Идеальные 3 зоны блока.', bonus: { def: 30, mf_anticrit: 95 } },
   'immortal_helm_10': { name: 'Венец Бессмертного', icon: '🪖', slotType: 'head', price: 800, level: 19, req: { endurance: 62 }, desc: 'Корона триумфатора, закрывающая лицо.', bonus: { def: 15, stats: { endurance: 8 }, mf_anticrit: 55 } },
   'immortal_cuirass_10': { name: 'Кираса Бессмертного', icon: '🔱', slotType: 'body', price: 1500, level: 19, req: { endurance: 78 }, desc: 'Легендарные латы. Превращают танка в неубиваемого босса.', bonus: { def: 55, stats: { endurance: 15, strength: 5 }, mf_anticrit: 80 } },
