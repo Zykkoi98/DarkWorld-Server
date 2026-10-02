@@ -288,10 +288,13 @@ async function createBotForLevel(targetLevel, slotIndex = 0, forcedClass = null)
   // 4. Имя
   const name = `${classInfo.label} ${classInfo.icon} #${slotIndex + 1}`;
 
-  // 5. HP — считаем как у игрока: (endurance) × 10 + hp бонусы от шмота
-  const gearEndurance = calcGearBonus(equipped, 'endurance');
-  const gearHpBonus = calcGearBonus(equipped, 'hp');
-  const maxHp = ((scaled.endurance + gearEndurance) * 10) + gearHpBonus;
+    // 5. HP — через общий dbHelper (единая формула)
+    const dbHelper = require('./../db_helper');
+    const maxHp = dbHelper.getServerMaxHp({
+        level: targetLevel,
+        endurance: scaled.endurance,
+        equipped: equipped
+    });
 
   return {
     uuid,
