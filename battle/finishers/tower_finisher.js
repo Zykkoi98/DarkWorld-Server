@@ -79,6 +79,7 @@ module.exports = {
         updatePayload[pointsKey] = currentDbStatPoints + (correctLevel - currentDbLevel) * 5;
         updatePayload.level = correctLevel;
         updatePayload.hp = dbHelper.getServerMaxHp({
+          level: Number(freshDb.level || 1),
           endurance: Number(freshDb.endurance || 1),
           equipped: player.equipped
         });
@@ -113,6 +114,7 @@ module.exports = {
       updatePayload.level = currentDbLevel;
       updatePayload[pointsKey] = currentDbStatPoints;
       updatePayload.hp = Math.max(1, Math.floor(dbHelper.getServerMaxHp({
+        level: Number(freshDb.level || 1),
         endurance: Number(freshDb.endurance || 1),
         equipped: player.equipped
       }) * 0.2));

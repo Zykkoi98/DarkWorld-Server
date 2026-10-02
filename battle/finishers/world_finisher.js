@@ -51,6 +51,7 @@ module.exports = {
       if (newLevel > oldLevel) {
         newStatPoints += (newLevel - oldLevel) * 5;
         player.currentHp = dbHelper.getServerMaxHp({
+          level: Number(freshDb.level || 1),
           endurance: Number(freshDb.endurance || 1),
           equipped: liveEquipped
         });
@@ -93,6 +94,7 @@ module.exports = {
       // Поражение — воскрешение в городе на 20%
       player.currentHp = 0;
       dbHpPayload = Math.max(1, Math.floor(dbHelper.getServerMaxHp({
+        level: Number(freshDb.level || 1),
         endurance: Number(freshDb.endurance || 1),
         equipped: liveEquipped
       }) * 0.2));

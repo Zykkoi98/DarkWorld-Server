@@ -71,6 +71,7 @@ module.exports = {
       }
 
       const maxHp = dbHelper.getServerMaxHp({
+        level: dbHelper.safeReadField(dbRow, 'level', 1),      // 🔥 добавить
         endurance: dbHelper.safeReadField(dbRow, 'endurance', 1),
         equipped: dbRow.equipped || {}
       });

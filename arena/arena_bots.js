@@ -288,13 +288,13 @@ async function createBotForLevel(targetLevel, slotIndex = 0, forcedClass = null)
   // 4. Имя
   const name = `${classInfo.label} ${classInfo.icon} #${slotIndex + 1}`;
 
-    // 5. HP — через общий dbHelper (единая формула)
-    const dbHelper = require('./../db_helper');
-    const maxHp = dbHelper.getServerMaxHp({
-        level: targetLevel,
-        endurance: scaled.endurance,
-        equipped: equipped
-    });
+  // 5. HP — через общий dbHelper (единая формула для всех)
+  const dbHelper = require('./../db_helper');
+  const maxHp = dbHelper.getServerMaxHp({
+    level: targetLevel,
+    endurance: scaled.endurance,
+    equipped: equipped
+  });
 
   return {
     uuid,
