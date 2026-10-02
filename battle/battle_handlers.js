@@ -526,7 +526,7 @@ module.exports = function(io, socket, sb, activeRooms) {
   // ==========================================================================
   // 10. РАСЧЁТ РАУНДА + BROADCAST (участникам + зрителям)
   // ==========================================================================
-  async function executeRoundAndBroadcast(room, io) {
+   async function executeRoundAndBroadcast(room, io) {
     const result = core.executeRound(room);
 
     // 🔥 Сохраняем логи раунда в архив
@@ -536,15 +536,21 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     // Broadcast всем в комнате (участники + зрители)
     if (room.battleType === 'arena_pvp') {
-      const playerA = room.teamA[0];
-      const playerB = room.teamB[0];
+      // 🔥 PvP 1×1 — каждому персональный результат
+      if (room.teamA.length === 1 && room.teamB.length === 1) {
+        const playerA = room.teamA[0];
+        const playerB = room.teamB[0];
 
-      if (playerA?.socketId) {
-        io.to(playerA.socketId).emit('battle_round_result', { ...result, resultType: result.result });
-      }
-      if (playerB?.socketId) {
-        const resB = result.result === 'win' ? 'lose' : (result.result === 'lose' ? 'win' : 'draw');
-        io.to(playerB.socketId).emit('battle_round_result', { ...result, resultType: resB });
+        if (playerA?.socketId) {
+          io.to(playerA.socketId).emit('battle_round_result', { ...result, resultType: result.result });
+        }
+        if (playerB?.socketId) {
+          const resB = result.result === 'win' ? 'lose' : (result.result === 'lose' ? 'win' : 'draw');
+          io.to(playerB.socketId).emit('battle_round_result', { ...result, resultType: resB });
+        }
+      } else {
+        // 🔥 PvP N×N — всем одинаковый (result от лица команды A)
+        io.to(room.id).emit('battle_round_result', result);
       }
 
       // Зрителям PvP — нейтрально
@@ -560,10 +566,28 @@ module.exports = function(io, socket, sb, activeRooms) {
     if (result.isOver) {
       clearTimeout(room.timeoutRef);
       await finishBattle(room, result);
-    } else {
-      room.isCalculating = false;
-      startTurnTimer(room, io);
+      return;
     }
+
+    room.isCalculating = false;
+
+    // 🔥 ЕСЛИ ВСЕ ЖИВЫЕ ЛЮДИ МЕРТВЫ — автораунды (боты добивают)
+    const aliveHumans = [...room.teamA, ...room.teamB]
+      .filter(f => !f.isBot && f.currentHp > 0);
+
+    if (aliveHumans.length === 0) {
+      console.log(`🤖 [BATTLE] Все люди мертвы в комнате ${room.id} — автораунды`);
+      setTimeout(() => {
+        if (activeRooms[room.id] && activeRooms[room.id].state === 'active') {
+          room.isCalculating = true;
+          executeRoundAndBroadcast(room, io);
+        }
+      }, 2000);
+      return;
+    }
+
+    // Обычный таймер для живых
+    startTurnTimer(room, io);
   }
 
     // ==========================================================================

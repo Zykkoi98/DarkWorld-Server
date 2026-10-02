@@ -188,12 +188,12 @@ function executeRound(room) {
     }
   });
 
-  // ИИ мобов
-  room.teamB.forEach(bot => {
+// 🔥 ИИ ботов — во ВСЕХ командах (и teamA, и teamB)
+  function processBotTurn(bot, opponents) {
     if (bot.currentHp <= 0 || !bot.isBot) return;
     if (bot.turn) return;
 
-    const aliveTargets = room.teamA.filter(a => a.currentHp > 0);
+    const aliveTargets = opponents.filter(a => a.currentHp > 0);
     if (aliveTargets.length === 0) return;
 
     const target = aliveTargets[rand(0, aliveTargets.length - 1)];
@@ -214,6 +214,18 @@ function executeRound(room) {
     }
 
     bot.turn = { targetUuid: target.uuid, attack: attackPayload, defends };
+  }
+
+  // Боты в teamA бьют по teamB
+  room.teamA.forEach(bot => {
+    if (!bot.isBot) return;
+    processBotTurn(bot, room.teamB);
+  });
+
+  // Боты в teamB бьют по teamA
+  room.teamB.forEach(bot => {
+    if (!bot.isBot) return;
+    processBotTurn(bot, room.teamA);
   });
 
   // Очередь атак
