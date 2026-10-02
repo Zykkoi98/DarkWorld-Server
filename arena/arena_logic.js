@@ -221,10 +221,8 @@ module.exports = function(io, socket, sb, activeRooms) {
       const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
       if (!userId) return socket.emit('arena_error', 'Не авторизован');
 
-      ownerId = Number(ownerId);
+       ownerId = Number(ownerId);
       team = (team === 'A' || team === 'B') ? team : null;
-
-      if (!team) return socket.emit('arena_error', 'Выберите команду');
 
       if (arenaLobby.has(userId)) {
         return socket.emit('arena_error', 'У вас уже есть активная заявка');
@@ -234,6 +232,13 @@ module.exports = function(io, socket, sb, activeRooms) {
       if (!ownerEntry) {
         return socket.emit('arena_error', 'Заявка не найдена или уже стартовала');
       }
+
+      // 🔥 Для дуэли 1×1 — авто команда B (создатель в A)
+      if (!team && ownerEntry.mode === 'duel_1v1') {
+        team = 'B';
+      }
+
+      if (!team) return socket.emit('arena_error', 'Выберите команду');
 
       const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === ownerId);
       const teamMembers = members.filter(m => m.team === team);
