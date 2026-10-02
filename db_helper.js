@@ -343,17 +343,24 @@ module.exports = {
         console.log(`🔍 [АУДИТ ВХОДА] Проверка игрока ID: ${nUserId} (${username})...`);
 
         // 🔥 ФИКС РЕКОННЕКТА В ГОРОДЕ
-        if (global.activeRooms) {
-          Object.keys(global.activeRooms).forEach(roomId => {
-            const room = global.activeRooms[roomId];
-            const fighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
-            if (fighter) {
-              console.log(`🔄 [РЕКОННЕКТ ФИКС] Боец ${fighter.name} переподключился. Новый сокет: ${socket.id}`);
-              fighter.socketId = socket.id;
-              socket.join(roomId);
-            }
-          });
-        }
+          if (global.activeRooms) {
+            Object.keys(global.activeRooms).forEach(roomId => {
+              const room = global.activeRooms[roomId];
+
+              // 🔥 Пропускаем завершённые комнаты
+              if (!room || room.state === 'finished') return;
+
+              const fighter = [...room.teamA, ...room.teamB].find(f => String(f.id) === sUserId);
+              if (fighter) {
+                // 🔥 Логируем ТОЛЬКО если сокет реально изменился
+                if (fighter.socketId !== socket.id) {
+                  console.log(`🔄 [РЕКОННЕКТ ФИКС] Боец ${fighter.name} переподключился. Старый: ${fighter.socketId}, Новый: ${socket.id}`);
+                  fighter.socketId = socket.id;
+                  socket.join(roomId);
+                }
+              }
+            });
+          }
 
         const { data: cloudPlayer, error } = await sb.from('players')
           .select('*')
