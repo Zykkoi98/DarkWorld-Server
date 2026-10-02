@@ -451,15 +451,126 @@ module.exports = function(io, socket, sb, activeRooms) {
         const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === ownerId);
         if (members.length === 0) continue;
 
-        console.log(`⏰ [ARENA] Заявка ${ownerId} истекла. Отменяем ${members.length} участников.`);
+        const owner = members[0];
+        const teamSize = owner.teamSize;
+        const maxPlayers = owner.maxPlayers;
 
+        // 🔥 Считаем по командам
+        const teamA = members.filter(m => m.team === 'A');
+        const teamB = members.filter(m => m.team === 'B');
+
+        // 🔥 Заполняем ботами ВСЕГДА (и 1×1, и N×N) — это фарм-заполнитель
+        console.log(`⏰ [ARENA] Заявка ${ownerId} истекла. Заполняем ботами: A=${teamA.length}/${teamSize}, B=${teamB.length}/${teamSize}`);
+
+        // Удаляем из лобби
         for (const m of members) {
           arenaLobby.delete(m.id);
-          io.to(m.socketId).emit('arena_request_cancelled', {
-            reason: 'Время заявки истекло'
-          });
         }
         await deleteLobbyFromDb(sb, ownerId);
+
+        // Считаем средний уровень игроков
+        const avgLevel = Math.max(1, Math.round(
+          members.reduce((sum, m) => sum + m.level, 0) / members.length
+        ));
+
+        // 🔥 Создаём ботов в пустые слоты команд
+        const arenaBots = require('./arena_bots');
+        const teamAFighters = [];
+        const teamBFighters = [];
+
+        // Заполняем команду A
+        for (let i = 0; i < teamSize; i++) {
+          if (i < teamA.length) {
+            const entry = teamA[i];
+            teamAFighters.push({
+              uuid: `player_${entry.id}`,
+              id: String(entry.id),
+              name: entry.name,
+              icon: '👤',
+              isBot: false,
+              level: entry.level,
+              strength: entry.playerData.stats.strength,
+              agility: entry.playerData.stats.agility,
+              endurance: entry.playerData.stats.endurance,
+              luck: entry.playerData.stats.luck,
+              currentHp: entry.hp,
+              maxHp: entry.maxHp,
+              equipped: entry.playerData.equipped,
+              inventory: entry.playerData.inventory,
+              turn: null,
+              afkTurns: 0,
+              socketId: entry.socketId
+            });
+          } else {
+            // 🔥 Пустой слот — бот
+            const bot = await arenaBots.createBotForLevel(avgLevel, i);
+            teamAFighters.push(bot);
+          }
+        }
+
+        // Заполняем команду B
+        for (let i = 0; i < teamSize; i++) {
+          if (i < teamB.length) {
+            const entry = teamB[i];
+            teamBFighters.push({
+              uuid: `player_${entry.id}`,
+              id: String(entry.id),
+              name: entry.name,
+              icon: '👤',
+              isBot: false,
+              level: entry.level,
+              strength: entry.playerData.stats.strength,
+              agility: entry.playerData.stats.agility,
+              endurance: entry.playerData.stats.endurance,
+              luck: entry.playerData.stats.luck,
+              currentHp: entry.hp,
+              maxHp: entry.maxHp,
+              equipped: entry.playerData.equipped,
+              inventory: entry.playerData.inventory,
+              turn: null,
+              afkTurns: 0,
+              socketId: entry.socketId
+            });
+          } else {
+            const bot = await arenaBots.createBotForLevel(avgLevel, i + teamSize);
+            teamBFighters.push(bot);
+          }
+        }
+
+        // 🔥 Создаём бой
+        const config = router.getConfig('arena_pvp');
+        const room = core.createRoom({
+          battleType: 'arena_pvp',
+          teamA: teamAFighters,
+          teamB: teamBFighters,
+          config,
+          params: {}
+        });
+
+        activeRooms[room.id] = room;
+
+        // Регистрируем только игроков (не ботов)
+        for (const entry of members) {
+          const fighter = [...teamAFighters, ...teamBFighters].find(f =>
+            !f.isBot && f.id === String(entry.id)
+          );
+          if (!fighter) continue;
+
+          const fighterSocket = io.sockets.sockets.get(entry.socketId);
+          if (fighterSocket) {
+            fighterSocket.join(room.id);
+          }
+
+          if (!global.activeBattlesByUser) global.activeBattlesByUser = new Map();
+          global.activeBattlesByUser.set(String(entry.id), room.id);
+
+          io.to(entry.socketId).emit('arena_redirect_to_battle', {
+            roomId: room.id,
+            battleType: 'arena_pvp'
+          });
+        }
+
+        console.log(`🤖 [ARENA] Создан бой с ботами. roomId=${room.id}, avgLevel=${avgLevel}, A=${teamAFighters.length}, B=${teamBFighters.length}`);
       }
 
       if (expiredOwners.size > 0) {
@@ -468,7 +579,7 @@ module.exports = function(io, socket, sb, activeRooms) {
     } catch (err) {
       console.error('🚨 [ARENA] Ошибка очистки:', err.message);
     }
-  }, 5 * 1000);   // 🔥 проверка каждые 5 секунд (было 30)
+  }, 5 * 1000);
 
   // --------------------------------------------------------------------------
   // 8. DISCONNECT — 30 сек на возврат после F5
