@@ -255,10 +255,17 @@ function executeRound(room) {
       if (engine.isTwoHanded(mainWeapon)) {
         attacksList = Array.isArray(attacker.turn.attack) ? attacker.turn.attack : [attacker.turn.attack];
       } else if (offWeapon && !engine.isShield(offWeapon)) {
-        const primary = Array.isArray(attacker.turn.attack) ? attacker.turn.attack[0] : attacker.turn.attack;
-        const zones = ['head', 'breast', 'torso', 'belt', 'legs'];
-        const leftZone = zones[Math.floor(Math.random() * zones.length)];
-        attacksList = [primary, leftZone];
+        // 🔥 Если игрок передал массив из 2 зон — используем их
+        if (Array.isArray(attacker.turn.attack) && attacker.turn.attack.length === 2) {
+          attacksList = [attacker.turn.attack[0], attacker.turn.attack[1]];
+        } else {
+          // Иначе — рандомим вторую, но НЕ совпадающую с первой
+          const primary = Array.isArray(attacker.turn.attack) ? attacker.turn.attack[0] : attacker.turn.attack;
+          const zones = ['head', 'breast', 'torso', 'belt', 'legs'];
+          const availableZones = zones.filter(z => z !== primary);
+          const leftZone = availableZones[Math.floor(Math.random() * availableZones.length)];
+          attacksList = [primary, leftZone];
+        }
       } else {
         const single = Array.isArray(attacker.turn.attack) ? attacker.turn.attack[0] : attacker.turn.attack;
         attacksList = [single];
