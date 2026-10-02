@@ -1,6 +1,6 @@
 // ============================================================================
-// ===== 🏆 СЕРВЕРНАЯ ЛОГИКА АРЕНЫ (ARENA_LOGIC.JS) =====
-// ===== Лобби, заявки, старт боя. Работает через Supabase + in-memory =====
+// ===== 🏆 СЕРВЕРНАЯ ЛОГИКА АРЕНЫ (ARENA_LOGIC.JS) — v3 =====
+// ===== Поддержка N×N групповых боёв (без ботов пока) =====
 // ============================================================================
 
 const dbHelper = require('./../db_helper');
@@ -13,40 +13,34 @@ const arenaLobby = new Map();
 global.arenaLobby = arenaLobby;
 
 // TTL заявки
-const REQUEST_TTL_MS = 1 * 60 * 1000;   // 5 минут(для тестов сделали 1 мин)
+// 🔥 ДЛЯ ТЕСТОВ: 60 секунд. В продакшене вернуть 5 * 60 * 1000
+const REQUEST_TTL_MS = 60 * 1000;
 
 // ============================================================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ХЕЛПЕРЫ
 // ============================================================================
-
-function getModeMaxPlayers(mode, teamSize) {
-  // duel_1v1 → 2, group_3v3 → 6, chaos_5v5 → 10
-  if (mode === 'duel_1v1') return 2;
-  if (mode.startsWith('group_')) return teamSize * 2;
-  if (mode.startsWith('chaos_')) return teamSize;   // chaos_N = N игроков всего
-  return 2;
-}
 
 function getTeamSizeFromMode(mode) {
   if (mode === 'duel_1v1') return 1;
-  const parts = mode.split('_');   // ['group', '3v3'] или ['chaos', '10']
-  if (parts.length < 2) return 1;
-  if (parts[0] === 'group') {
-    const vs = parts[1].split('v');
+  if (mode.startsWith('group_')) {
+    const parts = mode.split('_')[1];   // "2v2" | "3v3" | "5v5"
+    const vs = parts.split('v');
     return Number(vs[0]) || 1;
-  }
-  if (parts[0] === 'chaos') {
-    return Math.floor((Number(parts[1]) || 2) / 2);
   }
   return 1;
 }
 
-function buildLobbyEntry(playerRow, playerData, mode, teamSize, socketId) {
-  const maxPlayers = getModeMaxPlayers(mode, teamSize);
+function getModeMaxPlayers(mode) {
+  return getTeamSizeFromMode(mode) * 2;
+}
+
+function buildLobbyEntry(playerRow, mode, team, socketId) {
+  const teamSize = getTeamSizeFromMode(mode);
+  const maxPlayers = teamSize * 2;
 
   return {
     id: Number(playerRow.id),
-    ownerId: Number(playerRow.id),
+    ownerId: Number(playerRow.id),   // для создателя = его id
     name: playerRow.name,
     level: Number(playerRow.level || 1),
     hp: Number(playerRow.hp || 0),
@@ -54,14 +48,15 @@ function buildLobbyEntry(playerRow, playerData, mode, teamSize, socketId) {
     mode,
     teamSize,
     maxPlayers,
+    team,   // 🔥 'A' | 'B' | null
     playerData: {
       equipped: playerRow.equipped || {},
       inventory: playerRow.inventory || {},
       stats: {
-        strength: dbHelper.safeReadField(playerRow, 'strength', 1),
-        agility:  dbHelper.safeReadField(playerRow, 'agility', 1),
+        strength:  dbHelper.safeReadField(playerRow, 'strength', 1),
+        agility:   dbHelper.safeReadField(playerRow, 'agility', 1),
         endurance: dbHelper.safeReadField(playerRow, 'endurance', 1),
-        luck:     dbHelper.safeReadField(playerRow, 'luck', 1)
+        luck:      dbHelper.safeReadField(playerRow, 'luck', 1)
       }
     },
     socketId,
@@ -77,6 +72,7 @@ function serializeLobbyEntry(entry) {
     level: entry.level,
     hp: entry.hp,
     maxHp: entry.maxHp,
+    team: entry.team,
     mode: entry.mode,
     teamSize: entry.teamSize,
     maxPlayers: entry.maxPlayers,
@@ -94,6 +90,7 @@ async function saveLobbyEntryToDb(sb, entry) {
       level: entry.level,
       hp: entry.hp,
       max_hp: entry.maxHp,
+      team: entry.team,
       mode: entry.mode,
       team_size: entry.teamSize,
       max_players: entry.maxPlayers,
@@ -115,7 +112,7 @@ async function deleteLobbyFromDb(sb, ownerId) {
 }
 
 // ============================================================================
-// ГРУППИРОВКА: разбиваем Map в «комнаты» по ownerId
+// ГРУППИРОВКА — комнаты по ownerId
 // ============================================================================
 
 function getGroupedLobby() {
@@ -126,9 +123,11 @@ function getGroupedLobby() {
     grouped.get(entry.ownerId).push(entry);
   }
 
-  // Возвращаем массив «комнат» с метаданными
   return Array.from(grouped.values()).map(members => {
     const owner = members.find(m => m.id === m.ownerId) || members[0];
+    const teamA = members.filter(m => m.team === 'A');
+    const teamB = members.filter(m => m.team === 'B');
+
     return {
       ownerId: owner.ownerId,
       ownerName: owner.name,
@@ -137,7 +136,11 @@ function getGroupedLobby() {
       teamSize: owner.teamSize,
       maxPlayers: owner.maxPlayers,
       members: members.map(serializeLobbyEntry),
+      teamA: teamA.map(serializeLobbyEntry),
+      teamB: teamB.map(serializeLobbyEntry),
       currentCount: members.length,
+      teamACount: teamA.length,
+      teamBCount: teamB.length,
       expiresAt: owner.expiresAt,
       arena_expires_at: new Date(owner.expiresAt).toISOString()
     };
@@ -169,25 +172,24 @@ module.exports = function(io, socket, sb, activeRooms) {
   // --------------------------------------------------------------------------
   // 2. СОЗДАНИЕ СВОЕЙ ЗАЯВКИ
   // --------------------------------------------------------------------------
-    socket.on('arena_create_request', async ({ mode = 'duel_1v1' } = {}) => {
+  socket.on('arena_create_request', async ({ mode = 'duel_1v1' } = {}) => {
     try {
-        const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
-        if (!userId) return socket.emit('arena_error', 'Не авторизован');
+      const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
+      if (!userId) return socket.emit('arena_error', 'Не авторизован');
 
-        // 🔥 Если игрок уже в лобби, но отключён — обновляем socketId
-        const existing = arenaLobby.get(userId);
-        if (existing) {
+      // Восстановление после F5
+      const existing = arenaLobby.get(userId);
+      if (existing) {
         if (existing.disconnectedAt) {
-            console.log(`♻️ [ARENA] ${existing.name} вернулся после F5 — восстанавливаем заявку`);
-            existing.socketId = socket.id;
-            existing.disconnectedAt = null;
-            io.emit('arena_lobby_updated');
-            return socket.emit('arena_lobby_updated_self');
+          console.log(`♻️ [ARENA] ${existing.name} вернулся после F5 — восстанавливаем заявку`);
+          existing.socketId = socket.id;
+          existing.disconnectedAt = null;
+          io.emit('arena_lobby_updated');
+          return socket.emit('arena_lobby_updated_self', { restored: true });
         }
         return socket.emit('arena_error', 'У вас уже есть активная заявка');
-        }
+      }
 
-      // Читаем профиль из БД
       const { data: row } = await sb.from('players').select('*').eq('id', userId).maybeSingle();
       if (!row) return socket.emit('arena_error', 'Персонаж не найден');
 
@@ -195,18 +197,14 @@ module.exports = function(io, socket, sb, activeRooms) {
         return socket.emit('arena_error', 'Нельзя выйти на арену с 0 HP. Излечитесь в городе.');
       }
 
-      const teamSize = getTeamSizeFromMode(mode);
-      const entry = buildLobbyEntry(row, null, mode, teamSize, socket.id);
-
+      // 🔥 Создатель всегда в команду A
+      const entry = buildLobbyEntry(row, mode, 'A', socket.id);
       arenaLobby.set(userId, entry);
       await saveLobbyEntryToDb(sb, entry);
 
-      console.log(`🏆 [ARENA] ${entry.name} создал заявку ${mode} (${entry.maxPlayers} мест)`);
+      console.log(`🏆 [ARENA] ${entry.name} создал заявку ${mode} (команда A)`);
 
-      // Broadcast всем
       io.emit('arena_lobby_updated');
-
-      // Проверяем — может быть уже набралось?
       await checkAndStartBattle(io, sb, activeRooms, entry.ownerId);
 
     } catch (err) {
@@ -216,7 +214,64 @@ module.exports = function(io, socket, sb, activeRooms) {
   });
 
   // --------------------------------------------------------------------------
-  // 3. ОТМЕНА СВОЕЙ ЗАЯВКИ (или выход из чужой)
+  // 3. ПРИСОЕДИНЕНИЕ К ЧУЖОЙ ЗАЯВКЕ (с выбором команды)
+  // --------------------------------------------------------------------------
+  socket.on('arena_join_request', async ({ ownerId, team }) => {
+    try {
+      const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
+      if (!userId) return socket.emit('arena_error', 'Не авторизован');
+
+      ownerId = Number(ownerId);
+      team = (team === 'A' || team === 'B') ? team : null;
+
+      if (!team) return socket.emit('arena_error', 'Выберите команду');
+
+      if (arenaLobby.has(userId)) {
+        return socket.emit('arena_error', 'У вас уже есть активная заявка');
+      }
+
+      const ownerEntry = arenaLobby.get(ownerId);
+      if (!ownerEntry) {
+        return socket.emit('arena_error', 'Заявка не найдена или уже стартовала');
+      }
+
+      const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === ownerId);
+      const teamMembers = members.filter(m => m.team === team);
+
+      // 🔥 Проверка заполненности команды
+      if (teamMembers.length >= ownerEntry.teamSize) {
+        return socket.emit('arena_error', `Команда ${team} заполнена`);
+      }
+
+      const { data: row } = await sb.from('players').select('*').eq('id', userId).maybeSingle();
+      if (!row) return socket.emit('arena_error', 'Персонаж не найден');
+
+      if (Number(row.hp || 0) <= 0) {
+        return socket.emit('arena_error', 'Нельзя выйти на арену с 0 HP');
+      }
+
+      const entry = buildLobbyEntry(row, ownerEntry.mode, team, socket.id);
+      entry.ownerId = ownerId;
+      entry.expiresAt = ownerEntry.expiresAt;   // 🔥 синхронизируем таймер с владельцем
+
+      arenaLobby.set(userId, entry);
+      await saveLobbyEntryToDb(sb, entry);
+
+      console.log(`🏆 [ARENA] ${entry.name} присоединился к комнате ${ownerId} (команда ${team})`);
+
+      socket.emit('arena_request_joined', { ownerId, team });
+      io.emit('arena_lobby_updated');
+
+      await checkAndStartBattle(io, sb, activeRooms, ownerId);
+
+    } catch (err) {
+      console.error('🚨 [arena_join_request]', err.message);
+      socket.emit('arena_error', 'Ошибка сервера');
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 4. ОТМЕНА / ВЫХОД
   // --------------------------------------------------------------------------
   socket.on('arena_cancel_request', async () => {
     try {
@@ -230,10 +285,8 @@ module.exports = function(io, socket, sb, activeRooms) {
       const isOwner = (entry.id === ownerId);
 
       if (isOwner) {
-        // Владелец отменяет всю комнату
         console.log(`🏆 [ARENA] ${entry.name} отменяет свою комнату (ownerId=${ownerId})`);
 
-        // Удаляем всех участников этой комнаты
         for (const [pid, e] of arenaLobby.entries()) {
           if (e.ownerId === ownerId) {
             arenaLobby.delete(pid);
@@ -244,7 +297,6 @@ module.exports = function(io, socket, sb, activeRooms) {
         }
         await deleteLobbyFromDb(sb, ownerId);
       } else {
-        // Участник выходит из чужой комнаты
         console.log(`🏆 [ARENA] ${entry.name} вышел из комнаты ${ownerId}`);
         arenaLobby.delete(userId);
         await sb.from('arena_lobby').delete().eq('id', userId);
@@ -258,70 +310,47 @@ module.exports = function(io, socket, sb, activeRooms) {
     }
   });
 
-  // --------------------------------------------------------------------------
-  // 4. ПРИСОЕДИНЕНИЕ К ЧУЖОЙ ЗАЯВКЕ
-  // --------------------------------------------------------------------------
-  socket.on('arena_join_request', async ({ ownerId }) => {
-    try {
-      const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
-      if (!userId) return socket.emit('arena_error', 'Не авторизован');
-
-      ownerId = Number(ownerId);
-
-      if (arenaLobby.has(userId)) {
-        return socket.emit('arena_error', 'У вас уже есть активная заявка');
-      }
-
-      // Ищем владельца
-      const ownerEntry = arenaLobby.get(ownerId);
-      if (!ownerEntry) {
-        return socket.emit('arena_error', 'Заявка не найдена или уже стартовала');
-      }
-
-      // Проверяем заполненность
-      const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === ownerId);
-      if (members.length >= ownerEntry.maxPlayers) {
-        return socket.emit('arena_error', 'Заявка уже заполнена');
-      }
-
-      // Читаем профиль
-      const { data: row } = await sb.from('players').select('*').eq('id', userId).maybeSingle();
-      if (!row) return socket.emit('arena_error', 'Персонаж не найден');
-
-      if (Number(row.hp || 0) <= 0) {
-        return socket.emit('arena_error', 'Нельзя выйти на арену с 0 HP');
-      }
-
-      const entry = buildLobbyEntry(row, null, ownerEntry.mode, ownerEntry.teamSize, socket.id);
-      entry.ownerId = ownerId;   // ключевое: привязываем к чужой комнате
-
-      arenaLobby.set(userId, entry);
-      await saveLobbyEntryToDb(sb, entry);
-
-      console.log(`🏆 [ARENA] ${entry.name} присоединился к комнате ${ownerId}`);
-
-      socket.emit('arena_request_joined', { ownerId });
-      io.emit('arena_lobby_updated');
-
-      // Проверяем — набралось ли?
-      await checkAndStartBattle(io, sb, activeRooms, ownerId);
-
-    } catch (err) {
-      console.error('🚨 [arena_join_request]', err.message);
-      socket.emit('arena_error', 'Ошибка сервера');
-    }
-  });
-
-  // --------------------------------------------------------------------------
-  // 5. ВЫХОД ИЗ ЧУЖОЙ ЗАЯВКИ (алиас для cancel)
-  // --------------------------------------------------------------------------
   socket.on('arena_leave_request', async () => {
-    // Просто вызываем ту же логику
     socket.emit('arena_cancel_request');
   });
 
   // --------------------------------------------------------------------------
-  // 6. ПРОВЕРКА И СТАРТ БОЯ
+  // 5. ПРОВЕРКА Я В ЛОББИ (для F5)
+  // --------------------------------------------------------------------------
+  socket.on('arena_check_my_request', (arg1, arg2) => {
+    try {
+      const callback = (typeof arg1 === 'function') ? arg1
+                     : (typeof arg2 === 'function') ? arg2
+                     : null;
+
+      const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
+      if (!userId) {
+        if (callback) callback({ restored: false });
+        return;
+      }
+
+      const entry = arenaLobby.get(userId);
+      if (!entry) {
+        if (callback) callback({ restored: false });
+        socket.emit('arena_lobby_updated_self', { restored: false });
+        return;
+      }
+
+      console.log(`♻️ [ARENA] ${entry.name} вернулся после F5 — восстанавливаем заявку`);
+      entry.socketId = socket.id;
+      entry.disconnectedAt = null;
+
+      if (callback) callback({ restored: true });
+      socket.emit('arena_lobby_updated_self', { restored: true });
+      io.emit('arena_lobby_updated');
+    } catch (err) {
+      console.error('🚨 [arena_check_my_request]', err.message);
+      if (typeof arg1 === 'function') arg1({ restored: false });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 6. СТАРТ БОЯ
   // --------------------------------------------------------------------------
   async function checkAndStartBattle(io, sb, activeRooms, ownerId) {
     const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === ownerId);
@@ -329,29 +358,27 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     const owner = members[0];
     const maxPlayers = owner.maxPlayers;
+    const teamSize = owner.teamSize;
 
-    if (members.length < maxPlayers) return;   // ещё не набралось
+    // Считаем по командам
+    const teamA = members.filter(m => m.team === 'A');
+    const teamB = members.filter(m => m.team === 'B');
+
+    // 🔥 Обе команды должны быть заполнены ПОЛНОСТЬЮ (для старта)
+    if (teamA.length < teamSize || teamB.length < teamSize) {
+      return;   // ещё не набралось
+    }
 
     console.log(`🎬 [ARENA] Комната ${ownerId} набрала ${members.length}/${maxPlayers}. Стартуем!`);
 
-    // Удаляем всех из лобби (в БД и в памяти)
+    // Удаляем из лобби
     for (const m of members) {
       arenaLobby.delete(m.id);
     }
     await deleteLobbyFromDb(sb, ownerId);
 
-    // Рандомно делим на 2 команды
-    const shuffled = members.map(m => ({ ...m })).sort(() => Math.random() - 0.5);
-    const half = Math.floor(shuffled.length / 2);
-    const teamA = shuffled.slice(0, half);
-    const teamB = shuffled.slice(half);
-
-    // Собираем данные для battle_core
-    const battleType = 'arena_pvp';
-    const config = router.getConfig(battleType);
-
-    // Формируем teamA/teamB в формате battle_core
-    const buildFighter = (entry, teamKey) => ({
+    // Собираем бойцов
+    const buildFighter = (entry) => ({
       uuid: `player_${entry.id}`,
       id: String(entry.id),
       name: entry.name,
@@ -371,12 +398,12 @@ module.exports = function(io, socket, sb, activeRooms) {
       socketId: entry.socketId
     });
 
-    const teamAFighters = teamA.map(e => buildFighter(e, 'A'));
-    const teamBFighters = teamB.map(e => buildFighter(e, 'B'));
+    const teamAFighters = teamA.map(buildFighter);
+    const teamBFighters = teamB.map(buildFighter);
 
-    // Создаём комнату
+    const config = router.getConfig('arena_pvp');
     const room = core.createRoom({
-      battleType,
+      battleType: 'arena_pvp',
       teamA: teamAFighters,
       teamB: teamBFighters,
       config,
@@ -385,7 +412,6 @@ module.exports = function(io, socket, sb, activeRooms) {
 
     activeRooms[room.id] = room;
 
-    // Каждого игрока — в комнату и редирект
     for (const entry of members) {
       const fighter = [...teamAFighters, ...teamBFighters].find(f => f.id === String(entry.id));
       if (!fighter) continue;
@@ -400,7 +426,7 @@ module.exports = function(io, socket, sb, activeRooms) {
 
       io.to(entry.socketId).emit('arena_redirect_to_battle', {
         roomId: room.id,
-        battleType
+        battleType: 'arena_pvp'
       });
     }
 
@@ -410,7 +436,7 @@ module.exports = function(io, socket, sb, activeRooms) {
   // --------------------------------------------------------------------------
   // 7. АВТООЧИСТКА ПРОСРОЧЕННЫХ ЗАЯВОК
   // --------------------------------------------------------------------------
- setInterval(async () => {
+  setInterval(async () => {
     try {
       const now = Date.now();
       const expiredOwners = new Set();
@@ -425,76 +451,6 @@ module.exports = function(io, socket, sb, activeRooms) {
         const members = Array.from(arenaLobby.values()).filter(e => e.ownerId === ownerId);
         if (members.length === 0) continue;
 
-        const owner = members[0];
-        const maxPlayers = owner.maxPlayers;
-
-        // 🔥 Если в заявке 1 игрок (для 1×1) — заполняем ботом и стартуем
-        if (members.length < maxPlayers && owner.mode === 'duel_1v1') {
-          console.log(`⏰ [ARENA] Заявка ${ownerId} истекла, но 1×1 — добавляем бота вместо отмены`);
-
-          for (const m of members) {
-            arenaLobby.delete(m.id);
-          }
-          await deleteLobbyFromDb(sb, ownerId);
-
-          // Создаём бота
-          const arenaBots = require('./arena_bots');
-          const botFighter = await arenaBots.createBotForLevel(owner.level, 0);
-
-          // Формируем команду игрока
-          const playerFighter = {
-            uuid: `player_${owner.id}`,
-            id: String(owner.id),
-            name: owner.name,
-            icon: '👤',
-            isBot: false,
-            level: owner.level,
-            strength: owner.playerData.stats.strength,
-            agility: owner.playerData.stats.agility,
-            endurance: owner.playerData.stats.endurance,
-            luck: owner.playerData.stats.luck,
-            currentHp: owner.hp,
-            maxHp: owner.maxHp,
-            equipped: owner.playerData.equipped,
-            inventory: owner.playerData.inventory,
-            turn: null,
-            afkTurns: 0,
-            socketId: owner.socketId
-          };
-
-          // Создаём бой
-          const config = router.getConfig('arena_pvp');
-          const room = core.createRoom({
-            battleType: 'arena_pvp',
-            teamA: [playerFighter],
-            teamB: [botFighter],
-            config,
-            params: {}
-          });
-
-          activeRooms[room.id] = room;
-
-          // Регистрируем игрока
-          const fighterSocket = io.sockets.sockets.get(owner.socketId);
-          if (fighterSocket) {
-            fighterSocket.join(room.id);
-          }
-
-          if (!global.activeBattlesByUser) global.activeBattlesByUser = new Map();
-          global.activeBattlesByUser.set(String(owner.id), room.id);
-
-          io.to(owner.socketId).emit('arena_redirect_to_battle', {
-            roomId: room.id,
-            battleType: 'arena_pvp'
-          });
-
-          console.log(`🤖 [ARENA] Создан бой с ботом. roomId=${room.id}, botLevel=${botFighter.level}`);
-
-          io.emit('arena_lobby_updated');
-          continue;
-        }
-
-        // Иначе — просто отменяем
         console.log(`⏰ [ARENA] Заявка ${ownerId} истекла. Отменяем ${members.length} участников.`);
 
         for (const m of members) {
@@ -512,9 +468,10 @@ module.exports = function(io, socket, sb, activeRooms) {
     } catch (err) {
       console.error('🚨 [ARENA] Ошибка очистки:', err.message);
     }
-  }, 5 * 1000);
- // --------------------------------------------------------------------------
-  // 8. DISCONNECT — заявку НЕ удаляем сразу (даём время на F5)
+  }, 5 * 1000);   // 🔥 проверка каждые 5 секунд (было 30)
+
+  // --------------------------------------------------------------------------
+  // 8. DISCONNECT — 30 сек на возврат после F5
   // --------------------------------------------------------------------------
   socket.on('disconnect', () => {
     const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
@@ -524,25 +481,18 @@ module.exports = function(io, socket, sb, activeRooms) {
     if (!entry) return;
 
     console.log(`⚠️ [ARENA] ${entry.name} отключился — заявка остаётся на 30 сек`);
-
-    // 🔥 Даём 30 секунд на F5/переподключение
-    const disconnectTime = Date.now();
-    entry.disconnectedAt = disconnectTime;
+    entry.disconnectedAt = Date.now();
+    const disconnectTime = entry.disconnectedAt;
 
     setTimeout(() => {
-      const currentEntry = arenaLobby.get(userId);
-      if (!currentEntry) return;
+      const current = arenaLobby.get(userId);
+      if (!current) return;
+      if (current.disconnectedAt !== disconnectTime) return;
 
-      // Если за это время игрок переподключился и обновил socketId — не удаляем
-      if (currentEntry.disconnectedAt !== disconnectTime) {
-        console.log(`✅ [ARENA] ${currentEntry.name} вернулся — заявка сохранена`);
-        return;
-      }
+      console.log(`🚪 [ARENA] ${current.name} не вернулся за 30 сек — убираем`);
 
-      console.log(`🚪 [ARENA] ${currentEntry.name} не вернулся за 30 сек — убираем из лобби`);
-
-      const ownerId = currentEntry.ownerId;
-      const wasOwner = (currentEntry.id === ownerId);
+      const ownerId = current.ownerId;
+      const wasOwner = (current.id === ownerId);
       arenaLobby.delete(userId);
 
       if (wasOwner) {
@@ -557,45 +507,6 @@ module.exports = function(io, socket, sb, activeRooms) {
       }
 
       io.emit('arena_lobby_updated');
-    }, 30 * 1000);   // 30 сек
-  });
-  // --------------------------------------------------------------------------
-  // 9. ПРОВЕРКА — я в лобби? (для восстановления после F5)
-  // --------------------------------------------------------------------------
-  socket.on('arena_check_my_request', (arg1, arg2) => {
-    try {
-      // 🔥 Поддержка обеих форм вызова:
-      // socket.emit('arena_check_my_request')            → arg1 = undefined
-      // socket.emit('arena_check_my_request', callback)  → arg1 = callback
-      const callback = (typeof arg1 === 'function') ? arg1
-                     : (typeof arg2 === 'function') ? arg2
-                     : null;
-
-      const userId = Number(socket.data?.userId || socket.handshake?.auth?.userId);
-      if (!userId) {
-        if (callback) callback({ restored: false });
-        return;
-      }
-
-      const entry = arenaLobby.get(userId);
-      if (!entry) {
-        console.log(`ℹ️ [ARENA] Игрок ${userId} не в лобби`);
-        if (callback) callback({ restored: false });
-        socket.emit('arena_lobby_updated_self', { restored: false });
-        return;
-      }
-
-      console.log(`♻️ [ARENA] ${entry.name} вернулся после F5 — восстанавливаем заявку`);
-      entry.socketId = socket.id;
-      entry.disconnectedAt = null;
-
-      if (callback) callback({ restored: true });
-      socket.emit('arena_lobby_updated_self', { restored: true });
-      io.emit('arena_lobby_updated');
-    } catch (err) {
-      console.error('🚨 [arena_check_my_request]', err.message);
-      if (typeof arg1 === 'function') arg1({ restored: false });
-      else if (typeof arg2 === 'function') arg2({ restored: false });
-    }
+    }, 30 * 1000);
   });
 };
