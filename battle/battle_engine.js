@@ -270,7 +270,46 @@ function calculateHit(attacker, defender, zone, options = {}) {
     log: `⚔️ <strong>${attacker.name}</strong> нанес <strong>${defender.name}</strong> <strong>${dmg}</strong> урона в ${zoneNames[zone] || zone} ${isCrit ? '💥 КРИТ!' : ''}`
   };
 }
+// 🔥 Диапазон ATK для отображения (min-max)
+function getAtkRange(fighter) {
+  const rawStr = fighter.strength ?? (fighter.stats?.strength) ?? 1;
+  const totalStr = Number(rawStr) + getEquipmentBonus(fighter, 'strength');
+  const baseAtk = Math.floor(2 + (totalStr * 1.5));
 
+  const equipped = fighter.equipped || {};
+  let minBonus = 0;
+  let maxBonus = 0;
+
+  const processItem = (raw) => {
+    const itemId = (raw && typeof raw === 'object') ? raw.id : raw;
+    if (!itemId) return;
+    const item = dbHelper.findItemInAnyDatabase(itemId);
+    if (!item || !item.bonus) return;
+
+    if (item.bonus.atkMin !== undefined && item.bonus.atkMax !== undefined) {
+      minBonus += item.bonus.atkMin;
+      maxBonus += item.bonus.atkMax;
+    } else if (item.bonus.atk !== undefined) {
+      minBonus += item.bonus.atk;
+      maxBonus += item.bonus.atk;
+    }
+  };
+
+  ['head', 'body', 'legs', 'gloves', 'neck', 'mainHand', 'offHand'].forEach(slot => {
+    processItem(equipped[slot]);
+  });
+  if (Array.isArray(equipped.rings)) {
+    equipped.rings.forEach(processItem);
+  }
+
+  const minAtk = baseAtk + minBonus;
+  const maxAtk = baseAtk + maxBonus;
+
+  // Если min === max — возвращаем одно число
+  if (minAtk === maxAtk) return String(minAtk);
+
+  return `${minAtk}-${maxAtk}`;
+}
 // ============================================================================
 // ЭКСПОРТ
 // ============================================================================
@@ -278,6 +317,7 @@ function calculateHit(attacker, defender, zone, options = {}) {
 module.exports = {
   // Статы
   getAtk,
+  getAtkRange,           // 🔥 НОВОЕ
   getRandomAtk,           // 🔥 НОВОЕ
   getStaticAtkBonus,      // 🔥 НОВОЕ
   getRandomAtkBonus,      // 🔥 НОВОЕ

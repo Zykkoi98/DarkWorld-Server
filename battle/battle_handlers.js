@@ -398,7 +398,6 @@ module.exports = function(io, socket, sb, activeRooms) {
       const gearLuck = engine.getEquipmentBonus(fighter, 'luck');
 
       // ===== ИТОГОВЫЕ ПРОИЗВОДНЫЕ =====
-      const atk = engine.getAtk(fighter);
       const def = engine.getDef(fighter);
 
       // ===== МОДИФИКАТОРЫ (сырые очки) =====
@@ -423,7 +422,7 @@ module.exports = function(io, socket, sb, activeRooms) {
           { label: '🍀 Удача',         value: fmt(baseLuck, gearLuck) },
 
           // --- Боевые производные ---
-          { label: '⚔️ Атака',   value: atk },
+          { label: '⚔️ Атака', value: engine.getAtkRange(fighter) },
           { label: '🛡️ Защита',  value: def },
 
           // --- Модификаторы (сырые очки) ---
