@@ -447,14 +447,16 @@ socket.on('save_game_secure', async ({ player }) => {
     if (!player || !player.id) return;
     const nUserId = Number(player.id);
 
-    // 🔥 Читаем текущую запись из БД
+    // 🔥 Читаем текущую запись из БД (может быть null для нового игрока)
     const { data: currentRow } = await sb.from('players').select('*').eq('id', nUserId).maybeSingle();
 
-    // 🔥 Если игрок НОВЫЙ — используем значения из player, а не из currentRow
+    // 🔥 Если currentRow нет — это НОВЫЙ игрок, создаём с нуля
+    const isNew = !currentRow;
+
     const payload = {
       id: nUserId,
       name: player.name || (currentRow && currentRow.name) || 'Новичок',
-      avatar: player.avatar || (currentRow && currentRow.avatar) || 'assets/avatars/hero1.png',
+      avatar: player.avatar || (currentRow && currentRow.avatar) || "assets/avatars/hero1.png",
       level: Number(player.level ?? (currentRow && currentRow.level) ?? 1),
       gold: Number(player.gold ?? (currentRow && currentRow.gold) ?? 200),
       xp: Number(player.xp ?? (currentRow && currentRow.xp) ?? 0),
@@ -483,7 +485,7 @@ socket.on('save_game_secure', async ({ player }) => {
     if (error) {
       console.error(`🚨 Ошибка сохранения в Supabase для ID ${nUserId}:`, error.message);
     } else {
-      console.log(`✨ [БД УСПЕХ] ${currentRow ? 'Обновлён' : 'СОЗДАН НОВЫЙ'} персонаж ${payload.name} (ID ${nUserId})`);
+      console.log(`✨ [БД УСПЕХ] ${isNew ? 'СОЗДАН НОВЫЙ' : 'Обновлён'} персонаж ${payload.name} (ID ${nUserId})`);
     }
   } catch (err) {
     console.error("❌ Критический сбой в save_game_secure:", err);
